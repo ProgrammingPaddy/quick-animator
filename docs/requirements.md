@@ -52,11 +52,12 @@ See `checkpoints.md` for what is scheduled and what is backlog.
 
 ## 5. Timeline pane
 
-- **R20.** One row per object, nested and collapsible, following the object hierarchy. Each row shows the object's lifetime as a bar from appear to disappear, with fade handles at both ends (D38). Audio and video have rows too.
-- **R21.** Each action is a clip on its object's row, labelled and colored by its verb (D37). Drag to move its start. Drag its edges to change its duration. Drag the ease handles inside its edges to set how long it eases in and out (D39). Click to select.
+- **R20.** One row per object, nested and collapsible, following the object hierarchy. Each row shows the object's opacity over time as its own lane at the bottom, never covered by clips: where it is above zero the object exists (D52). Audio and video have rows too.
+- **R21.** Each action is a clip on its object's row, colored by its kind, labelled with its identifier in a dimmer color and then its kind (D37, D66). Drag to move its start. Drag its edges to change its duration. Drag the ease handles inside its edges to set how long it eases in and out (D39). Click to select the action everywhere.
 - **R22.** Keyframes inside an action are marks on the clip and can be dragged.
 - **R23.** Relative timing links are drawn as connectors. Moving an action moves everything that depends on it.
-- **R24.** Transport: return to start, play, pause, jump to the end of the content, a loop toggle that is off by default, scrub, time shown in seconds and frames, snapping to frames. Home and End do the same from the keyboard. The timeline has no fixed length: the content end is derived from the scene, playback stops or loops there, and the export range defaults to it (D41, D59).
+- **R24.** Transport: return to start, play, pause, jump to the end of the content, a loop toggle that is off by default, a snap toggle, scrub, time shown in seconds and frames. Home and End do the same from the keyboard. With snapping on, drags land on whole seconds and on other actions' starts and ends; off, they land exactly (D64). The timeline has no fixed length: the content end is the last action plus the hold, drawn as a marker on the ruler that drags to set the hold; playback stops or loops there, and the export range defaults to it (D41, D54, D59).
+- **R28.** Right-click on empty track space adds an action of a chosen kind at that time, with the object's current values so nothing jumps, or makes the object appear or disappear there (D52, D62).
 - **R25.** Over the tracks, the wheel zooms the time axis around the cursor, from minutes per screen down to single frames, opening at one second per tick; Shift and the wheel scroll time; Alt and the wheel scroll the rows. Over the row headers, the wheel scrolls the rows. The view pages forward while playing. Frame stepping from the keyboard. (D50)
 - **R27.** Clips that overlap in time stack in lanes within the object's row, so each stays visible and grabbable (D53).
 - **R26.** Audio rows show a waveform. Video rows show thumbnails. (Audio and video checkpoint.)
@@ -70,9 +71,9 @@ See `checkpoints.md` for what is scheduled and what is backlog.
 
 ## 7. Code pane and Now pane
 
-- **R40.** A JavaScript editor with syntax highlighting, line wrapping, autocompletion of classes, objects, verbs, attributes, timing keys, named curves, and time references with inline documentation, and inline error display. Tab accepts a completion, otherwise indents the line to where it belongs. A class name and Tab expands a full block with every attribute at its default, and Tab then steps through the values (D36). Ctrl+F searches. Other occurrences of the selected text are highlighted.
+- **R40.** A JavaScript editor with syntax highlighting, line wrapping, autocompletion of classes, objects, verbs, attributes, timing keys, named curves, and time references with inline documentation, and inline error display. Tab accepts a completion, otherwise indents the line to where it belongs. A class name and Tab expands a full block with every attribute at its default, also after a written `name = `, and Tab then steps through the values (D36, D69). Ctrl+F searches. Other occurrences of the selected text are highlighted. Every color literal shows a swatch that opens a picker (D68).
 - **R41.** Organized by default: one file per scene, written as the cast of objects followed by the script of actions in time order (D32); a per-object view that groups an object's declaration with all of its actions; and a project library file for shared functions and components. Every attribute of every object is shown, set ones as code and unset ones as dimmed ghost lines with their defaults, switchable by a preference (D35). Blocks fold. Lines stay short: one attribute per line, one point per line.
-- **R42.** Selecting an object highlights its declaration and all of its actions and expands them. The pane scrolls only on Jump to code, from the right-click menu, a double click in the object pane, or a shortcut, or when a Follow selection toggle is turned on. Moving between an object and its actions is one step each way: the object name in any action line jumps to the declaration, the declaration lists its actions to jump to, and a shortcut cycles through them. (Decision D12.)
+- **R42.** Selecting an object tints its declaration and puts a left bar, in each kind's color, on its actions; selecting an action tints the action in its kind's color and puts a left bar on its object (D67). The pane scrolls only on Jump to code, from the right-click menu, a double click in the object pane, or a shortcut, or when a Follow selection toggle is turned on. Moving between an object and its actions is one step each way: the object name in any action line jumps to the declaration, the declaration lists its actions to jump to, and a shortcut cycles through them. (Decision D12.)
 - **R43.** Every attribute line edits like a style rule in browser devtools: attribute names and values autocomplete, a number drags, a color opens a picker, an easing name opens a picker, an asset path opens a file picker. This is the enhanced editing that replaces an inspector.
 - **R44.** Code edited in the pane applies live. Edits made outside the app, by an agent or another editor, are picked up by file watching and applied live. The playhead and selection survive a reload.
 - **R45.** The GUI rewrites code minimally: only the literal that changed. Formatting and comments are preserved.
@@ -90,16 +91,16 @@ See `checkpoints.md` for what is scheduled and what is backlog.
 
 ## 9. Animation
 
-- **R60.** The unit of animation is an action: a change of one or more attributes of one object, with a start, a duration, and an easing. "This happens, and this is how long it takes." Actions are written with verbs that say what kind of change they are: move, rotate, scale, resize, fade, morph, follow, link, appear, disappear, and the general `to` (D37).
+- **R60.** The unit of animation is an action: a change of one or more attributes of one object, with a start, a duration, and an easing. "This happens, and this is how long it takes." Actions are written with verbs that say what kind of change they are: move, rotate, scale, resize, fade, and the general `to`, later also morph, follow, and link (D37). A block may be relative, so its values are changes from wherever the object is when it starts (D51).
 - **R61.** A start is absolute, in seconds, or relative to a state of another object or action: its start, its end, or a fraction of its progress, plus an optional delay. An end is a duration or an `until` time reference.
-- **R62.** States exposed for linking, shown in a picker when setting a start: an object appears, starts moving, stops moving; an action starts, ends, reaches a fraction **(proposed vocabulary)**.
-- **R63.** An action without a start follows the object's previous action. An action can hold keyframes at times inside it. Both are editable in the timeline and preview **(proposed model)**. An object's lifetime is set by appear and disappear actions with fade durations, shown as a bar with fade handles on its row (D38).
+- **R62.** States exposed for linking, shown in a picker when setting a start: an action starts, ends, reaches a fraction; later, an object starts moving or stops moving **(proposed vocabulary)**.
+- **R63.** An action without a start follows the object's previous action. When actions on the same attribute overlap, an absolute one takes over from its start and a relative one adds on top (D53). An action can hold keyframes at times inside it **(proposed model)**.
 - **R64.** Easing is a duration at each end of an action: how long it eases in and how long it eases out, dragged as handles on the clip or typed as `easeIn` and `easeOut`. Named curves such as bounce, elastic, back, snap, and linear remain for what durations cannot express (D39).
 - **R65.** An attribute can be an expression of other objects' attributes and of time. It is shown as linked. Dragging a linked attribute locks by default, edits the trailing offset when the expression ends in a constant, or replaces the expression with a literal. The choice is offered in the GUI case by case. (Decision D2.) A link can also be an action in the script, running from a start to an `until`, which is how an object attaches to another mid-animation.
 - **R66.** Presets for common techniques, such as fade in, slide in, pop, bounce in, and snap in, apply in at most two clicks and produce ordinary actions in code. No hidden magic **(proposed list)**.
 - **R67.** Deterministic: a frame is a pure function of time. No hidden state. The same frame renders identically in the preview and in export.
 - **R68.** Morph: an object changes kind and dimensions smoothly, such as a circle into a rectangle, as one action with a duration and easing (D43).
-- **R69.** Fade in and fade out belong to an object's lifetime, not to separate actions, and are edited on the timeline like clip fades in a video editor (D38).
+- **R69.** Visibility is opacity, and nothing else (D52). An object exists wherever its opacity is above zero and costs nothing where it is not. Fades are fade actions; the timeline shows the result as the opacity lane and offers appear and disappear at a time, which write a base opacity of 0 and a fade.
 
 ## 10. Paths
 
@@ -134,14 +135,14 @@ See `checkpoints.md` for what is scheduled and what is backlog.
 
 ## 15. Project files and agents
 
-- **R120.** A project is a folder: `project.json`, `scenes/*.js`, `lib/*.js`, `assets/`. Plain text, git friendly. External files are copied into `assets/` on import and referenced by name from a `src` attribute, never imported in code (D44).
+- **R120.** A project is a folder: `project.json`, `scenes/*.js`, `lib/*.js`, `assets/`. Plain text, git friendly. External files are copied into `assets/` on import and referenced by name from a `src` attribute, never imported in code (D44). `project.json` holds width, height, fps (default 60, D65), and hold (D54).
 - **R121.** `docs/animation-rules.md` is complete and concise. An agent with that file alone writes valid animations. It is updated as part of every checkpoint.
 - **R122.** The app watches the project folder. Agent edits apply live.
 - **R123.** User-facing code is JavaScript with no imports. Type definitions ship with the app for autocompletion. The app validates the file against the class registry on load and reports problems inline. (Decisions D16, D34, D36.)
 
 ## 16. Performance and reliability
 
-- **R130.** Direct manipulation runs at display refresh rate for scenes up to a few hundred objects.
+- **R130.** Direct manipulation runs at display refresh rate for scenes up to a few hundred objects. Objects at opacity 0 are not sampled or drawn (D52).
 - **R131.** A typed code change reaches the preview within 100 ms.
 - **R132.** Playback holds project frame rate for typical scenes and skips frames rather than slowing down.
 - **R133.** The app starts in under three seconds and opens a project in under one.

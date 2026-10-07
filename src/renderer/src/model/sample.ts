@@ -14,10 +14,18 @@ interface Segment {
   ease: Easing
 }
 
-const segmentCache = new WeakMap<SceneModel, Map<string, Segment[]>>()
+/**
+ * The actions that change one attribute, in start order. Absolute ones take over from their
+ * start; relative ones add their change on top of everything else (decision D53).
+ */
+interface Segments {
+  absolute: Segment[]
+  relative: Segment[]
+}
 
-/** The actions that change this attribute, in start order. */
-function segmentsFor(model: SceneModel, obj: SceneObject, attr: string): Segment[] {
+const segmentCache = new WeakMap<SceneModel, Map<string, Segments>>()
+
+function segmentsFor(model: SceneModel, obj: SceneObject, attr: string): Segments {
   let perModel = segmentCache.get(model)
   if (!perModel) {
     perModel = new Map()
@@ -26,10 +34,14 @@ function segmentsFor(model: SceneModel, obj: SceneObject, attr: string): Segment
   const key = `${obj.id}:${attr}`
   let segments = perModel.get(key)
   if (!segments) {
-    segments = obj.actions
-      .filter((a) => attr in a.changes)
-      .sort((a, b) => a.start - b.start)
-      .map((a) => ({ action: a, to: a.changes[attr]!, ease: easingFor(a.timing, a.end - a.start) }))
+    const type = attrSchema(obj.className, attr)?.type
+    segments = { absolute: [], relative: [] }
+    const sorted = obj.actions.filter((a) => attr in a.changes).sort((a, b) => a.start - b.start || a.id - b.id)
+    for (const action of sorted) {
+      const segment: Segment = { action, to: action.changes[attr]!, ease: easingFor(action.timing, action.end - action.start) }
+      if (action.timing.relative && type === 'number') segments.relative.push(segment)
+      else segments.absolute.push(segment)
+    }
     perModel.set(key, segments)
   }
   return segments
@@ -70,7 +82,7 @@ export function baseValue(model: SceneModel, obj: SceneObject, attr: string, tim
   return source === undefined ? fallback : resolveSource(model, source, time, fallback)
 }
 
-function evalSegments(model: SceneModel, obj: SceneObject, attr: string, segments: Segment[], count: number, time: number, type: AttrType): AttrValue {
+function evalAbsolute(model: SceneModel, obj: SceneObject, attr: string, segments: Segment[], count: number, time: number, type: AttrType): AttrValue {
   // The latest segment that has started wins; earlier ones only supply its starting value.
   let index = -1
   for (let i = 0; i < count; i++) {
@@ -82,42 +94,53 @@ function evalSegments(model: SceneModel, obj: SceneObject, attr: string, segment
   const action = segment.action
   const to = resolveSource(model, segment.to, time, fallbackFor(obj, attr))
   if (time >= action.end || action.end <= action.start) return to
-  const from = evalSegments(model, obj, attr, segments, index, action.start, type)
+  const from = evalAbsolute(model, obj, attr, segments, index, action.start, type)
   return interpolate(from, to, segment.ease((time - action.start) / (action.end - action.start)), type)
+}
+
+/** Eased progress of an action at a time: 0 before it starts, 1 once it has ended. */
+export function progressAt(action: Action, time: number): number {
+  if (time <= action.start) return 0
+  if (time >= action.end || action.end <= action.start) return 1
+  return easingFor(action.timing, action.end - action.start)((time - action.start) / (action.end - action.start))
 }
 
 /** The value of an attribute at a time, with every action and link applied. */
 export function valueAt(model: SceneModel, obj: SceneObject, attr: string, time: number): AttrValue {
   const schema = attrSchema(obj.className, attr)
   if (!schema) return 0
-  const segments = segmentsFor(model, obj, attr)
-  return evalSegments(model, obj, attr, segments, segments.length, time, schema.type)
+  const { absolute, relative } = segmentsFor(model, obj, attr)
+  let value = evalAbsolute(model, obj, attr, absolute, absolute.length, time, schema.type)
+  if (relative.length > 0 && typeof value === 'number') {
+    let sum = value
+    for (const segment of relative) {
+      if (segment.action.start > time) break
+      const delta = resolveSource(model, segment.to, time, 0)
+      if (typeof delta === 'number') sum += delta * progressAt(segment.action, time)
+    }
+    value = sum
+  }
+  return value
 }
 
-/** The action that defines this attribute at this time, or null when the base value does. */
+/** The action that most recently started changing this attribute at this time, or null. */
 export function definingAction(model: SceneModel, obj: SceneObject, attr: string, time: number): Action | null {
+  const { absolute, relative } = segmentsFor(model, obj, attr)
   let found: Action | null = null
-  for (const segment of segmentsFor(model, obj, attr)) {
-    if (segment.action.start <= time) found = segment.action
-    else break
+  for (const list of [absolute, relative]) {
+    for (const segment of list) {
+      const action = segment.action
+      if (action.start > time) break
+      if (!found || action.start > found.start || (action.start === found.start && action.id > found.id)) found = action
+    }
   }
   return found
 }
 
-export function isVisibleAt(obj: SceneObject, time: number): boolean {
-  return time >= obj.appears && (obj.disappears === null || time < obj.disappears)
-}
-
-/** Opacity multiplier from the lifetime fades, 0 to 1. */
-export function lifetimeOpacity(obj: SceneObject, time: number): number {
-  let factor = 1
-  if (obj.fadeIn > 0) factor *= clamp01((time - obj.appears) / obj.fadeIn)
-  if (obj.disappears !== null && obj.fadeOut > 0) factor *= clamp01((obj.disappears - time) / obj.fadeOut)
-  return factor
-}
-
-function clamp01(v: number): number {
-  return v < 0 ? 0 : v > 1 ? 1 : v
+/** An object exists wherever its opacity is above zero (decision D52). */
+export function isVisibleAt(model: SceneModel, obj: SceneObject, time: number): boolean {
+  const opacity = valueAt(model, obj, 'opacity', time)
+  return typeof opacity === 'number' && opacity > 0.0005
 }
 
 function interpolate(from: AttrValue, to: AttrValue, p: number, type: AttrType): AttrValue {

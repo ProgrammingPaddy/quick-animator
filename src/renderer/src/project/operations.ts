@@ -1,11 +1,9 @@
 import { applyEdits, scrollToPos } from '../code/editor'
-import { easingFor } from '../model/easing'
 import { appendStatement, blockText, insertDeclaration, removeStatements, setProp, type TextEdit } from '../model/edits'
-import type { AttrValue } from '../model/registry'
-import { definingAction, valueAt } from '../model/sample'
+import { classes, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
+import { definingAction, progressAt, valueAt } from '../model/sample'
 import type { Range, SceneModel, SceneObject } from '../model/types'
 import { useStore, type Tool } from '../state/store'
-import { snapToFrame } from '../state/time'
 
 /**
  * Every GUI gesture that changes the scene ends here as a minimal text edit (decision D24). The
@@ -42,7 +40,7 @@ function roundPixels(v: number): number {
   return Math.round(v)
 }
 
-function roundSeconds(v: number): number {
+export function roundSeconds(v: number): number {
   return Math.round(v * 1000) / 1000
 }
 
@@ -62,7 +60,9 @@ export function addObject(className: Exclude<Tool, 'select'>, x: number, y: numb
 
 /**
  * Make an attribute have this value at this time by editing whatever defines it then: the
- * action that covers or last changed it, or else the declaration. Returns null when locked.
+ * action that most recently started changing it, or else the declaration. For an action, the
+ * written value moves by the needed change divided by the eased progress, so the object lands
+ * under the cursor; a relative action's change is adjusted the same way. Returns null when locked.
  */
 function editFor(name: string, attr: string, value: number, time: number): TextEdit | null {
   const { source, model } = state()
@@ -71,15 +71,13 @@ function editFor(name: string, attr: string, value: number, time: number): TextE
   if (!obj) return null
   const action = definingAction(model, obj, attr, time)
   if (action) {
-    if (!action.stmt || typeof action.changes[attr] === 'function') return null
-    let target = value
-    if (time < action.end && action.end > action.start) {
-      // Mid-action: choose the target that puts the object under the cursor at this time.
-      const progress = easingFor(action.timing, action.end - action.start)((time - action.start) / (action.end - action.start))
-      const from = valueAt(model, obj, attr, action.start)
-      if (typeof from === 'number' && progress > 0.05) target = from + (value - from) / progress
-    }
-    return setProp(source, action.stmt, attr, roundPixels(target))
+    const written = action.changes[attr]
+    if (!action.stmt || typeof written !== 'number') return null
+    const current = valueAt(model, obj, attr, time)
+    if (typeof current !== 'number') return null
+    const progress = progressAt(action, time)
+    if (progress < 0.05) return null
+    return setProp(source, action.stmt, attr, roundPixels(written + (value - current) / progress))
   }
   if (!obj.decl || typeof obj.attrs[attr] === 'function') return null
   return setProp(source, obj.decl, attr, roundPixels(value))
@@ -94,16 +92,16 @@ export function setPositionAt(name: string, x: number, y: number, time: number):
 
 /** Shift-drag begins: add a move from where the object is now, starting at the playhead (D27). */
 export function beginMove(name: string): boolean {
-  const { source, model, fps, time } = state()
+  const { source, model, time } = state()
   const obj = model?.objects.find((o) => o.name === name)
   if (!model || !obj || !obj.decl) return false
-  const at = snapToFrame(time, fps)
+  const at = roundSeconds(time)
   const x = valueAt(model, obj, 'x', time)
   const y = valueAt(model, obj, 'y', time)
   const text = blockText(`${name}.move`, {
     x: roundPixels(typeof x === 'number' ? x : 0),
     y: roundPixels(typeof y === 'number' ? y : 0),
-    at: roundSeconds(at),
+    at,
     duration: 1,
   })
   applyEdits([appendStatement(source, text)])
@@ -120,6 +118,51 @@ export function setLastActionTarget(name: string, attrs: Record<string, number>)
   if (!action?.stmt) return
   const stmt = action.stmt
   applyEdits(Object.entries(attrs).map(([key, value]) => setProp(source, stmt, key, roundPixels(value))))
+}
+
+/** Add an action of a kind at a time. Its values start as the object's current ones, so nothing jumps. */
+export function addAction(name: string, verb: Verb, time: number): void {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj || !obj.decl) return
+  const attrs: Record<string, AttrValue> = {}
+  const allowed = VERB_ATTRS[verb]
+  if (allowed) {
+    const schema = classes[obj.className]
+    for (const attr of allowed) {
+      const def = schema?.attrs.find((a) => a.name === attr)
+      if (!def || attr === 'z') continue
+      const value = valueAt(model, obj, attr, time)
+      attrs[attr] = typeof value === 'number' ? Math.round(value * 100) / 100 : value
+    }
+  }
+  attrs['at'] = roundSeconds(time)
+  attrs['duration'] = 1
+  const index = obj.actions.length
+  applyEdits([appendStatement(source, blockText(`${name}.${verb}`, attrs))])
+  useStore.getState().selectAction(name, index)
+}
+
+/** Make the object exist from here: base opacity 0, then a short fade to 1 at this time. */
+export function appearHere(name: string, time: number): void {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj || !obj.decl) return
+  const edits: TextEdit[] = []
+  const base = obj.decl.props.find((p) => p.key === 'opacity')
+  if (!base || base.raw.trim() !== '0') edits.push(setProp(source, obj.decl, 'opacity', 0))
+  edits.push(appendStatement(source, blockText(`${name}.fade`, { opacity: 1, at: roundSeconds(time), duration: 0.3 })))
+  applyEdits(edits)
+  useStore.getState().selectAction(name, obj.actions.length)
+}
+
+/** Make the object stop existing from here: a short fade to 0 at this time. */
+export function disappearHere(name: string, time: number): void {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj || !obj.decl) return
+  applyEdits([appendStatement(source, blockText(`${name}.fade`, { opacity: 0, at: roundSeconds(time), duration: 0.3 }))])
+  useStore.getState().selectAction(name, obj.actions.length)
 }
 
 /** Move or resize a clip. `at` is the start without delay; `duration` the length. */
@@ -155,6 +198,7 @@ export function deleteAction(name: string, index: number): void {
   const action = findObject(name)?.actions[index]
   if (!action?.stmt) return
   applyEdits(removeStatements(source, [action.stmt.range]))
+  useStore.getState().select([name])
 }
 
 /** Scroll the code pane to an object's declaration. */

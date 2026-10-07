@@ -14,6 +14,7 @@ dot = Circle({
   y: -300,
   radius: 50,
   fill: '#f59e0b',
+  opacity: 0,
 })
 
 title = Text({
@@ -25,7 +26,7 @@ title = Text({
 })
 
 // Script: what happens, in time order. Without \`at\`, an action starts when the object's
-// previous action ends.
+// previous action ends. An object exists wherever its opacity is above zero.
 
 slide = box.move({
   x: 400,
@@ -39,9 +40,10 @@ box.rotate({
   duration: 1,
 })
 
-dot.appear({
+dot.fade({
+  opacity: 1,
   at: slide.end,
-  fadeIn: 0.3,
+  duration: 0.3,
 })
 
 dot.move({

@@ -1,3 +1,4 @@
+import type { MouseEvent as ReactMouseEvent } from 'react'
 import { showMenu } from '../components/ContextMenu'
 import { VERB_COLORS } from '../model/registry'
 import type { Action, SceneObject } from '../model/types'
@@ -17,10 +18,12 @@ export function ObjectPane() {
   const model = useStore((s) => s.model)
   const fps = useStore((s) => s.settings.fps)
   const selection = useStore((s) => s.selection)
+  const selectedAction = useStore((s) => s.selectedAction)
   const select = useStore((s) => s.select)
+  const selectAction = useStore((s) => s.selectAction)
   const objects = model?.objects ?? []
 
-  const objectMenu = (obj: SceneObject) => (e: React.MouseEvent) => {
+  const objectMenu = (obj: SceneObject) => (e: ReactMouseEvent) => {
     select([obj.name])
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToObject(obj.name) },
@@ -28,9 +31,9 @@ export function ObjectPane() {
     ])
   }
 
-  const actionMenu = (obj: SceneObject, index: number) => (e: React.MouseEvent) => {
+  const actionMenu = (obj: SceneObject, index: number) => (e: ReactMouseEvent) => {
     e.stopPropagation()
-    select([obj.name])
+    selectAction(obj.name, index)
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToAction(obj.name, index) },
       { label: 'Delete action', run: () => deleteAction(obj.name, index), danger: true },
@@ -39,7 +42,7 @@ export function ObjectPane() {
 
   const actionLabel = (action: Action): string => {
     const what = action.verb === 'to' ? Object.keys(action.changes).join(', ') || 'to' : action.verb
-    return action.name ? `${action.name} = ${what}` : what
+    return action.timing.relative ? `${what} (relative)` : what
   }
 
   return (
@@ -64,7 +67,7 @@ export function ObjectPane() {
       ) : (
         <ul className="object-list">
           {objects.map((obj) => {
-            const selected = selection.includes(obj.name)
+            const selected = selection.includes(obj.name) && !selectedAction
             return (
               <li key={obj.name} className={`object${selected ? ' selected' : ''}`}>
                 <div
@@ -81,21 +84,25 @@ export function ObjectPane() {
                 </div>
                 {obj.actions.length > 0 && (
                   <ul className="action-list">
-                    {obj.actions.map((action, index) => (
-                      <li
-                        key={action.id}
-                        className="action-row"
-                        onClick={() => select([obj.name])}
-                        onDoubleClick={() => jumpToAction(obj.name, index)}
-                        onContextMenu={action.stmt ? actionMenu(obj, index) : undefined}
-                        title="Double-click to jump to the code, right-click for more"
-                      >
-                        <span className="dot" style={{ background: VERB_COLORS[action.verb] }} />
-                        <span className="name">{actionLabel(action)}</span>
-                        <span className="dim mono">{timecode(action.start, fps)}</span>
-                        {action.codeDriven && <span className="badge">code</span>}
-                      </li>
-                    ))}
+                    {obj.actions.map((action, index) => {
+                      const isSelected = selectedAction?.object === obj.name && selectedAction.index === index
+                      return (
+                        <li
+                          key={action.id}
+                          className={`action-row${isSelected ? ' selected' : ''}`}
+                          onClick={() => selectAction(obj.name, index)}
+                          onDoubleClick={() => jumpToAction(obj.name, index)}
+                          onContextMenu={action.stmt ? actionMenu(obj, index) : undefined}
+                          title="Double-click to jump to the code, right-click for more"
+                        >
+                          <span className="dot" style={{ background: VERB_COLORS[action.verb] }} />
+                          {action.name && <span className="ident">{action.name}</span>}
+                          <span className="name">{actionLabel(action)}</span>
+                          <span className="dim mono">{timecode(action.start, fps)}</span>
+                          {action.codeDriven && <span className="badge">code</span>}
+                        </li>
+                      )
+                    })}
                   </ul>
                 )}
               </li>

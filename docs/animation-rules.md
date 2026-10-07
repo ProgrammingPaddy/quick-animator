@@ -7,11 +7,13 @@ unless marked **coming**. The app validates the file on load and shows errors at
 
 ```
 my-animation/
-  project.json      { "width": 1920, "height": 1080, "fps": 30 }
+  project.json      { "width": 1920, "height": 1080, "fps": 60, "hold": 0 }
   scenes/main.js    the scene
   assets/           images, audio, video (coming)
   lib/              shared code (coming)
 ```
+
+`hold` is seconds kept after the last action, so the final state stays for export and looping.
 
 ## The scene file
 
@@ -53,7 +55,7 @@ Every object has these attributes, with these defaults:
 | `x`, `y`, `z` | 0 | center position |
 | `rotation` | 0 | degrees, counterclockwise |
 | `scale` | 1 | size multiplier |
-| `opacity` | 1 | 0 invisible, 1 solid |
+| `opacity` | 1 | 0 means the object does not exist; 1 is solid |
 | `fill` | `'#ffffff'` | color, as `'#rrggbb'` |
 
 | Class | Own attributes and defaults |
@@ -63,6 +65,29 @@ Every object has these attributes, with these defaults:
 | `Text` | `text` `'Text'`, `fontSize` 48, `font` `'Segoe UI'` |
 
 An omitted attribute takes its default. An unknown attribute is reported and ignored.
+
+## Visibility is opacity
+
+There is one visibility system. An object exists wherever its opacity is above zero, and nowhere
+else: at opacity 0 it is not drawn, not clickable, and costs nothing. To make an object appear
+later, give it `opacity: 0` in the cast and fade it in; to remove it, fade it to 0.
+
+```js
+dot = Circle({
+  x: 0,
+  y: -300,
+  radius: 50,
+  opacity: 0,
+})
+
+dot.fade({
+  opacity: 1,
+  at: 2,
+  duration: 0.3,
+})
+```
+
+An instant appearance is the same fade with `duration: 0`.
 
 ## Actions
 
@@ -76,32 +101,41 @@ An omitted attribute takes its default. An unknown attribute is reported and ign
 | `resize` | `width`, `height`, `radius`, `fontSize` |
 | `fade` | `opacity` |
 | `to` | any attributes |
-| `appear` | nothing changes; the object exists from here, fading in over `fadeIn` seconds |
-| `disappear` | nothing changes; the object stops existing here, fading out over `fadeOut` seconds |
 
 Timing keys, allowed in every action block:
 
 - `at`: the start, in seconds or a time reference. Omitted: right after the object's previous action, or 0 if there is none.
 - `delay`: seconds added to the start.
-- `duration`: seconds. Omitted: 1. Always 0 for `appear` and `disappear`.
+- `duration`: seconds. Omitted: 1.
 - `until`: an end time or time reference, instead of `duration`.
 - `easeIn`, `easeOut`: seconds of easing at each end. Omitted: 30% of the duration each.
 - `ease`: `'linear'`, `'bounce'`, `'back'`, `'elastic'`, or `'snap'`. Replaces `easeIn` and `easeOut`.
-- `fadeIn` with `appear`, `fadeOut` with `disappear`: seconds.
+- `relative`: `true` makes the values changes from where the object is when the action starts. Omitted: `false`.
 
-Without `appear` and `disappear`, an object exists from 0 to the end. A later action on the same
-attribute takes over from its start.
+## Relative and overlapping actions
+
+```js
+box.move({
+  x: 100,
+  relative: true,
+  duration: 0.5,
+})
+```
+
+moves 100 pixels to the right of wherever the box is at that moment. When actions on the same
+attribute overlap, an absolute action takes over from its start, blending from wherever the object
+is; a relative action adds its change on top of whatever else is happening.
 
 ## Time references
 
 Assign an action to a name to refer to its timing: `slide.start`, `slide.end`,
-`slide.progress(0.5)` for halfway. Objects have `box.appears` and `box.disappears`. A reference
-must be declared above the line that uses it.
+`slide.progress(0.5)` for halfway. A reference must be declared above the line that uses it.
 
 ```js
-dot.appear({
+dot.fade({
+  opacity: 1,
   at: slide.end,
-  fadeIn: 0.3,
+  duration: 0.3,
 })
 ```
 
@@ -116,7 +150,8 @@ a start and an end.
 Literal numbers and strings in the cast and in action blocks, and the trailing number of a link.
 Anything else, such as loops, helper functions, or computed values, runs and shows, but is marked
 "code" and is not editable from the GUI. The app never reformats your lines; it replaces one
-literal, adds one line, or removes one statement.
+literal, adds one line, or removes one statement. While the file has an error, the GUI does not
+edit it.
 
 ## Complete example
 
@@ -136,6 +171,7 @@ dot = Circle({
   y: -300,
   radius: 50,
   fill: '#f59e0b',
+  opacity: 0,
 })
 
 title = Text({
@@ -160,9 +196,10 @@ box.rotate({
   duration: 1,
 })
 
-dot.appear({
+dot.fade({
+  opacity: 1,
   at: slide.end,
-  fadeIn: 0.3,
+  duration: 0.3,
 })
 
 dot.move({
@@ -181,4 +218,4 @@ title.fade({
 ## Coming
 
 `Path` and `follow`, `morph`, `link` actions, `Group`, `Image`, `Video`, `Line`, `Polygon`,
-per-character text animation, 3D, export.
+object states such as `startsMoving`, per-character text animation, 3D, export.

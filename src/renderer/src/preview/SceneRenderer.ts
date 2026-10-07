@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { isVisibleAt, lifetimeOpacity, parseColor, valueAt } from '../model/sample'
+import { isVisibleAt, parseColor, valueAt } from '../model/sample'
 import type { SceneModel, SceneObject } from '../model/types'
 
 interface Item {
@@ -87,6 +87,11 @@ export class SceneRenderer {
 
   private apply(item: Item, obj: SceneObject, model: SceneModel, time: number, index: number): void {
     const mesh = item.mesh
+    // An object with zero opacity does not exist right now: nothing else about it is sampled.
+    if (!isVisibleAt(model, obj, time)) {
+      mesh.visible = false
+      return
+    }
     const material = mesh.material as THREE.MeshBasicMaterial
     const num = (attr: string): number => {
       const v = valueAt(model, obj, attr, time)
@@ -94,12 +99,11 @@ export class SceneRenderer {
     }
     const str = (attr: string): string => String(valueAt(model, obj, attr, time))
 
-    const opacity = Math.max(0, Math.min(1, num('opacity'))) * lifetimeOpacity(obj, time)
-    mesh.visible = isVisibleAt(obj, time) && opacity > 0
+    mesh.visible = true
     mesh.renderOrder = index
     mesh.position.set(num('x'), num('y'), num('z'))
     mesh.rotation.z = (num('rotation') * Math.PI) / 180
-    material.opacity = opacity
+    material.opacity = Math.max(0, Math.min(1, num('opacity')))
 
     if (obj.className === 'Rect') {
       item.width = num('width')

@@ -2,6 +2,8 @@ export interface ProjectSettings {
   width: number
   height: number
   fps: number
+  /** Seconds kept after the last action, so the final state stays for export and looping (D54). */
+  hold: number
 }
 
 /** A scene file with its path relative to the project folder, such as `scenes/main.js`. */

@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { showMenu } from '../components/ContextMenu'
-import { VERB_COLORS } from '../model/registry'
-import type { Action, SceneObject } from '../model/types'
-import { canEdit, deleteAction, deleteObjects, jumpToAction, jumpToObject, setActionTiming } from '../project/operations'
+import { VERB_COLORS, VERBS } from '../model/registry'
+import { valueAt } from '../model/sample'
+import type { Action, SceneModel, SceneObject } from '../model/types'
+import { updateSettings } from '../project/controller'
+import { addAction, appearHere, canEdit, deleteAction, deleteObjects, disappearHere, jumpToAction, jumpToObject, roundSeconds, setActionTiming } from '../project/operations'
 import { useStore } from '../state/store'
 import { formatTime, snapToFrame, timecode } from '../state/time'
 
-/** Zoom limits in pixels per second. At the top, single frames at 30 fps sit about 130 px apart. */
+/** Zoom limits in pixels per second. At the top, single frames at 60 fps sit about 65 px apart. */
 const MIN_PPS = 4
 const MAX_PPS = 4000
 /** One second per labelled tick at the default zoom. */
@@ -19,6 +21,10 @@ const TICK_SPACING = 80
 const HEADER_W = 180
 /** Height of one lane of clips in a row. Overlapping clips stack in lanes. */
 const LANE_H = 22
+/** Height of the opacity lane at the bottom of every row. */
+const OPACITY_H = 14
+/** How close a drag must come to a snap target, in pixels. */
+const SNAP_PX = 8
 
 interface View {
   /** Pixels per second. */
@@ -42,17 +48,13 @@ function tickLabel(seconds: number, step: number, fps: number): string {
 }
 
 function clipLabel(action: Action): string {
-  if (action.verb === 'to') return Object.keys(action.changes).join(', ') || 'to'
-  return action.verb
-}
-
-function isClip(action: Action): boolean {
-  return action.verb !== 'appear' && action.verb !== 'disappear'
+  const what = action.verb === 'to' ? Object.keys(action.changes).join(', ') || 'to' : action.verb
+  return action.timing.relative ? `${what} (relative)` : what
 }
 
 /** Overlapping clips go in separate lanes so each stays visible and grabbable. */
 function assignLanes(actions: Action[]): { lanes: Map<number, number>; count: number } {
-  const sorted = actions.filter(isClip).sort((a, b) => a.start - b.start || a.id - b.id)
+  const sorted = [...actions].sort((a, b) => a.start - b.start || a.id - b.id)
   const laneEnds: number[] = []
   const lanes = new Map<number, number>()
   for (const action of sorted) {
@@ -67,26 +69,71 @@ function assignLanes(actions: Action[]): { lanes: Map<number, number>; count: nu
   return { lanes, count: Math.max(1, laneEnds.length) }
 }
 
+/**
+ * Snap a dragged time to whole seconds and to the starts and ends of other actions when
+ * snapping is on (D64); otherwise keep it exact to the millisecond.
+ */
+function snapTime(raw: number, model: SceneModel | null, exclude: Action | null, pps: number, snap: boolean): number {
+  if (!snap) return Math.max(0, roundSeconds(raw))
+  const threshold = SNAP_PX / pps
+  const candidates = [0, Math.floor(raw), Math.ceil(raw)]
+  if (model) for (const action of model.actions) if (action !== exclude) candidates.push(action.start, action.end)
+  let best = raw
+  let bestDistance = threshold
+  for (const candidate of candidates) {
+    const distance = Math.abs(candidate - raw)
+    if (distance <= bestDistance) {
+      best = candidate
+      bestDistance = distance
+    }
+  }
+  return Math.max(0, roundSeconds(best))
+}
+
+/** The opacity of one object over the visible range, as a filled curve. Memoised: it ignores the playhead. */
+const OpacityLane = memo(function OpacityLane({ model, obj, scrollTime, pps, width, height }: { model: SceneModel; obj: SceneObject; scrollTime: number; pps: number; width: number; height: number }) {
+  const path = useMemo(() => {
+    if (width <= 0) return ''
+    const points: string[] = []
+    for (let x = 0; x <= width; x += 3) {
+      const value = valueAt(model, obj, 'opacity', scrollTime + x / pps)
+      const opacity = Math.max(0, Math.min(1, typeof value === 'number' ? value : 0))
+      points.push(`${x},${(height - 1 - opacity * (height - 3)).toFixed(1)}`)
+    }
+    return `M0,${height} L${points.join(' L')} L${width},${height} Z`
+  }, [model, obj, scrollTime, pps, width, height])
+  return (
+    <svg className="opacity-lane" width={width} height={height} aria-hidden="true">
+      <path d={path} />
+    </svg>
+  )
+})
+
 type ClipMode = 'move' | 'start' | 'end'
 
 /**
- * Transport, ruler, and a row per object with its lifetime and clips, over an open-ended time
- * axis. Over the tracks the wheel zooms around the cursor, Shift and the wheel scroll time, Alt
- * and the wheel scroll the rows; over the row headers the wheel scrolls the rows. Clips drag by
- * the body to move and by the edges to resize; right-click for more.
+ * Transport, ruler, and a row per object with its clips in lanes and its opacity below, over an
+ * open-ended time axis. Over the tracks the wheel zooms around the cursor, Shift and the wheel
+ * scroll time, Alt and the wheel scroll the rows; over the row headers the wheel scrolls the
+ * rows. Clips drag by the body to move and by the edges to resize; right-click for more.
  */
 export function TimelinePane() {
   const time = useStore((s) => s.time)
   const playing = useStore((s) => s.playing)
   const loop = useStore((s) => s.loop)
+  const snap = useStore((s) => s.snap)
   const fps = useStore((s) => s.settings.fps)
+  const hold = useStore((s) => s.settings.hold)
   const contentEnd = useStore((s) => s.contentEnd)
   const model = useStore((s) => s.model)
   const source = useStore((s) => s.source)
   const selection = useStore((s) => s.selection)
+  const selectedAction = useStore((s) => s.selectedAction)
   const select = useStore((s) => s.select)
+  const selectAction = useStore((s) => s.selectAction)
   const togglePlaying = useStore((s) => s.togglePlaying)
   const toggleLoop = useStore((s) => s.toggleLoop)
+  const toggleSnap = useStore((s) => s.toggleSnap)
   const setPlaying = useStore((s) => s.setPlaying)
   const setTime = useStore((s) => s.setTime)
   const gridRef = useRef<HTMLDivElement>(null)
@@ -163,24 +210,26 @@ export function TimelinePane() {
     el.addEventListener('pointercancel', onUp)
   }
 
-  const timeAtPointer = (clientX: number): number => {
+  /** Raw time under a pointer position, not snapped. */
+  const rawTimeAt = (clientX: number): number => {
     const ruler = rulerRef.current
     if (!ruler) return 0
     const x = clientX - ruler.getBoundingClientRect().left
     const v = viewRef.current
-    return Math.max(0, snapToFrame(v.scrollTime + x / v.pps, fps))
+    return Math.max(0, v.scrollTime + x / v.pps)
   }
 
   const beginScrub = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
-    setTime(timeAtPointer(e.clientX))
-    capture(e.currentTarget, e.pointerId, (ev) => setTime(timeAtPointer(ev.clientX)))
+    const scrub = (clientX: number) => setTime(snapToFrame(rawTimeAt(clientX), fps))
+    scrub(e.clientX)
+    capture(e.currentTarget, e.pointerId, (ev) => scrub(ev.clientX))
   }
 
   const beginClipDrag = (obj: SceneObject, index: number, mode: ClipMode) => (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
     e.stopPropagation()
-    select([obj.name])
+    selectAction(obj.name, index)
     const action = obj.actions[index]
     if (!action?.stmt || !canEdit()) return
     const atProp = action.stmt.props.find((p) => p.key === 'at')
@@ -188,23 +237,36 @@ export function TimelinePane() {
     if (atProp && atProp.kind !== 'literal' && mode !== 'end') return
     if (untilProp && mode !== 'move') return
     const origin = { x: e.clientX, start: action.start, end: action.end, pps: viewRef.current.pps, delay: action.timing.delay ?? 0 }
-    const frame = 1 / fps
+    const minimum = 1 / fps
+    const snapOn = useStore.getState().snap
+    const currentModel = useStore.getState().model
     capture(e.currentTarget, e.pointerId, (ev) => {
       const dt = (ev.clientX - origin.x) / origin.pps
       if (mode === 'move') {
-        const start = Math.max(0, snapToFrame(origin.start + dt, fps))
+        const start = snapTime(origin.start + dt, currentModel, action, origin.pps, snapOn)
         setActionTiming(obj.name, index, { at: start - origin.delay })
       } else if (mode === 'end') {
-        const end = Math.max(origin.start + frame, snapToFrame(origin.end + dt, fps))
+        const end = Math.max(origin.start + minimum, snapTime(origin.end + dt, currentModel, action, origin.pps, snapOn))
         setActionTiming(obj.name, index, { duration: end - origin.start })
       } else {
-        const start = Math.min(origin.end - frame, Math.max(0, snapToFrame(origin.start + dt, fps)))
+        const start = Math.min(origin.end - minimum, snapTime(origin.start + dt, currentModel, action, origin.pps, snapOn))
         setActionTiming(obj.name, index, { at: start - origin.delay, duration: origin.end - start })
       }
     })
   }
 
-  const objectMenu = (obj: SceneObject) => (e: React.MouseEvent) => {
+  /** Drag the end-of-content marker to set the hold after the last action (D54). */
+  const beginHoldDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    const lastEnd = model?.lastActionEnd ?? 0
+    capture(e.currentTarget, e.pointerId, (ev) => {
+      const end = snapTime(rawTimeAt(ev.clientX), model, null, viewRef.current.pps, useStore.getState().snap)
+      updateSettings({ hold: Math.max(0, roundSeconds(end - lastEnd)) })
+    })
+  }
+
+  const objectMenu = (obj: SceneObject) => (e: ReactMouseEvent) => {
     e.stopPropagation()
     select([obj.name])
     showMenu(e, [
@@ -213,12 +275,25 @@ export function TimelinePane() {
     ])
   }
 
-  const clipMenu = (obj: SceneObject, index: number) => (e: React.MouseEvent) => {
+  const clipMenu = (obj: SceneObject, index: number) => (e: ReactMouseEvent) => {
     e.stopPropagation()
-    select([obj.name])
+    selectAction(obj.name, index)
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToAction(obj.name, index) },
       { label: 'Delete action', run: () => deleteAction(obj.name, index), danger: true },
+    ])
+  }
+
+  /** Right-click on empty track space: add an action of a kind at that time. */
+  const trackMenu = (obj: SceneObject) => (e: ReactMouseEvent) => {
+    if (!canEdit() || obj.codeDriven) return
+    select([obj.name])
+    const t = snapTime(rawTimeAt(e.clientX), model, null, viewRef.current.pps, useStore.getState().snap)
+    const label = timecode(t, fps)
+    showMenu(e, [
+      ...VERBS.map((verb) => ({ label: `Add ${verb} at ${label}`, run: () => addAction(obj.name, verb, t) })),
+      { label: `Appear at ${label} (fade in)`, run: () => appearHere(obj.name, t) },
+      { label: `Disappear at ${label} (fade out)`, run: () => disappearHere(obj.name, t) },
     ])
   }
 
@@ -282,9 +357,22 @@ export function TimelinePane() {
         >
           {'↻'}
         </button>
+        <button
+          className={`transport-button text${snap ? ' on' : ''}`}
+          onClick={(e) => {
+            toggleSnap()
+            e.currentTarget.blur()
+          }}
+          title={snap ? 'Drags snap to whole seconds and to other actions. Click for free placement.' : 'Drags place freely. Click to snap to whole seconds and to other actions.'}
+          aria-label="Snap"
+          aria-pressed={snap}
+        >
+          Snap
+        </button>
         <span className="time mono">{formatTime(time, fps)}</span>
         <span className="dim">
           {fps} fps{contentEnd !== null ? `, ends at ${timecode(contentEnd, fps)}` : ''}
+          {hold > 0 ? ` (hold ${roundSeconds(hold)}s)` : ''}
           {!editable ? ', code has an error' : ''}
         </span>
       </div>
@@ -296,6 +384,9 @@ export function TimelinePane() {
               <span>{tickLabel(t, step, fps)}</span>
             </div>
           ))}
+          {contentEnd !== null && (
+            <div className="end-marker" style={{ left: xAt(contentEnd) }} onPointerDown={beginHoldDrag} title="End of the content. Drag to hold the final state longer." />
+          )}
           <div className="playhead head" style={{ left: xAt(time) }} />
         </div>
         <div className="tl-body" ref={bodyRef}>
@@ -304,9 +395,7 @@ export function TimelinePane() {
             {objects.map((obj) => {
               const selected = selection.includes(obj.name)
               const { lanes, count } = assignLanes(obj.actions)
-              const rowHeight = 6 + count * LANE_H
-              const lifeFrom = xAt(obj.appears)
-              const lifeTo = obj.disappears === null ? Math.max(lifeFrom, width) : xAt(obj.disappears)
+              const rowHeight = 6 + count * LANE_H + OPACITY_H
               return (
                 <div key={obj.name} className={`tl-row${selected ? ' selected' : ''}`} style={{ height: rowHeight }}>
                   <div
@@ -320,31 +409,35 @@ export function TimelinePane() {
                     <span className="dim">{obj.className}</span>
                     {obj.codeDriven && <span className="badge">code</span>}
                   </div>
-                  <div className="tl-track" onPointerDown={beginScrub}>
+                  <div className="tl-track" onPointerDown={beginScrub} onContextMenu={trackMenu(obj)}>
                     {ticks.map((t) => (
                       <div key={t} className="grid-line" style={{ left: xAt(t) }} />
                     ))}
-                    <div className="lifetime" style={{ left: lifeFrom, width: Math.max(0, lifeTo - lifeFrom) }}>
-                      {obj.fadeIn > 0 && <div className="fade in" style={{ width: obj.fadeIn * view.pps }} />}
-                      {obj.fadeOut > 0 && <div className="fade out" style={{ width: obj.fadeOut * view.pps }} />}
-                    </div>
+                    {model && width > 0 && (
+                      <div className="opacity-slot" style={{ top: 4 + count * LANE_H, height: OPACITY_H }} title="Opacity. Right-click the row to appear or disappear here.">
+                        <OpacityLane model={model} obj={obj} scrollTime={view.scrollTime} pps={view.pps} width={width} height={OPACITY_H} />
+                      </div>
+                    )}
                     {obj.actions.map((action, index) => {
-                      if (!isClip(action)) return null
                       const locked = action.codeDriven || !action.stmt || !editable
+                      const isSelected = selectedAction?.object === obj.name && selectedAction.index === index
                       const left = xAt(action.start)
                       const clipWidth = Math.max(8, (action.end - action.start) * view.pps)
                       const top = 4 + (lanes.get(action.id) ?? 0) * LANE_H
                       return (
                         <div
                           key={action.id}
-                          className={`clip${locked ? ' locked' : ''}`}
+                          className={`clip${locked ? ' locked' : ''}${isSelected ? ' selected' : ''}`}
                           style={{ left, top, width: clipWidth, background: VERB_COLORS[action.verb] }}
                           onPointerDown={locked ? undefined : beginClipDrag(obj, index, 'move')}
                           onContextMenu={action.stmt ? clipMenu(obj, index) : undefined}
                           title={`${action.name ? `${action.name} = ` : ''}${obj.name}.${action.verb}  ${timecode(action.start, fps)} to ${timecode(action.end, fps)}`}
                         >
                           {!locked && <div className="clip-edge left" onPointerDown={beginClipDrag(obj, index, 'start')} />}
-                          <span className="label">{clipLabel(action)}</span>
+                          <span className="label">
+                            {action.name && <span className="ident">{action.name}</span>}
+                            {clipLabel(action)}
+                          </span>
                           {!locked && <div className="clip-edge right" onPointerDown={beginClipDrag(obj, index, 'end')} />}
                         </div>
                       )

@@ -9,12 +9,11 @@ export interface Range {
 export type AttrFn = () => AttrValue
 export type AttrSource = AttrValue | AttrFn
 
-/** A moment defined relative to an action or an object's lifetime, such as `fly.end`. */
+/** A moment defined relative to an action, such as `fly.end` or `fly.progress(0.5)`. */
 export interface TimeRef {
   readonly __timeRef: true
-  kind: 'start' | 'end' | 'progress' | 'appears' | 'disappears'
-  action?: Action
-  object?: SceneObject
+  kind: 'start' | 'end' | 'progress'
+  action: Action
   fraction?: number
 }
 
@@ -62,8 +61,8 @@ export interface Timing {
   easeIn?: number
   easeOut?: number
   ease?: string
-  fadeIn?: number
-  fadeOut?: number
+  /** Values are changes from where the object is when the action starts (D51). */
+  relative?: boolean
 }
 
 export interface SceneObject {
@@ -78,11 +77,6 @@ export interface SceneObject {
   decl: DeclInfo | null
   /** In creation order. */
   actions: Action[]
-  appears: number
-  /** Null means until the end. */
-  disappears: number | null
-  fadeIn: number
-  fadeOut: number
 }
 
 export interface Action {
@@ -109,8 +103,8 @@ export interface SceneModel {
   source: string
   objects: SceneObject[]
   actions: Action[]
-  /** End of the last action or lifetime, or null when nothing animates. */
-  contentEnd: number | null
+  /** End of the last action, or null when nothing animates. The hold is added elsewhere. */
+  lastActionEnd: number | null
   /** End of the last object declaration statement, where new objects are inserted. */
   lastDeclEnd: number | null
   warnings: SceneError[]

@@ -1,6 +1,6 @@
 /**
  * The class registry: every object type, its attributes with defaults and docs, the verbs, and
- * the timing keys (decision D36). Autocompletion, validation, the Now pane, and the rules
+ * the timing keys (decision D36). Autocompletion, validation, the Selected pane, and the rules
  * document all read from here, so they can never disagree.
  */
 
@@ -28,7 +28,7 @@ const common: AttrSchema[] = [
   { name: 'z', type: 'number', default: 0, doc: 'Depth, toward the camera.', animatable: true },
   { name: 'rotation', type: 'number', default: 0, doc: 'Degrees, counterclockwise.', animatable: true },
   { name: 'scale', type: 'number', default: 1, doc: 'Size multiplier.', animatable: true },
-  { name: 'opacity', type: 'number', default: 1, doc: '0 is invisible, 1 is solid.', animatable: true },
+  { name: 'opacity', type: 'number', default: 1, doc: '0 is invisible and costs nothing, 1 is solid. This is the one visibility control (D52).', animatable: true },
   { name: 'fill', type: 'color', default: '#ffffff', doc: 'Fill color, as #rrggbb.', animatable: true },
 ]
 
@@ -61,7 +61,7 @@ export const classes: Record<string, ClassSchema> = {
 
 export const CLASS_NAMES: ReadonlySet<string> = new Set(Object.keys(classes))
 
-export const VERBS = ['to', 'move', 'rotate', 'scale', 'resize', 'fade', 'appear', 'disappear'] as const
+export const VERBS = ['to', 'move', 'rotate', 'scale', 'resize', 'fade'] as const
 export type Verb = (typeof VERBS)[number]
 export const VERB_NAMES: ReadonlySet<string> = new Set(VERBS)
 
@@ -73,10 +73,9 @@ export const VERB_ATTRS: Record<Verb, readonly string[] | null> = {
   scale: ['scale'],
   resize: ['width', 'height', 'radius', 'fontSize'],
   fade: ['opacity'],
-  appear: [],
-  disappear: [],
 }
 
+/** One color per kind of change, used wherever an action is shown. */
 export const VERB_COLORS: Record<Verb, string> = {
   move: '#3b82f6',
   rotate: '#a855f7',
@@ -84,11 +83,12 @@ export const VERB_COLORS: Record<Verb, string> = {
   resize: '#f59e0b',
   fade: '#64748b',
   to: '#10b981',
-  appear: '#64748b',
-  disappear: '#64748b',
 }
 
-export const TIMING_KEYS = ['at', 'delay', 'duration', 'until', 'easeIn', 'easeOut', 'ease', 'fadeIn', 'fadeOut'] as const
+/** The color for an object itself, as opposed to one of its actions. */
+export const OBJECT_COLOR = '#3b82f6'
+
+export const TIMING_KEYS = ['at', 'delay', 'duration', 'until', 'easeIn', 'easeOut', 'ease', 'relative'] as const
 export type TimingKey = (typeof TIMING_KEYS)[number]
 export const TIMING_KEY_NAMES: ReadonlySet<string> = new Set(TIMING_KEYS)
 

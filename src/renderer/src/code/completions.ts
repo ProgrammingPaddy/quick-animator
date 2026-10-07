@@ -9,8 +9,9 @@ import { useStore } from '../state/store'
 
 /**
  * Completions driven by the class registry and the current model (decision D36): classes and
- * objects at a statement start, verbs after `object.`, attributes and timing keys inside a
- * block, named curves after `ease:`, time references after `at:` and `until:`.
+ * objects at a statement start, classes after `name = `, verbs after `object.`, attributes and
+ * timing keys inside a block, named curves after `ease:`, time references after `at:` and
+ * `until:`.
  */
 
 const TIMING_DOCS: Record<string, string> = {
@@ -21,8 +22,7 @@ const TIMING_DOCS: Record<string, string> = {
   easeIn: 'Seconds of easing at the start. Omitted: 30% of the duration.',
   easeOut: 'Seconds of easing at the end. Omitted: 30% of the duration.',
   ease: "A named curve: 'linear', 'bounce', 'back', 'elastic', or 'snap'. Replaces easeIn and easeOut.",
-  fadeIn: 'Seconds to fade in, with appear.',
-  fadeOut: 'Seconds to fade out, with disappear.',
+  relative: 'true: the values are changes from where the object is when the action starts, and add on top of other actions.',
 }
 
 const TIMING_PLACEHOLDER: Record<string, string> = {
@@ -33,8 +33,7 @@ const TIMING_PLACEHOLDER: Record<string, string> = {
   easeIn: '0.3',
   easeOut: '0.3',
   ease: "'linear'",
-  fadeIn: '0.3',
-  fadeOut: '0.3',
+  relative: 'true',
 }
 
 const VERB_DOCS: Record<Verb, string> = {
@@ -42,10 +41,8 @@ const VERB_DOCS: Record<Verb, string> = {
   rotate: 'Turn to an angle over time.',
   scale: 'Grow or shrink over time.',
   resize: 'Change width, height, radius, or font size over time.',
-  fade: 'Change opacity over time.',
+  fade: 'Change opacity over time. Opacity 0 means the object does not exist.',
   to: 'Change any attributes over time.',
-  appear: 'Exist from this time, with an optional fade in.',
-  disappear: 'Stop existing at this time, with an optional fade out.',
 }
 
 /**
@@ -71,20 +68,13 @@ function timingCompletion(key: string): Completion {
   return snippetCompletion(`${key}: ${f.field(TIMING_PLACEHOLDER[key] ?? '')},`, { label: key, info: TIMING_DOCS[key], type: 'keyword' })
 }
 
-function timingApplies(key: string, verb: Verb): boolean {
-  if (key === 'fadeIn') return verb === 'appear'
-  if (key === 'fadeOut') return verb === 'disappear'
-  if (verb === 'appear' || verb === 'disappear') return key === 'at' || key === 'delay'
-  return true
-}
-
-/** A whole object with every attribute at its default, name first, Tab through the values. */
-function classSnippet(className: string): Completion {
+/** A whole object with every attribute at its default, Tab through the values. With or without the `name = ` part. */
+function classSnippet(className: string, withName: boolean): Completion {
   const schema = classes[className]!
   const f = new Fields()
-  const name = f.field(className.toLowerCase())
+  const head = withName ? `${f.field(className.toLowerCase())} = ${className}` : className
   const lines = schema.attrs.map((a) => `  ${a.name}: ${f.field(formatValue(a.default))},`).join('\n')
-  return snippetCompletion(`${name} = ${className}({\n${lines}\n})`, {
+  return snippetCompletion(`${head}({\n${lines}\n})`, {
     label: className,
     detail: 'new object',
     info: `${schema.doc} Expands to a full block.`,
@@ -102,9 +92,7 @@ function verbSnippet(verb: Verb, className: string | undefined): Completion {
     const attrs = allowed.filter((a) => schema?.attrs.some((s) => s.name === a)).slice(0, verb === 'move' ? 2 : 1)
     for (const a of attrs) lines.push(`  ${a}: ${f.field(formatValue(schema!.attrs.find((s) => s.name === a)!.default))},`)
   }
-  if (verb === 'appear') lines.push(`  at: ${f.field('0')},`, `  fadeIn: ${f.field('0.3')},`)
-  else if (verb === 'disappear') lines.push(`  at: ${f.field('0')},`, `  fadeOut: ${f.field('0.3')},`)
-  else lines.push(`  duration: ${f.field('1')},`)
+  lines.push(`  duration: ${f.field('1')},`)
   return snippetCompletion(`${verb}({\n${lines.join('\n')}\n})`, { label: verb, info: VERB_DOCS[verb], type: 'method' })
 }
 
@@ -172,11 +160,7 @@ function timeReferenceOptions(model: SceneModel | null): Completion[] {
     if (!action.name) continue
     options.push({ label: `${action.name}.end`, type: 'variable', info: `When ${action.name} ends.` })
     options.push({ label: `${action.name}.start`, type: 'variable', info: `When ${action.name} starts.` })
-    options.push(snippetCompletion(`${action.name}.progress(\${0.5})`, { label: `${action.name}.progress()`, type: 'variable', info: `A fraction of the way through ${action.name}.` }))
-  }
-  for (const obj of model?.objects ?? []) {
-    options.push({ label: `${obj.name}.appears`, type: 'variable', info: `When ${obj.name} starts to exist.` })
-    options.push({ label: `${obj.name}.disappears`, type: 'variable', info: `When ${obj.name} stops existing.` })
+    options.push(snippetCompletion(`${action.name}.progress(\${1:0.5})`, { label: `${action.name}.progress()`, type: 'variable', info: `A fraction of the way through ${action.name}.` }))
   }
   return options
 }
@@ -202,12 +186,18 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
         options: [
           { label: 'end', type: 'property', info: 'When the action ends.' },
           { label: 'start', type: 'property', info: 'When the action starts.' },
-          snippetCompletion('progress(${0.5})', { label: 'progress', detail: '(fraction)', info: 'A fraction of the way through the action.', type: 'method' }),
+          snippetCompletion('progress(${1:0.5})', { label: 'progress', detail: '(fraction)', info: 'A fraction of the way through the action.', type: 'method' }),
         ],
         validFor: /^[\w$]*$/,
       }
     }
     return null
+  }
+
+  // name = | : the name is already there, so the class expands without one.
+  if (/^\s*(?:const\s+|let\s+|var\s+)?[A-Za-z_$][\w$]*\s*=\s*[\w$]*$/.test(before)) {
+    if (!word || (word.from === word.to && !context.explicit)) return null
+    return { from: word.from, options: Object.keys(classes).map((c) => classSnippet(c, false)), validFor: /^[\w$]*$/ }
   }
 
   const node = syntaxTree(state).resolveInner(pos, -1)
@@ -222,6 +212,9 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
       if (key === 'at' || key === 'until') {
         if (!word) return null
         return { from: word.from, options: timeReferenceOptions(model), validFor: /^[\w$.()]*$/ }
+      }
+      if (key === 'relative') {
+        return { from: word?.from ?? pos, options: [{ label: 'true', type: 'constant' }, { label: 'false', type: 'constant' }], validFor: /^[\w$]*$/ }
       }
       return null
     }
@@ -241,7 +234,7 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
           options.push(attrCompletion(attr))
         }
       }
-      for (const key of TIMING_KEYS) if (!present.has(key) && timingApplies(key, call.verb!)) options.push(timingCompletion(key))
+      for (const key of TIMING_KEYS) if (!present.has(key)) options.push(timingCompletion(key))
     }
     return { from: word.from, options, validFor: /^[\w$]*$/ }
   }
@@ -249,7 +242,7 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
   // A statement start: a new object, or an object to act on.
   if (/^\s*[\w$]*$/.test(before)) {
     if (!word || (word.from === word.to && !context.explicit)) return null
-    const options: Completion[] = Object.keys(classes).map(classSnippet)
+    const options: Completion[] = Object.keys(classes).map((c) => classSnippet(c, true))
     for (const obj of model?.objects ?? []) options.push({ label: obj.name, type: 'variable', detail: obj.className, apply: `${obj.name}.` })
     return { from: word.from, options, validFor: /^[\w$]*$/ }
   }

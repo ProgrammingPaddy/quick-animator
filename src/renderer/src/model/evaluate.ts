@@ -25,10 +25,6 @@ function behindHandle(value: unknown): SceneObject | Action | null {
   return typeof behind === 'object' && behind !== null ? (behind as SceneObject | Action) : null
 }
 
-function isSceneObject(entry: SceneObject | Action): entry is SceneObject {
-  return 'className' in entry
-}
-
 /**
  * Run a scene file and build the model (architecture: "The round trip" and "Evaluation").
  * The file runs as plain JavaScript inside a scope that already holds every class, so nothing is
@@ -49,7 +45,7 @@ export function evaluateScene(source: string): EvaluateResult {
   const objects: SceneObject[] = []
   const actions: Action[] = []
   const warnings: SceneError[] = []
-  const model: SceneModel = { source, objects, actions, contentEnd: null, lastDeclEnd: parsed.lastDeclEnd, warnings }
+  const model: SceneModel = { source, objects, actions, lastActionEnd: null, lastDeclEnd: parsed.lastDeclEnd, warnings }
 
   const actionHandle = (action: Action): Record<string | symbol, unknown> => ({
     [HANDLE]: action,
@@ -66,7 +62,8 @@ export function evaluateScene(source: string): EvaluateResult {
     const allowed = VERB_ATTRS[verb]
     for (const [key, value] of Object.entries(props as Record<string, unknown>)) {
       if (TIMING_KEY_NAMES.has(key)) {
-        ;(timing as Record<string, unknown>)[key] = value
+        if (key === 'relative') timing.relative = Boolean(value)
+        else (timing as Record<string, unknown>)[key] = value
         continue
       }
       if (!classes[obj.className]?.attrs.some((a) => a.name === key)) {
@@ -92,7 +89,6 @@ export function evaluateScene(source: string): EvaluateResult {
         if (key === HANDLE) return obj
         if (typeof key !== 'string') return undefined
         if (VERB_NAMES.has(key)) return (...args: unknown[]) => addAction(obj, key as Verb, args)
-        if (key === 'appears' || key === 'disappears') return timeRef({ kind: key, object: obj })
         if (key === 'name') return obj.name
         const attr = schema.attrs.find((a) => a.name === key)
         if (attr) {
@@ -129,10 +125,6 @@ export function evaluateScene(source: string): EvaluateResult {
         codeDriven: true,
         decl: null,
         actions: [],
-        appears: 0,
-        disappears: null,
-        fadeIn: 0,
-        fadeOut: 0,
       }
       objects.push(obj)
       return objectHandle(obj)
@@ -202,30 +194,14 @@ export function evaluateScene(source: string): EvaluateResult {
   const resolved = new Map<number, [number, number]>()
   const resolving = new Set<number>()
 
-  const appearsOf = (obj: SceneObject): number => {
-    const appear = obj.actions.find((a) => a.verb === 'appear')
-    return appear ? resolveAction(appear)[0] : 0
-  }
-  const disappearsOf = (obj: SceneObject): number | null => {
-    const disappear = obj.actions.find((a) => a.verb === 'disappear')
-    return disappear ? resolveAction(disappear)[0] : null
-  }
-
   const timeOf = (ref: unknown, fallback: number, what: string): number => {
     if (ref === undefined) return fallback
     if (typeof ref === 'number') return Number.isFinite(ref) ? ref : fallback
     if (!isTimeRef(ref)) throw new Error(`${what} must be seconds or a time reference such as other.end`)
-    if (ref.action) {
-      const [start, end] = resolveAction(ref.action)
-      if (ref.kind === 'start') return start
-      if (ref.kind === 'end') return end
-      if (ref.kind === 'progress') return start + (end - start) * (ref.fraction ?? 0)
-    }
-    if (ref.object) {
-      if (ref.kind === 'appears') return appearsOf(ref.object)
-      if (ref.kind === 'disappears') return disappearsOf(ref.object) ?? fallback
-    }
-    throw new Error(`${what} is not a usable time reference`)
+    const [start, end] = resolveAction(ref.action)
+    if (ref.kind === 'start') return start
+    if (ref.kind === 'end') return end
+    return start + (end - start) * (ref.fraction ?? 0)
   }
 
   function resolveAction(action: Action): [number, number] {
@@ -238,10 +214,10 @@ export function evaluateScene(source: string): EvaluateResult {
     const previous = index > 0 ? action.object.actions[index - 1] : undefined
     const fallbackStart = previous ? resolveAction(previous)[1] : 0
     const start = timeOf(action.timing.at, fallbackStart, `${label} at`) + (action.timing.delay ?? 0)
-    let duration: number
-    if (action.verb === 'appear' || action.verb === 'disappear') duration = 0
-    else if (action.timing.until !== undefined) duration = Math.max(0, timeOf(action.timing.until, start, `${label} until`) - start)
-    else duration = Math.max(0, action.timing.duration ?? 1)
+    const duration =
+      action.timing.until !== undefined
+        ? Math.max(0, timeOf(action.timing.until, start, `${label} until`) - start)
+        : Math.max(0, action.timing.duration ?? 1)
     const result: [number, number] = [start, start + duration]
     resolved.set(action.id, result)
     resolving.delete(action.id)
@@ -252,26 +228,13 @@ export function evaluateScene(source: string): EvaluateResult {
 
   try {
     for (const action of actions) resolveAction(action)
-    for (const obj of objects) {
-      obj.appears = appearsOf(obj)
-      obj.disappears = disappearsOf(obj)
-      obj.fadeIn = Math.max(0, obj.actions.find((a) => a.verb === 'appear')?.timing.fadeIn ?? 0)
-      obj.fadeOut = Math.max(0, obj.actions.find((a) => a.verb === 'disappear')?.timing.fadeOut ?? 0)
-    }
   } catch (err) {
     return { model: null, error: { message: err instanceof Error ? err.message : String(err) } }
   }
 
-  let end = 0
-  let any = false
-  for (const action of actions) {
-    end = Math.max(end, action.end)
-    any = true
-  }
-  for (const obj of objects) if (obj.disappears !== null) end = Math.max(end, obj.disappears)
-  model.contentEnd = any ? end : null
+  let end: number | null = null
+  for (const action of actions) end = Math.max(end ?? 0, action.end)
+  model.lastActionEnd = end
 
   return { model, error: null }
 }
-
-export { isSceneObject }

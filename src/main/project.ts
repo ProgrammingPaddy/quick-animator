@@ -3,7 +3,7 @@ import { promises as fs, watch, type FSWatcher } from 'node:fs'
 import { basename, join } from 'node:path'
 import type { ProjectData, ProjectFile, ProjectSettings } from '../shared/api'
 
-const DEFAULT_SETTINGS: ProjectSettings = { width: 1920, height: 1080, fps: 30 }
+const DEFAULT_SETTINGS: ProjectSettings = { width: 1920, height: 1080, fps: 60, hold: 0 }
 
 const TEMPLATE_SCENE = `// Cast: every object, one attribute per line.
 

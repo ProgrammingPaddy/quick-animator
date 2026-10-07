@@ -102,7 +102,8 @@ watcher event. In both cases the playhead and the selection, by object name, are
 
 - One Three.js scene. 2D objects are flat meshes in draw order. The default scene camera is flat (orthographic). The 3D checkpoint animates the camera's projection blend toward perspective.
 - Coordinates: origin at the center of the camera frame, y up, units are pixels at project resolution, rotation in degrees (D21).
-- Anti-aliasing by multisampling. Text by signed distance fields. CP1 verifies 2D edge and text quality against a Canvas2D reference and keeps Canvas2D rendered to texture as the fallback for 2D content.
+- Anti-aliasing by multisampling. Text is drawn to a canvas at twice the size and shown as a texture; CP1 keeps signed distance fields in reserve if zooming shows it soft.
+- An object whose opacity is zero is not sampled, drawn, or hit (D52). Visibility costs nothing.
 - Rendering is on demand: when the playhead, the model, the selection, or the view changes. Playback renders once per display frame.
 
 ## World and camera (D40)
@@ -122,7 +123,7 @@ slow push-in, is an animation of the scene camera.
 ## Time (D41)
 
 - Time in code is seconds. The timeline shows seconds and frames and snaps to frames.
-- The timeline has no fixed length. The content end is derived from the last action or disappearance. Playback loops there, and the export range defaults to it. The time axis zooms with Ctrl and the wheel, from minutes per screen to single frames, and scrolls with Shift and the wheel. The view pages forward while playing.
+- The timeline has no fixed length. The content end is the end of the last action plus the hold from `project.json`, dragged as a marker on the ruler (D54). Playback stops or loops there, and the export range defaults to it. The wheel zooms the time axis around the cursor; Shift and the wheel scroll. Drags snap to whole seconds and to other actions when snapping is on, and place exactly when it is off (D64). The view pages forward while playing.
 - A frame is a pure function of time (R67). Expressions receive the time and read other objects' values at that time. There is no per-frame mutable state.
 - Export samples the frame times exactly. Preview samples the display clock and may skip frames.
 
@@ -173,12 +174,13 @@ changes between the two modes.
 window, loads the project, renders every frame through the same renderer, and encodes with
 ffmpeg. Progress on stdout, a non-zero exit on error, a one-page doc.
 
-## PROPOSED: the animation language, third draft
+## The animation language, fourth draft
 
 Plain JavaScript with a small API and no imports. Three rules shape it: it reads as "this
 happens, and this is how long it takes"; every GUI-editable value is a literal on its own line,
-like a CSS declaration; and names come from variables. A scene file has two parts: the cast
-declares every object, the script lists what happens in time order (D32).
+like a CSS declaration; and names come from assignment. A scene file has two parts: the cast
+declares every object, the script lists what happens in time order (D32). An object exists
+wherever its opacity is above zero, and nowhere else (D52).
 
 ```js
 // scenes/main.js
@@ -200,19 +202,19 @@ bullet = Rect({
   fill: '#ffffff',
 })
 
-title = Text({
-  text: 'Hello',
-  x: 0,
-  y: 300,
-  fontSize: 72,
-  fill: '#ffffff',
-  scale: 0,
-})
-
 tag = Text({
   text: 'whoosh',
   fontSize: 24,
   fill: '#ffcc00',
+  opacity: 0,
+})
+
+shadow = Circle({
+  x: () => smoke.x + 10,
+  y: () => smoke.y - 10,
+  radius: 40,
+  fill: '#000000',
+  opacity: 0.3,
 })
 
 arc = Path({
@@ -242,15 +244,11 @@ fly = bullet.move({
   easeIn: 0.2,
 })
 
-title.appear({
-  at: fly.end,
-  fadeIn: 0.3,
-})
-
-title.scale({
-  scale: 1,
-  duration: 0.4,
-  ease: 'bounce',
+bullet.move({
+  y: 60,
+  relative: true,
+  at: fly.start,
+  duration: 0.8,
 })
 
 ride = bullet.follow(arc, {
@@ -259,24 +257,22 @@ ride = bullet.follow(arc, {
   orient: true,
 })
 
-// Mid-animation attachment: the tag appears halfway along the ride and is tied to the bullet
-// until the ride ends.
-
-tag.appear({
+tag.fade({
+  opacity: 1,
   at: ride.progress(0.5),
-  fadeIn: 0.2,
+  duration: 0.2,
 })
 
 tag.link({
   x: () => bullet.x,
   y: () => bullet.y + 40,
-  scale: () => bullet.scale,
   until: ride.end,
 })
 
-tag.disappear({
+tag.fade({
+  opacity: 0,
   at: ride.end,
-  fadeOut: 0.2,
+  duration: 0.2,
 })
 
 bullet.morph(Circle, {
@@ -284,28 +280,25 @@ bullet.morph(Circle, {
   at: ride.end,
   duration: 0.6,
 })
-
-// Free code is allowed anywhere. What it creates is shown as code-driven.
-for (let i = 0; i < 5; i++) {
-  Circle({ x: i * 100 - 200, y: -400, radius: 8, fill: '#ff5555' })
-}
 ```
 
-Vocabulary:
+Vocabulary. Items marked "coming" are not built yet.
 
-- **Classes** (D36, D43): `Rect`, `Circle`, `Line`, `Polygon`, `Text`, `Image`, `Group`, `Path`, later `Video`, `Camera`, and the 3D shapes. Every visible object is a shape with a kind; `Circle({ ... })` makes a shape of kind circle, which is what lets one object morph into another kind.
-- **Attributes.** Common: `x`, `y`, `z`, `rotation`, `scale`, `opacity`, `anchor`, `fill`, `stroke`, `strokeWidth`. Per class: `radius`, `width`, `height`, `text`, `fontSize`, `points`, `src`, and so on. The registry lists them all with defaults.
-- **Verbs** (D37): `move` for x, y, z; `rotate`; `scale`; `resize` for width, height, radius, fontSize; `fade` for opacity; `to` for any attributes; `follow(path, { ... })`; `morph(Class, { ... })`; `link({ ... })`; `appear`; `disappear`. The timeline labels and colors clips by verb.
-- **Timing keys**, reserved in every action block: `at`, `delay`, `duration`, `until`, `easeIn`, `easeOut`, `ease`. `at` takes seconds or a time reference; omitted, it means right after the object's previous action, or 0. `until` is an end time or reference, as an alternative to `duration`.
-- **Lifetime** (D38): `appear({ at, fadeIn })` and `disappear({ at, fadeOut })`. Without them an object exists from 0 to the end. The timeline shows a lifetime bar with fade handles.
-- **Easing** (D39): `easeIn` and `easeOut` are seconds of easing at each end, default 30% of the duration each; `ease: 'linear'` removes them, and named curves such as `bounce`, `elastic`, `back`, `snap` cover what durations cannot express. Clip edges carry handles for the two durations.
-- **Time references:** `action.start`, `action.end`, `action.progress(f)`, `object.appears`, `object.disappears`, `object.startsMoving`, `object.stopsMoving`.
-- **Links** (D33): an arrow function. `() => other.attr + number` is an offset link whose number the GUI edits. In the cast a link is permanent; in the script `link({ ... })` runs from `at` to `until`.
+- **Classes** (D36, D43): `Rect`, `Circle`, `Text`; coming: `Line`, `Polygon`, `Image`, `Group`, `Path`, `Video`, `Camera`, and the 3D shapes. Every visible object is a shape with a kind, which is what lets one object morph into another kind.
+- **Attributes.** Common: `x`, `y`, `z`, `rotation`, `scale`, `opacity`, `fill`; coming: `anchor`, `stroke`, `strokeWidth`. Per class: `width`, `height`, `radius`, `text`, `fontSize`, `font`. The registry lists them all with defaults.
+- **Verbs** (D37): `move` for x, y, z; `rotate`; `scale`; `resize` for width, height, radius, fontSize; `fade` for opacity; `to` for any attributes. Coming: `follow(path, { ... })`, `morph(Class, { ... })`, `link({ ... })`. The timeline labels and colors clips by verb.
+- **Timing keys**, reserved in every action block: `at`, `delay`, `duration`, `until`, `easeIn`, `easeOut`, `ease`, `relative`. `at` takes seconds or a time reference; omitted, it means right after the object's previous action, or 0. `until` is an end time or reference, as an alternative to `duration`.
+- **Relative** (D51): `relative: true` makes the block's values changes from wherever the object is when the action starts. A relative action adds on top of whatever else is happening; an absolute one takes over from its start (D53).
+- **Visibility** (D52): opacity is the one system. An object with opacity 0 does not exist, is not drawn, not hit, and not sampled. To appear later, the cast sets `opacity: 0` and the script fades it in; the timeline shows every object's opacity as its own lane.
+- **Easing** (D39): `easeIn` and `easeOut` are seconds of easing at each end, default 30% of the duration each; `ease: 'linear'` removes them, and named curves such as `bounce`, `elastic`, `back`, `snap` cover what durations cannot express.
+- **Time references:** `action.start`, `action.end`, `action.progress(f)`. Coming: object states such as `startsMoving`.
+- **Links** (D33): an arrow function. `() => other.attr + number` is an offset link whose number the GUI edits. In the cast a link is permanent; coming: `link({ ... })` in the script runs from `at` to `until`.
 
-## PROPOSED: rules for GUI-editable code
+## Rules for GUI-editable code
 
 1. An object is a `name = Class({ ... })` at the top level of the file, one attribute per line, in the cast. `const name = ...` is accepted but not written by the app (D48). The GUI edits those literals and adds or removes attribute lines.
 2. An action is a top level `name.verb({ ... })` in the script, optionally assigned to a name so other actions can reference its timing. The GUI edits its literals, adds an `at` line when a clip is dragged, and removes the whole statement on delete.
 3. GUI-editable values are numbers, strings, arrays of numbers, and color strings. An arrow function of the form `() => other.attribute + number` is an offset link with an editable number. Any other function is code-driven.
 4. Everything else is free JavaScript. It runs, it shows, it is not GUI-editable.
 5. The GUI replaces the smallest literal span, inserts new objects at the end of the cast and new actions at the end of the script, writes one attribute per line and one point per line, and never reformats existing lines.
+6. While the file has an error, the GUI does not edit it (D63): the last good model describes older text.

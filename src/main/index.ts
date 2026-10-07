@@ -18,6 +18,9 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       sandbox: false,
+      // Keep playing and reacting while another window has focus; Chromium would otherwise
+      // slow timers and animation frames to once a second in a background window.
+      backgroundThrottling: false,
     },
   })
   mainWindow = win

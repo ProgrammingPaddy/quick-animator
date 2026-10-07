@@ -1,18 +1,20 @@
 import { useEffect, useRef } from 'react'
-import { createEditor, highlightRanges, markErrorLine } from '../code/editor'
-import type { Range } from '../model/types'
+import { createEditor, highlightRanges, markErrorLine, type HighlightSpec } from '../code/editor'
+import { OBJECT_COLOR, VERB_COLORS } from '../model/registry'
 import { commitSource } from '../project/controller'
 import { useStore } from '../state/store'
 
 /**
- * The code pane hosts the app's one editor. Selecting an object highlights its declaration and
- * all of its actions (decision D12). Errors show at their line and below the text.
+ * The code pane hosts the app's one editor. The selected object or action is tinted across its
+ * lines; everything related to it gets a left bar in the color of its kind (decision D12).
+ * Errors show at their line and below the text.
  */
 export function CodePane() {
   const hostRef = useRef<HTMLDivElement>(null)
   const error = useStore((s) => s.error)
   const project = useStore((s) => s.project)
   const selection = useStore((s) => s.selection)
+  const selectedAction = useStore((s) => s.selectedAction)
   const model = useStore((s) => s.model)
 
   useEffect(() => {
@@ -26,17 +28,24 @@ export function CodePane() {
   }, [])
 
   useEffect(() => {
-    const ranges: Range[] = []
+    const spec: HighlightSpec = { full: [], bars: [] }
     if (model) {
-      for (const name of selection) {
-        const obj = model.objects.find((o) => o.name === name)
-        if (!obj) continue
-        if (obj.decl) ranges.push(obj.decl.range)
-        for (const action of obj.actions) if (action.stmt) ranges.push(action.stmt.range)
+      if (selectedAction) {
+        const obj = model.objects.find((o) => o.name === selectedAction.object)
+        const action = obj?.actions[selectedAction.index]
+        if (action?.stmt) spec.full.push({ range: action.stmt.range, color: VERB_COLORS[action.verb] })
+        if (obj?.decl) spec.bars.push({ range: obj.decl.range, color: OBJECT_COLOR })
+      } else {
+        for (const name of selection) {
+          const obj = model.objects.find((o) => o.name === name)
+          if (!obj) continue
+          if (obj.decl) spec.full.push({ range: obj.decl.range, color: OBJECT_COLOR })
+          for (const action of obj.actions) if (action.stmt) spec.bars.push({ range: action.stmt.range, color: VERB_COLORS[action.verb] })
+        }
       }
     }
-    highlightRanges(ranges)
-  }, [selection, model])
+    highlightRanges(spec)
+  }, [selection, selectedAction, model])
 
   useEffect(() => {
     markErrorLine(error?.line ?? null)

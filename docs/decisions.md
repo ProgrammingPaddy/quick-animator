@@ -71,15 +71,20 @@ gestures could be judged by hand. Each one is still open to veto.
 - **D46. Objects are written `Circle({ ... })`, without `new`.** In JavaScript a typed object with attributes is a call with an object literal; the parentheses are the price of a real class behind each object. `new Circle({ ... })` would be equally valid and is the alternative if it reads better.
 - **D47. Dev mode** shows the resolved time of every action, the names of code-driven objects, evaluation time, and raw errors. It never changes the file.
 
-## Proposed by Claude, awaiting the owner, after the first hands-on review on 2026-10-07
+## Confirmed by the owner after the first hands-on review, 2026-10-07
 
-- **D51. Relative values.** Every action block accepts `relative: true`, meaning its attribute values are changes from wherever the object is when the action starts: `box.move({ x: 100, relative: true })` moves 100 to the right. The clip shows `+100`, and a clip toggle flips the flag. Alternatives set aside: a second set of verbs such as `moveBy`, which doubles the vocabulary, and string deltas such as `'+100'`, which hide a type change in a string.
-- **D52. One visibility system: opacity.** Remove `appear`, `disappear`, `fadeIn`, and `fadeOut`. An object exists wherever its opacity is above zero. To appear at 2 seconds with a fade, the cast sets `opacity: 0` and the script says `fade({ opacity: 1, at: 2, duration: 0.3 })`; an instant appearance is the same with `duration: 0`. The lifetime bar is derived from the opacity track and shows its level, and dragging the bar's ends creates or edits the fades. The alternative, one `show({ at, until, fadeIn, fadeOut })` block, keeps a second mechanism next to opacity.
-- **D53. Overlapping actions on the same attribute.** An absolute action takes over from its start, blending from wherever the object is at that moment. A relative action (D51) adds its change on top of whatever else is happening. Overlapping clips stack in lanes on the timeline so both stay visible.
-- **D54. A hold after the content.** `project.json` gets `hold`, in seconds, added after the last action when computing the content end, so the final state stays for export and looping. Default 0. Drawn as an end marker on the ruler that can be dragged.
-- **D55. A Help pane**, opened from a button beside the project name and with F1, showing the rules document and the shortcuts inside the app.
-- **D56. An Effects pane** under the object list, with presets that drag onto an object or a timeline row, also offered in the right-click menus. Belongs with the presets of CP3.
-- **D58. Drag snapping.** Clip drags snap to frames, which at 30 fps writes numbers like 1.333. Proposed: snap to tenths of a second by default and to frames while Alt is held, so written times stay readable.
+- **D51. Relative values.** Every action block accepts `relative: true`, meaning its attribute values are changes from wherever the object is when the action starts: `box.move({ x: 100, relative: true })` moves 100 to the right. The default is absolute. Clips and the object pane mark relative actions.
+- **D52. One visibility system: opacity.** `appear`, `disappear`, `fadeIn`, and `fadeOut` are gone. An object exists wherever its opacity is above zero. It must be performant: an object at opacity 0 is not sampled, drawn, or hit. Every timeline row shows the object's opacity as its own lane, never covered by clips, and the GUI must offer click-and-drag control of it there; the first controls are right-click to appear or disappear at a time, which write a base opacity of 0 and a fade, and the fades themselves as clips. The exact drag controls are to be tested.
+- **D53. Overlapping actions on the same attribute.** An absolute action takes over from its start, blending from wherever the object is at that moment. A relative action adds its change on top of whatever else is happening. Overlapping clips stack in lanes.
+- **D54. A hold after the content.** `project.json` has `hold`, in seconds, added after the last action when computing the content end, so the final state stays for export and looping. Default 0. Drawn as a marker on the ruler that drags.
+- **D55. A Help pane** showing the rules document and the shortcuts inside the app. Agreed; not built yet.
+- **D56. An Effects pane** under the object list, with presets that drag onto an object or a timeline row, also offered in the right-click menus. Agreed; belongs with the presets of CP3.
+- **D64. Snapping is a timeline toggle.** On, drags snap to whole seconds and to the starts and ends of other actions. Off, placement is exact to the millisecond. Frame snapping of drags is gone; the playhead still steps by frames. This replaces the earlier D58 proposal.
+- **D65. Projects default to 60 fps**, as a project setting.
+- **D66. Selecting an action** in the timeline or the object pane marks it everywhere: the clip, the row in the object pane, and its code. Clips show the action's identifier, when it has one, in a dimmer color before its kind.
+- **D67. Code marks follow the colors of the UI.** The selected thing is tinted across its lines; what relates to it gets a left bar, not a tint. An object is blue; each kind of action has its own color, the same in the timeline, the object pane, and the code.
+- **D68. The code pane borrows from VS Code where it helps:** a color swatch before every color literal that opens a picker, search, and highlighting of other occurrences of the selection.
+- **D69. Completion knows a written name.** After `box2 = `, the class expands without adding a name.
 
 ## Open
 

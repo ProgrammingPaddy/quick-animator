@@ -7,6 +7,7 @@ import { EditorState, RangeSetBuilder, StateEffect, StateField, type Extension }
 import { Decoration, EditorView, drawSelection, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from '@codemirror/view'
 import type { TextEdit } from '../model/edits'
 import type { Range } from '../model/types'
+import { colorSwatches } from './colors'
 import { sceneCompletions } from './completions'
 import { editorHighlight, editorTheme } from './theme'
 
@@ -15,25 +16,37 @@ import { editorHighlight, editorTheme } from './theme'
  * undo history, and GUI edits always have somewhere to go (decision D22).
  */
 
-const setHighlights = StateEffect.define<Range[]>()
+/** What to mark in the code: full-line tints for the thing selected, left bars for what relates to it. */
+export interface HighlightSpec {
+  full: { range: Range; color: string }[]
+  bars: { range: Range; color: string }[]
+}
+
+const setHighlights = StateEffect.define<HighlightSpec>()
 const setErrorLine = StateEffect.define<number | null>()
-const objectLine = Decoration.line({ class: 'cm-object-line' })
 const errorLine = Decoration.line({ class: 'cm-error-line' })
 
-function lineDecorations(state: EditorState, ranges: Range[], decoration: Decoration): DecorationSet {
-  const lines = new Set<number>()
-  for (const range of ranges) {
-    const from = Math.max(0, Math.min(range.from, state.doc.length))
-    const to = Math.max(from, Math.min(range.to, state.doc.length))
-    const first = state.doc.lineAt(from).number
-    const last = state.doc.lineAt(to).number
-    for (let n = first; n <= last; n++) lines.add(n)
+function linesIn(state: EditorState, range: Range): number[] {
+  const from = Math.max(0, Math.min(range.from, state.doc.length))
+  const to = Math.max(from, Math.min(range.to, state.doc.length))
+  const first = state.doc.lineAt(from).number
+  const last = state.doc.lineAt(to).number
+  const lines: number[] = []
+  for (let n = first; n <= last; n++) lines.push(n)
+  return lines
+}
+
+function highlightDecorations(state: EditorState, spec: HighlightSpec): DecorationSet {
+  const entries: { from: number; deco: Decoration }[] = []
+  for (const { range, color } of spec.full) {
+    for (const n of linesIn(state, range)) entries.push({ from: state.doc.line(n).from, deco: Decoration.line({ class: 'cm-object-line', attributes: { style: `--hl: ${color}` } }) })
   }
+  for (const { range, color } of spec.bars) {
+    for (const n of linesIn(state, range)) entries.push({ from: state.doc.line(n).from, deco: Decoration.line({ class: 'cm-bar-line', attributes: { style: `--bar: ${color}` } }) })
+  }
+  entries.sort((a, b) => a.from - b.from)
   const builder = new RangeSetBuilder<Decoration>()
-  for (const n of [...lines].sort((a, b) => a - b)) {
-    const line = state.doc.line(n)
-    builder.add(line.from, line.from, decoration)
-  }
+  for (const entry of entries) builder.add(entry.from, entry.from, entry.deco)
   return builder.finish()
 }
 
@@ -41,7 +54,7 @@ const highlightField = StateField.define<DecorationSet>({
   create: () => Decoration.none,
   update(decorations, tr) {
     let next = decorations.map(tr.changes)
-    for (const effect of tr.effects) if (effect.is(setHighlights)) next = lineDecorations(tr.state, effect.value, objectLine)
+    for (const effect of tr.effects) if (effect.is(setHighlights)) next = highlightDecorations(tr.state, effect.value)
     return next
   },
   provide: (field) => EditorView.decorations.from(field),
@@ -56,7 +69,9 @@ const errorField = StateField.define<DecorationSet>({
       if (effect.value === null || effect.value < 1 || effect.value > tr.state.doc.lines) next = Decoration.none
       else {
         const line = tr.state.doc.line(effect.value)
-        next = lineDecorations(tr.state, [{ from: line.from, to: line.from }], errorLine)
+        const builder = new RangeSetBuilder<Decoration>()
+        builder.add(line.from, line.from, errorLine)
+        next = builder.finish()
       }
     }
     return next
@@ -83,6 +98,7 @@ function extensions(): Extension[] {
     highlightSelectionMatches(),
     search({ top: true }),
     autocompletion({ override: [sceneCompletions], icons: false }),
+    colorSwatches,
     EditorView.lineWrapping,
     javascript(),
     syntaxHighlighting(editorHighlight),
@@ -156,8 +172,8 @@ export function applyEdits(edits: TextEdit[]): void {
   view.dispatch({ changes: edits.map((e) => ({ from: e.from, to: e.to, insert: e.insert })) })
 }
 
-export function highlightRanges(ranges: Range[]): void {
-  view?.dispatch({ effects: setHighlights.of(ranges) })
+export function highlightRanges(spec: HighlightSpec): void {
+  view?.dispatch({ effects: setHighlights.of(spec) })
 }
 
 export function markErrorLine(line: number | null): void {
