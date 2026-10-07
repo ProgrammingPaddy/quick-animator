@@ -45,12 +45,27 @@ dot.appear({
 
 dot.move({
   y: 0,
-  duration: 0.8,
+  duration: 0.933,
   ease: 'bounce',
+  at: 1.333,
 })
 
 title.fade({
   opacity: 0,
   at: 3,
+  duration: 1,
+})
+
+box.move({
+  x: -389,
+  y: -206,
+  at: 2.967,
+  duration: 1,
+})
+
+box.move({
+  x: 418,
+  y: -219,
+  at: 3.267,
   duration: 1,
 })

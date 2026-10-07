@@ -26,7 +26,7 @@ export function NowPane() {
 
   const visible = isVisibleAt(obj, time)
   return (
-    <div className="now">
+    <div className="now-values">
       <div className="now-head">
         <span className="name">{obj.name}</span>
         <span className="dim">{obj.className}</span>

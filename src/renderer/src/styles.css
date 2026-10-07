@@ -685,7 +685,7 @@ button.icon:hover {
 
 /* Now */
 
-.now {
+.now-values {
   position: absolute;
   inset: 0;
   overflow: auto;
@@ -707,40 +707,40 @@ button.icon:hover {
   color: var(--playhead);
 }
 
-.now table {
+.now-values table {
   width: 100%;
   border-collapse: collapse;
 }
 
-.now td {
+.now-values td {
   padding: 3px 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.03);
   white-space: nowrap;
 }
 
-.now td.k {
+.now-values td.k {
   width: 90px;
   color: var(--fg-dim);
 }
 
-.now td.v {
+.now-values td.v {
   user-select: text;
 }
 
-.now td.s {
+.now-values td.s {
   text-align: right;
   font-size: 11px;
 }
 
-.now tr.animated td.v {
+.now-values tr.animated td.v {
   color: #9ec5ff;
 }
 
-.now tr.default td {
+.now-values tr.default td {
   color: var(--fg-faint);
 }
 
-.now .swatch {
+.now-values .swatch {
   display: inline-block;
   width: 10px;
   height: 10px;

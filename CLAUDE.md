@@ -24,6 +24,21 @@ A low-friction, code-based motion graphics tool for video. Read these before cha
 - `npm run typecheck` type-checks main, preload, and renderer.
 - `npm run build` builds to `out/`.
 
+## Verifying in the real window
+
+Always check changes in the Electron window, not only in a browser; CSS and file access differ.
+Start the app with a debugging port, then screenshot it or evaluate JavaScript in its page:
+
+```
+npx electron-vite dev -- --remote-debugging-port=9222
+node scripts/inspect.mjs shot out.png
+node scripts/inspect.mjs eval "window.__quickAnimator.useStore.getState().selection"
+node scripts/inspect.mjs eval "window.__quickAnimator.openProject('C:/path/to/examples/first')"
+```
+
+Use forward slashes in paths passed through the shell. In development the page exposes
+`window.__quickAnimator` with `useStore` and `openProject`.
+
 ## Layout
 
 - `src/main`: Electron main process. `src/preload`: the typed bridge. `src/shared`: types used on both sides.
