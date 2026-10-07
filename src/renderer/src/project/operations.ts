@@ -3,7 +3,7 @@ import { easingFor } from '../model/easing'
 import { appendStatement, blockText, insertDeclaration, removeStatements, setProp, type TextEdit } from '../model/edits'
 import type { AttrValue } from '../model/registry'
 import { definingAction, valueAt } from '../model/sample'
-import type { Range, SceneObject } from '../model/types'
+import type { Range, SceneModel, SceneObject } from '../model/types'
 import { useStore, type Tool } from '../state/store'
 import { snapToFrame } from '../state/time'
 
@@ -12,9 +12,19 @@ import { snapToFrame } from '../state/time'
  * edit goes through the editor, which re-evaluates the model and records the undo step.
  */
 
-function state() {
+/**
+ * The current text and the model that describes it. While the text has an error, the last good
+ * model describes older text, so its positions cannot be trusted and GUI edits are refused.
+ */
+function state(): { source: string; model: SceneModel | null; fps: number; time: number } {
   const s = useStore.getState()
-  return { source: s.source, model: s.model, fps: s.settings.fps, time: s.time }
+  const model = s.model && s.model.source === s.source ? s.model : null
+  return { source: s.source, model, fps: s.settings.fps, time: s.time }
+}
+
+/** True when the preview and timeline may edit the code right now. */
+export function canEdit(): boolean {
+  return state().model !== null
 }
 
 function findObject(name: string): SceneObject | null {
@@ -139,8 +149,22 @@ export function deleteObjects(names: string[]): void {
   useStore.getState().select([])
 }
 
+/** Remove one action. */
+export function deleteAction(name: string, index: number): void {
+  const { source } = state()
+  const action = findObject(name)?.actions[index]
+  if (!action?.stmt) return
+  applyEdits(removeStatements(source, [action.stmt.range]))
+}
+
 /** Scroll the code pane to an object's declaration. */
 export function jumpToObject(name: string): void {
-  const obj = findObject(name)
+  const obj = useStore.getState().model?.objects.find((o) => o.name === name)
   if (obj?.decl) scrollToPos(obj.decl.range.from)
+}
+
+/** Scroll the code pane to an action's block. */
+export function jumpToAction(name: string, index: number): void {
+  const action = useStore.getState().model?.objects.find((o) => o.name === name)?.actions[index]
+  if (action?.stmt) scrollToPos(action.stmt.range.from)
 }

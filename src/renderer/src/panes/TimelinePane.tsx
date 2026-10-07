@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { showMenu } from '../components/ContextMenu'
 import { VERB_COLORS } from '../model/registry'
 import type { Action, SceneObject } from '../model/types'
-import { jumpToObject, setActionTiming } from '../project/operations'
+import { canEdit, deleteAction, deleteObjects, jumpToAction, jumpToObject, setActionTiming } from '../project/operations'
 import { useStore } from '../state/store'
 import { formatTime, snapToFrame, timecode } from '../state/time'
 
@@ -16,6 +17,8 @@ const SECOND_STEPS = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600]
 const TICK_SPACING = 80
 /** Width of the row header column, in pixels. Keep in step with styles.css. */
 const HEADER_W = 180
+/** Height of one lane of clips in a row. Overlapping clips stack in lanes. */
+const LANE_H = 22
 
 interface View {
   /** Pixels per second. */
@@ -43,22 +46,47 @@ function clipLabel(action: Action): string {
   return action.verb
 }
 
+function isClip(action: Action): boolean {
+  return action.verb !== 'appear' && action.verb !== 'disappear'
+}
+
+/** Overlapping clips go in separate lanes so each stays visible and grabbable. */
+function assignLanes(actions: Action[]): { lanes: Map<number, number>; count: number } {
+  const sorted = actions.filter(isClip).sort((a, b) => a.start - b.start || a.id - b.id)
+  const laneEnds: number[] = []
+  const lanes = new Map<number, number>()
+  for (const action of sorted) {
+    let lane = laneEnds.findIndex((end) => end <= action.start)
+    if (lane < 0) {
+      lane = laneEnds.length
+      laneEnds.push(0)
+    }
+    laneEnds[lane] = Math.max(action.end, action.start + 1e-6)
+    lanes.set(action.id, lane)
+  }
+  return { lanes, count: Math.max(1, laneEnds.length) }
+}
+
 type ClipMode = 'move' | 'start' | 'end'
 
 /**
  * Transport, ruler, and a row per object with its lifetime and clips, over an open-ended time
- * axis. The wheel zooms around the cursor; Shift and the wheel scroll time; Alt and the wheel
- * scroll the rows. Clips drag by the body to move and by the edges to resize.
+ * axis. Over the tracks the wheel zooms around the cursor, Shift and the wheel scroll time, Alt
+ * and the wheel scroll the rows; over the row headers the wheel scrolls the rows. Clips drag by
+ * the body to move and by the edges to resize; right-click for more.
  */
 export function TimelinePane() {
   const time = useStore((s) => s.time)
   const playing = useStore((s) => s.playing)
+  const loop = useStore((s) => s.loop)
   const fps = useStore((s) => s.settings.fps)
   const contentEnd = useStore((s) => s.contentEnd)
   const model = useStore((s) => s.model)
+  const source = useStore((s) => s.source)
   const selection = useStore((s) => s.selection)
   const select = useStore((s) => s.select)
   const togglePlaying = useStore((s) => s.togglePlaying)
+  const toggleLoop = useStore((s) => s.toggleLoop)
   const setPlaying = useStore((s) => s.setPlaying)
   const setTime = useStore((s) => s.setTime)
   const gridRef = useRef<HTMLDivElement>(null)
@@ -73,6 +101,8 @@ export function TimelinePane() {
     viewRef.current = next
     setViewState(next)
   }
+  const editable = canEdit()
+  void source
 
   useEffect(() => {
     const ruler = rulerRef.current
@@ -89,7 +119,8 @@ export function TimelinePane() {
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
       const v = viewRef.current
-      if (e.altKey) {
+      const overHeaders = e.clientX < grid.getBoundingClientRect().left + HEADER_W
+      if (overHeaders || e.altKey) {
         if (bodyRef.current) bodyRef.current.scrollTop += e.deltaY
       } else if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
         const delta = (Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY) / v.pps
@@ -151,7 +182,7 @@ export function TimelinePane() {
     e.stopPropagation()
     select([obj.name])
     const action = obj.actions[index]
-    if (!action?.stmt) return
+    if (!action?.stmt || !canEdit()) return
     const atProp = action.stmt.props.find((p) => p.key === 'at')
     const untilProp = action.stmt.props.find((p) => p.key === 'until')
     if (atProp && atProp.kind !== 'literal' && mode !== 'end') return
@@ -171,6 +202,24 @@ export function TimelinePane() {
         setActionTiming(obj.name, index, { at: start - origin.delay, duration: origin.end - start })
       }
     })
+  }
+
+  const objectMenu = (obj: SceneObject) => (e: React.MouseEvent) => {
+    e.stopPropagation()
+    select([obj.name])
+    showMenu(e, [
+      { label: 'Jump to code', run: () => jumpToObject(obj.name) },
+      { label: 'Delete object', run: () => deleteObjects([obj.name]), danger: true },
+    ])
+  }
+
+  const clipMenu = (obj: SceneObject, index: number) => (e: React.MouseEvent) => {
+    e.stopPropagation()
+    select([obj.name])
+    showMenu(e, [
+      { label: 'Jump to code', run: () => jumpToAction(obj.name, index) },
+      { label: 'Delete action', run: () => deleteAction(obj.name, index), danger: true },
+    ])
   }
 
   const step = tickStep(view.pps, fps)
@@ -221,9 +270,22 @@ export function TimelinePane() {
         >
           {'⏭'}
         </button>
+        <button
+          className={`transport-button${loop ? ' on' : ''}`}
+          onClick={(e) => {
+            toggleLoop()
+            e.currentTarget.blur()
+          }}
+          title={loop ? 'Looping at the end. Click to stop at the end instead.' : 'Stopping at the end. Click to loop.'}
+          aria-label="Loop"
+          aria-pressed={loop}
+        >
+          {'↻'}
+        </button>
         <span className="time mono">{formatTime(time, fps)}</span>
         <span className="dim">
           {fps} fps{contentEnd !== null ? `, ends at ${timecode(contentEnd, fps)}` : ''}
+          {!editable ? ', code has an error' : ''}
         </span>
       </div>
       <div className="tl-grid" ref={gridRef}>
@@ -241,11 +303,19 @@ export function TimelinePane() {
             {objects.length === 0 && <div className="empty">No objects yet.</div>}
             {objects.map((obj) => {
               const selected = selection.includes(obj.name)
+              const { lanes, count } = assignLanes(obj.actions)
+              const rowHeight = 6 + count * LANE_H
               const lifeFrom = xAt(obj.appears)
               const lifeTo = obj.disappears === null ? Math.max(lifeFrom, width) : xAt(obj.disappears)
               return (
-                <div key={obj.name} className={`tl-row${selected ? ' selected' : ''}`}>
-                  <div className="tl-row-header" onClick={() => select([obj.name])} onDoubleClick={() => jumpToObject(obj.name)} title="Double-click to jump to the code">
+                <div key={obj.name} className={`tl-row${selected ? ' selected' : ''}`} style={{ height: rowHeight }}>
+                  <div
+                    className="tl-row-header"
+                    onClick={() => select([obj.name])}
+                    onDoubleClick={() => jumpToObject(obj.name)}
+                    onContextMenu={objectMenu(obj)}
+                    title="Double-click to jump to the code, right-click for more"
+                  >
                     <span className="name">{obj.name}</span>
                     <span className="dim">{obj.className}</span>
                     {obj.codeDriven && <span className="badge">code</span>}
@@ -259,16 +329,18 @@ export function TimelinePane() {
                       {obj.fadeOut > 0 && <div className="fade out" style={{ width: obj.fadeOut * view.pps }} />}
                     </div>
                     {obj.actions.map((action, index) => {
-                      if (action.verb === 'appear' || action.verb === 'disappear') return null
-                      const locked = action.codeDriven || !action.stmt
+                      if (!isClip(action)) return null
+                      const locked = action.codeDriven || !action.stmt || !editable
                       const left = xAt(action.start)
                       const clipWidth = Math.max(8, (action.end - action.start) * view.pps)
+                      const top = 4 + (lanes.get(action.id) ?? 0) * LANE_H
                       return (
                         <div
                           key={action.id}
                           className={`clip${locked ? ' locked' : ''}`}
-                          style={{ left, width: clipWidth, background: VERB_COLORS[action.verb] }}
+                          style={{ left, top, width: clipWidth, background: VERB_COLORS[action.verb] }}
                           onPointerDown={locked ? undefined : beginClipDrag(obj, index, 'move')}
+                          onContextMenu={action.stmt ? clipMenu(obj, index) : undefined}
                           title={`${action.name ? `${action.name} = ` : ''}${obj.name}.${action.verb}  ${timecode(action.start, fps)} to ${timecode(action.end, fps)}`}
                         >
                           {!locked && <div className="clip-edge left" onPointerDown={beginClipDrag(obj, index, 'start')} />}

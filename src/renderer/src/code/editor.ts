@@ -1,11 +1,14 @@
+import { acceptCompletion, autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete'
+import { defaultKeymap, history, historyKeymap, indentLess, indentSelection, redo, undo } from '@codemirror/commands'
+import { javascript } from '@codemirror/lang-javascript'
+import { bracketMatching, foldGutter, foldKeymap, indentOnInput, indentUnit, syntaxHighlighting } from '@codemirror/language'
+import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import { EditorState, RangeSetBuilder, StateEffect, StateField, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, drawSelection, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from '@codemirror/view'
-import { defaultKeymap, history, historyKeymap, indentWithTab, redo, undo } from '@codemirror/commands'
-import { bracketMatching, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting } from '@codemirror/language'
-import { javascript } from '@codemirror/lang-javascript'
-import { editorHighlight, editorTheme } from './theme'
 import type { TextEdit } from '../model/edits'
 import type { Range } from '../model/types'
+import { sceneCompletions } from './completions'
+import { editorHighlight, editorTheme } from './theme'
 
 /**
  * One editor for the whole app. It outlives the code pane, so collapsing the pane keeps the
@@ -72,16 +75,32 @@ function extensions(): Extension[] {
     foldGutter(),
     drawSelection(),
     history(),
+    indentUnit.of('  '),
     indentOnInput(),
     bracketMatching(),
+    closeBrackets(),
     highlightActiveLine(),
+    highlightSelectionMatches(),
+    search({ top: true }),
+    autocompletion({ override: [sceneCompletions], icons: false }),
     EditorView.lineWrapping,
     javascript(),
     syntaxHighlighting(editorHighlight),
     editorTheme,
     highlightField,
     errorField,
-    keymap.of([...defaultKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
+    keymap.of([
+      // Tab accepts a completion when one is open, otherwise indents the line to where it belongs.
+      { key: 'Tab', run: acceptCompletion },
+      { key: 'Tab', run: indentSelection },
+      { key: 'Shift-Tab', run: indentLess },
+      ...closeBracketsKeymap,
+      ...completionKeymap,
+      ...searchKeymap,
+      ...defaultKeymap,
+      ...historyKeymap,
+      ...foldKeymap,
+    ]),
     EditorView.updateListener.of((update) => {
       if (update.docChanged && !suppress) onChange?.(update.state.doc.toString())
     }),
@@ -110,14 +129,22 @@ export function resetEditorDoc(text: string): void {
   }
 }
 
-/** Replace the text to match an outside edit. Recorded in history so it can be undone. */
+/**
+ * Make the text match an outside edit, changing only the span that differs so the cursor and
+ * the scroll position stay where they are. Recorded in history so it can be undone.
+ */
 export function setEditorDoc(text: string): void {
   if (!view) return
   const current = view.state.doc.toString()
   if (current === text) return
+  const max = Math.min(current.length, text.length)
+  let prefix = 0
+  while (prefix < max && current.charCodeAt(prefix) === text.charCodeAt(prefix)) prefix++
+  let suffix = 0
+  while (suffix < max - prefix && current.charCodeAt(current.length - 1 - suffix) === text.charCodeAt(text.length - 1 - suffix)) suffix++
   suppress = true
   try {
-    view.dispatch({ changes: { from: 0, to: current.length, insert: text } })
+    view.dispatch({ changes: { from: prefix, to: current.length - suffix, insert: text.slice(prefix, text.length - suffix) } })
   } finally {
     suppress = false
   }

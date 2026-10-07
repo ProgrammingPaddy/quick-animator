@@ -1,5 +1,5 @@
-import { EditorView } from '@codemirror/view'
 import { HighlightStyle } from '@codemirror/language'
+import { EditorView } from '@codemirror/view'
 import { tags as t } from '@lezer/highlight'
 
 /** Editor chrome, matched to the app palette in styles.css. */
@@ -15,6 +15,29 @@ export const editorTheme = EditorView.theme(
     '.cm-cursor': { borderLeftColor: 'var(--fg)' },
     '.cm-matchingBracket': { backgroundColor: 'rgba(59, 130, 246, 0.25)', outline: 'none' },
     '.cm-foldGutter .cm-gutterElement': { color: 'var(--fg-faint)' },
+    '.cm-selectionMatch': { backgroundColor: 'rgba(255, 255, 255, 0.12)' },
+    '.cm-searchMatch': { backgroundColor: 'rgba(245, 158, 11, 0.35)' },
+    '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'rgba(245, 158, 11, 0.7)' },
+    '.cm-snippetField': { backgroundColor: 'rgba(59, 130, 246, 0.2)' },
+    '.cm-panels': { backgroundColor: 'var(--bg-header)', color: 'var(--fg)', borderBottom: '1px solid var(--border)' },
+    '.cm-panel.cm-search': { padding: '6px 10px', fontFamily: 'var(--font-ui)', fontSize: '12px' },
+    '.cm-panel.cm-search input, .cm-panel.cm-search button': {
+      background: 'var(--bg-raised)',
+      color: 'var(--fg)',
+      border: '1px solid var(--border)',
+      borderRadius: '4px',
+      font: 'inherit',
+      padding: '2px 6px',
+      margin: '0 2px',
+    },
+    '.cm-panel.cm-search label': { color: 'var(--fg-dim)', marginLeft: '6px' },
+    '.cm-tooltip': { backgroundColor: 'var(--bg-raised)', color: 'var(--fg)', border: '1px solid var(--border)', borderRadius: '6px', fontFamily: 'var(--font-ui)', fontSize: '12px' },
+    '.cm-tooltip.cm-tooltip-autocomplete > ul': { fontFamily: 'var(--font-mono)', fontSize: '12px', maxHeight: '240px' },
+    '.cm-tooltip.cm-tooltip-autocomplete > ul > li': { padding: '3px 10px', lineHeight: '1.5' },
+    '.cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]': { backgroundColor: 'var(--accent)', color: '#ffffff' },
+    '.cm-completionDetail': { color: 'var(--fg-dim)', fontStyle: 'normal', marginLeft: '10px' },
+    '.cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] .cm-completionDetail': { color: 'rgba(255,255,255,0.75)' },
+    '.cm-completionInfo': { padding: '6px 10px', maxWidth: '320px', fontFamily: 'var(--font-ui)' },
   },
   { dark: true },
 )

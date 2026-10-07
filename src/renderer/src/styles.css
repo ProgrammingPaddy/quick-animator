@@ -247,7 +247,12 @@ button.icon:hover {
   overflow: auto;
 }
 
-.object-list li {
+.object-list li.object {
+  display: block;
+}
+
+.object-row,
+.action-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -256,11 +261,12 @@ button.icon:hover {
   cursor: default;
 }
 
-.object-list li:hover {
+.object-row:hover,
+.action-row:hover {
   background: rgba(255, 255, 255, 0.03);
 }
 
-.object-list li.selected {
+.object-list li.selected .object-row {
   background: var(--accent-soft);
 }
 
@@ -276,6 +282,29 @@ button.icon:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.action-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.action-row {
+  height: 22px;
+  padding-left: 22px;
+  font-size: 12px;
+}
+
+.action-row .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.action-row .mono {
+  font-size: 11px;
 }
 
 /* Preview */
@@ -432,6 +461,10 @@ button.icon:hover {
   color: var(--fg);
 }
 
+.transport-button.on {
+  color: var(--accent);
+}
+
 .transport .time {
   margin-left: 8px;
   margin-right: 8px;
@@ -489,7 +522,7 @@ button.icon:hover {
 .tl-row {
   display: grid;
   grid-template-columns: var(--tl-header-w) minmax(0, 1fr);
-  height: var(--tl-row-h);
+  min-height: var(--tl-row-h);
   border-bottom: 1px solid var(--border);
 }
 
@@ -748,4 +781,40 @@ button.icon:hover {
   border-radius: 2px;
   vertical-align: -1px;
   border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+/* Context menu */
+
+.context-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 170px;
+  padding: 4px;
+  border-radius: 6px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.context-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 4px;
+  text-align: left;
+  font-size: 12px;
+}
+
+.context-menu button:hover {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.context-menu button.danger {
+  color: #f5a5a5;
+}
+
+.context-menu button.danger:hover {
+  background: var(--error);
+  color: #ffffff;
 }

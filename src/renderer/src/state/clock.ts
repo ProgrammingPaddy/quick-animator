@@ -2,8 +2,8 @@ import { useEffect } from 'react'
 import { useStore } from './store'
 
 /**
- * Advances the playhead while playing, once per display frame. Loops at the content end when
- * one is known, otherwise runs on. Mount once, at the top of the app.
+ * Advances the playhead while playing, once per display frame. At the content end it wraps when
+ * looping is on, otherwise it stops there. Mount once, at the top of the app.
  */
 export function useClock(): void {
   const playing = useStore((s) => s.playing)
@@ -18,9 +18,15 @@ export function useClock(): void {
       // performance.now() taken when the effect ran, which would move the playhead backwards.
       if (last !== null) {
         const dt = Math.max(0, now - last) / 1000
-        const { time, contentEnd } = useStore.getState()
+        const { time, contentEnd, loop } = useStore.getState()
         let next = time + dt
-        if (contentEnd !== null && contentEnd > 0 && next >= contentEnd) next %= contentEnd
+        if (contentEnd !== null && contentEnd > 0 && next >= contentEnd) {
+          if (loop) next %= contentEnd
+          else {
+            useStore.setState({ time: contentEnd, playing: false })
+            return
+          }
+        }
         useStore.setState({ time: Math.max(0, next) })
       }
       last = now

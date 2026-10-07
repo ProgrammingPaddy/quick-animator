@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { showMenu } from '../components/ContextMenu'
 import { valueAt } from '../model/sample'
 import { newProject, pickProject } from '../project/controller'
-import { addObject, beginMove, setLastActionTarget, setPositionAt } from '../project/operations'
+import { addObject, beginMove, deleteObjects, jumpToObject, setLastActionTarget, setPositionAt } from '../project/operations'
 import { SceneRenderer } from '../preview/SceneRenderer'
 import { Viewport } from '../preview/Viewport'
 import { useStore, type Tool } from '../state/store'
@@ -24,6 +25,7 @@ interface Drag {
  * The world view. The wheel zooms around the cursor, Shift and the wheel pan sideways, Alt and
  * the wheel pan up and down, the middle button drags the view. Click selects, drag moves,
  * Shift-drag makes a timed move (decision D27). A tool button then a click places an object.
+ * Right-click adds objects or acts on the one under the cursor.
  */
 export function PreviewPane() {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -86,6 +88,19 @@ export function PreviewPane() {
     viewportRef.current?.setComposition(settings.width, settings.height)
   }, [settings.width, settings.height])
 
+  /** World position and the object under a pointer position in the pane. */
+  const locate = (host: HTMLDivElement, clientX: number, clientY: number) => {
+    const viewport = viewportRef.current
+    const renderer = rendererRef.current
+    if (!viewport || !renderer) return null
+    const bounds = host.getBoundingClientRect()
+    // A pane that has never been painted (hidden since load) has not reported its size yet.
+    if (!viewport.sized) viewport.resize(bounds.width, bounds.height, window.devicePixelRatio)
+    const paneX = clientX - bounds.left
+    const paneY = clientY - bounds.top
+    return { viewport, world: viewport.toWorld(paneX, paneY), hit: renderer.pick(viewport.camera, viewport.toNdc(paneX, paneY)) }
+  }
+
   const capture = (el: HTMLElement, pointerId: number, onMove: (ev: PointerEvent) => void, onEnd: () => void) => {
     try {
       el.setPointerCapture(pointerId)
@@ -106,8 +121,7 @@ export function PreviewPane() {
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     const host = e.currentTarget
     const viewport = viewportRef.current
-    const renderer = rendererRef.current
-    if (!viewport || !renderer) return
+    if (!viewport) return
 
     if (e.button === 1) {
       e.preventDefault()
@@ -126,21 +140,17 @@ export function PreviewPane() {
     }
     if (e.button !== 0) return
 
-    const bounds = host.getBoundingClientRect()
-    // A pane that has never been painted (hidden since load) has not reported its size yet.
-    if (!viewport.sized) viewport.resize(bounds.width, bounds.height, window.devicePixelRatio)
-    const paneX = e.clientX - bounds.left
-    const paneY = e.clientY - bounds.top
-    const world = viewport.toWorld(paneX, paneY)
+    const located = locate(host, e.clientX, e.clientY)
+    if (!located) return
     const store = useStore.getState()
 
     if (store.tool !== 'select') {
-      addObject(store.tool, world.x, world.y)
+      addObject(store.tool, located.world.x, located.world.y)
       store.setTool('select')
       return
     }
 
-    const hit = renderer.pick(viewport.camera, viewport.toNdc(paneX, paneY))
+    const hit = located.hit
     if (!hit) {
       store.select([])
       return
@@ -184,13 +194,34 @@ export function PreviewPane() {
     )
   }
 
+  const onContextMenu = (e: ReactMouseEvent<HTMLDivElement>) => {
+    const located = locate(e.currentTarget, e.clientX, e.clientY)
+    if (!located) {
+      e.preventDefault()
+      return
+    }
+    const { world, hit } = located
+    if (hit) {
+      useStore.getState().select([hit])
+      showMenu(e, [
+        { label: 'Jump to code', run: () => jumpToObject(hit) },
+        { label: 'Delete object', run: () => deleteObjects([hit]), danger: true },
+      ])
+    } else {
+      showMenu(
+        e,
+        TOOLS.map((t) => ({ label: `Add ${t} here`, run: () => addObject(t, world.x, world.y) })),
+      )
+    }
+  }
+
   return (
     <div
       className={`preview${tool !== 'select' ? ' placing' : ''}`}
       ref={hostRef}
       onPointerDown={onPointerDown}
       onAuxClick={(e) => e.preventDefault()}
-      onContextMenu={(e) => e.preventDefault()}
+      onContextMenu={onContextMenu}
     >
       <canvas ref={canvasRef} />
       <div className="preview-toolbar">

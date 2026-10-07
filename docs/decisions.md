@@ -31,7 +31,12 @@ Every functional decision, who made it, and its status.
 - **D41. The timeline has no fixed length.** The content end is derived from the scene. The time axis zooms and scrolls freely. (2026-10-07)
 - **D42. The Now pane.** A fifth pane, below the code pane, shows every attribute of the selection as a literal value at the playhead. (2026-10-07)
 - **D48. Objects are named by plain assignment**, `smoke = Circle({ ... })`. `const` is accepted but never written by the app, because it is noise to a non-developer. (2026-10-07)
-- **D50. The wheel zooms, at the cursor, in both the preview and the timeline.** Shift and the wheel pan or scroll sideways; Alt and the wheel pan the preview vertically or scroll the timeline rows; the middle button drags the preview. The timeline opens at one second per tick and has return-to-start and jump-to-end buttons, also on Home and End. (2026-10-07)
+- **D50. The wheel zooms, at the cursor, in both the preview and the timeline.** Shift and the wheel pan or scroll sideways; Alt and the wheel pan the preview vertically or scroll the timeline rows; the middle button drags the preview. Over the timeline's row headers the wheel scrolls the rows. The timeline opens at one second per tick and has return-to-start and jump-to-end buttons, also on Home and End. (2026-10-07)
+- **D59. Looping is a toggle in the transport, off by default.** Playback stops at the content end; playing from the end starts over. (2026-10-07)
+- **D60. The values pane is called Selected**, not Now. (2026-10-07)
+- **D61. The object pane lists each object's actions under it.** Standalone items such as paths will list on their own when they exist. (2026-10-07)
+- **D62. Right-click menus** on objects, clips, and empty preview space, starting with jump to code, delete, and add here. (2026-10-07)
+- **D63. GUI edits are refused while the code has an error**, because the last good model describes older text and its positions cannot be trusted. The error bar says so. (2026-10-07)
 
 ## Proposed by Claude and accepted by the owner, 2026-10-06
 
@@ -65,6 +70,16 @@ gestures could be judged by hand. Each one is still open to veto.
 - **D45. The Now pane is display only until keyframes exist (CP3).** Editing a value there then changes the base value when no action covers the playhead, and inserts or adjusts a keyframe otherwise.
 - **D46. Objects are written `Circle({ ... })`, without `new`.** In JavaScript a typed object with attributes is a call with an object literal; the parentheses are the price of a real class behind each object. `new Circle({ ... })` would be equally valid and is the alternative if it reads better.
 - **D47. Dev mode** shows the resolved time of every action, the names of code-driven objects, evaluation time, and raw errors. It never changes the file.
+
+## Proposed by Claude, awaiting the owner, after the first hands-on review on 2026-10-07
+
+- **D51. Relative values.** Every action block accepts `relative: true`, meaning its attribute values are changes from wherever the object is when the action starts: `box.move({ x: 100, relative: true })` moves 100 to the right. The clip shows `+100`, and a clip toggle flips the flag. Alternatives set aside: a second set of verbs such as `moveBy`, which doubles the vocabulary, and string deltas such as `'+100'`, which hide a type change in a string.
+- **D52. One visibility system: opacity.** Remove `appear`, `disappear`, `fadeIn`, and `fadeOut`. An object exists wherever its opacity is above zero. To appear at 2 seconds with a fade, the cast sets `opacity: 0` and the script says `fade({ opacity: 1, at: 2, duration: 0.3 })`; an instant appearance is the same with `duration: 0`. The lifetime bar is derived from the opacity track and shows its level, and dragging the bar's ends creates or edits the fades. The alternative, one `show({ at, until, fadeIn, fadeOut })` block, keeps a second mechanism next to opacity.
+- **D53. Overlapping actions on the same attribute.** An absolute action takes over from its start, blending from wherever the object is at that moment. A relative action (D51) adds its change on top of whatever else is happening. Overlapping clips stack in lanes on the timeline so both stay visible.
+- **D54. A hold after the content.** `project.json` gets `hold`, in seconds, added after the last action when computing the content end, so the final state stays for export and looping. Default 0. Drawn as an end marker on the ruler that can be dragged.
+- **D55. A Help pane**, opened from a button beside the project name and with F1, showing the rules document and the shortcuts inside the app.
+- **D56. An Effects pane** under the object list, with presets that drag onto an object or a timeline row, also offered in the right-click menus. Belongs with the presets of CP3.
+- **D58. Drag snapping.** Clip drags snap to frames, which at 30 fps writes numbers like 1.333. Proposed: snap to tenths of a second by default and to frames while Alt is held, so written times stay readable.
 
 ## Open
 

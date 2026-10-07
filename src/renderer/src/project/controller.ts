@@ -8,6 +8,8 @@ import { SAMPLE_SCENE } from './sample'
 export type SourceOrigin = 'editor' | 'external' | 'load'
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+/** The text of our most recent write, so the watcher's echo of it is not mistaken for an outside edit. */
+let lastWritten: string | null = null
 let unsubscribeWatch: (() => void) | null = null
 
 /**
@@ -22,23 +24,37 @@ export function commitSource(source: string, origin: SourceOrigin): void {
     error,
     contentEnd: model ? model.contentEnd : s.contentEnd,
   }))
-  if (origin === 'load') resetEditorDoc(source)
-  else if (origin === 'external') setEditorDoc(source)
-  else scheduleSave(source)
+  if (origin === 'load') {
+    cancelSave()
+    resetEditorDoc(source)
+  } else if (origin === 'external') {
+    // The file on disk is now the truth; a pending save would overwrite it with stale text.
+    cancelSave()
+    setEditorDoc(source)
+  } else {
+    scheduleSave(source)
+  }
+}
+
+function cancelSave(): void {
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = null
 }
 
 function scheduleSave(source: string): void {
   const project = useStore.getState().project
   if (!project || project.inMemory || !window.api) return
-  if (saveTimer) clearTimeout(saveTimer)
+  cancelSave()
   saveTimer = setTimeout(() => {
     saveTimer = null
+    lastWritten = source
     void window.api?.project.write(project.path, project.sceneFile, source)
   }, 200)
 }
 
 export function applyProject(data: ProjectData): void {
   const scene = data.scenes[0]
+  lastWritten = null
   useStore.setState({
     settings: data.settings,
     project: { path: data.path, name: data.name, sceneFile: scene?.file ?? 'scenes/main.js', inMemory: false },
@@ -46,6 +62,7 @@ export function applyProject(data: ProjectData): void {
     time: 0,
     playing: false,
     tool: 'select',
+    contextMenu: null,
   })
   commitSource(scene?.source ?? '', 'load')
 }
@@ -80,7 +97,9 @@ export function initProject(): void {
   unsubscribeWatch = window.api.project.onChanged((change: FileChange) => {
     const { project, source } = useStore.getState()
     if (!project || change.path !== project.path || change.file !== project.sceneFile) return
-    if (change.source !== source) commitSource(change.source, 'external')
+    // Our own save echoes back through the watcher; only a genuinely different file counts.
+    if (change.source === source || change.source === lastWritten) return
+    commitSource(change.source, 'external')
   })
   if (!useStore.getState().project) {
     void window.api.project.last().then((last) => {

@@ -23,6 +23,23 @@ title = Text({
   fill: '#ffffff',
 })
 
+box2 = Rect({
+  x: -677,
+  y: 174,
+  fill: '',
+})
+
+art = Rect({
+  x: -210,
+  y: -250,
+  z: 0,
+  rotation: 0,
+  scale: 1,
+  opacity: 1,
+  fill: '#ffffff',
+  width: 200,
+  height: 120,
+})
 // Script: what happens, in time order. Without \`at\`, an action starts when the object's
 // previous action ends.
 

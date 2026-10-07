@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { editorRedo, editorUndo } from './code/editor'
+import { ContextMenuLayer } from './components/ContextMenu'
 import { Layout } from './Layout'
 import { initProject } from './project/controller'
 import { deleteObjects } from './project/operations'
@@ -21,8 +22,13 @@ export function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const store = useStore.getState()
+      if (e.code === 'Escape' && store.contextMenu) {
+        store.closeMenu()
+        return
+      }
       if (isTypingTarget(e.target)) return
-      const { togglePlaying, stepFrames, setTime, setPlaying, contentEnd, time, selection, select, tool, setTool } = useStore.getState()
+      const { togglePlaying, stepFrames, setTime, setPlaying, contentEnd, time, selection, select, tool, setTool } = store
       const ctrl = e.ctrlKey || e.metaKey
       if (ctrl && (e.code === 'KeyZ' || e.code === 'KeyY')) {
         e.preventDefault()
@@ -78,5 +84,10 @@ export function App() {
     }
   }, [])
 
-  return <Layout />
+  return (
+    <>
+      <Layout />
+      <ContextMenuLayer />
+    </>
+  )
 }

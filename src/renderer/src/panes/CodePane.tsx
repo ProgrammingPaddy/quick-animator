@@ -49,6 +49,7 @@ export function CodePane() {
         <div className="code-error" role="alert">
           {error.line ? `Line ${error.line}: ` : ''}
           {error.message}
+          <span className="dim"> Fix it to edit from the preview and timeline.</span>
         </div>
       )}
       {!project && <div className="code-empty dim">Open a project to edit its scene.</div>}

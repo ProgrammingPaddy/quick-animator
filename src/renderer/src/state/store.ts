@@ -20,12 +20,26 @@ export interface ProjectInfo {
   inMemory: boolean
 }
 
+export interface MenuItem {
+  label: string
+  run: () => void
+  danger?: boolean
+}
+
+export interface ContextMenuState {
+  x: number
+  y: number
+  items: MenuItem[]
+}
+
 interface State {
   settings: ProjectSettings
   /** Playhead position in seconds. Never negative, not limited at the top. */
   time: number
   playing: boolean
-  /** Where the content ends, or null while nothing animates. Playback loops there. */
+  /** Whether playback wraps at the content end. Off by default: it stops there. */
+  loop: boolean
+  /** Where the content ends, or null while nothing animates. */
   contentEnd: number | null
   /** Names of the selected objects. Shared by every pane. */
   selection: string[]
@@ -36,14 +50,19 @@ interface State {
   model: SceneModel | null
   error: SceneError | null
   tool: Tool
+  contextMenu: ContextMenuState | null
 
   setTime: (time: number) => void
   setPlaying: (playing: boolean) => void
+  /** Play or pause. Playing from the end starts over. */
   togglePlaying: () => void
+  toggleLoop: () => void
   /** Pause and move the playhead by a number of frames, snapped to the frame grid. */
   stepFrames: (frames: number) => void
   select: (names: string[]) => void
   setTool: (tool: Tool) => void
+  openMenu: (menu: ContextMenuState) => void
+  closeMenu: () => void
 }
 
 function createAppStore() {
@@ -51,6 +70,7 @@ function createAppStore() {
     settings: { width: 1920, height: 1080, fps: 30 },
     time: 0,
     playing: false,
+    loop: false,
     contentEnd: null,
     selection: [],
     project: null,
@@ -58,10 +78,16 @@ function createAppStore() {
     model: null,
     error: null,
     tool: 'select',
+    contextMenu: null,
 
     setTime: (time) => set({ time: Math.max(0, time) }),
     setPlaying: (playing) => set({ playing }),
-    togglePlaying: () => set((s) => ({ playing: !s.playing })),
+    togglePlaying: () =>
+      set((s) => {
+        if (!s.playing && s.contentEnd !== null && s.time >= s.contentEnd) return { playing: true, time: 0 }
+        return { playing: !s.playing }
+      }),
+    toggleLoop: () => set((s) => ({ loop: !s.loop })),
     stepFrames: (frames) => {
       const { time, settings } = get()
       const next = snapToFrame(time, settings.fps) + frames / settings.fps
@@ -69,6 +95,8 @@ function createAppStore() {
     },
     select: (selection) => set({ selection }),
     setTool: (tool) => set({ tool }),
+    openMenu: (contextMenu) => set({ contextMenu }),
+    closeMenu: () => set((s) => (s.contextMenu ? { contextMenu: null } : s)),
   }))
 }
 

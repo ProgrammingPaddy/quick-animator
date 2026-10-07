@@ -31,12 +31,12 @@ See `checkpoints.md` for what is scheduled and what is backlog.
 
 ## 3. Main window
 
-- **R1.** Five panes in a fixed layout: object pane on the left, preview top center, timeline bottom center, code pane top right, Now pane bottom right. Splits are resizable. Each pane can be collapsed. The layout persists between runs.
+- **R1.** Five panes in a fixed layout: object pane on the left, preview top center, timeline bottom center, code pane top right, Selected pane bottom right. Splits are resizable. Each pane can be collapsed. The layout persists between runs.
 - **R2.** There is no separate property inspector. Properties are edited by direct manipulation in the preview, by dragging in the timeline, and by structured editing in the code pane. (Decision D13.)
 - **R3.** One selection is shared by all panes. Selecting in any pane selects in all of them.
 - **R4.** An edit in any pane is reflected in every other pane within the same display frame for direct manipulation, and within 100 ms for typed code.
 - **R5.** Undo and redo cover every edit from every pane as one history. A drag is one undo step.
-- **R6.** Errors in user code never crash or blank the app. The last good state stays visible. The error is shown inline at its source line and in a status line.
+- **R6.** Errors in user code never crash or blank the app. The last good state stays visible. The error is shown inline at its source line and in a status line. While the code has an error, the preview and timeline do not edit it (D63).
 - **R7.** Keyboard: space plays and pauses, arrow keys step frames, standard shortcuts for undo, redo, delete, duplicate, and group. The full list is short and documented.
 
 ## 4. Preview pane
@@ -56,26 +56,27 @@ See `checkpoints.md` for what is scheduled and what is backlog.
 - **R21.** Each action is a clip on its object's row, labelled and colored by its verb (D37). Drag to move its start. Drag its edges to change its duration. Drag the ease handles inside its edges to set how long it eases in and out (D39). Click to select.
 - **R22.** Keyframes inside an action are marks on the clip and can be dragged.
 - **R23.** Relative timing links are drawn as connectors. Moving an action moves everything that depends on it.
-- **R24.** Transport: return to start, play, pause, jump to the end of the content, scrub, time shown in seconds and frames, snapping to frames. Home and End do the same from the keyboard. The timeline has no fixed length: the content end is derived from the scene, playback loops there, and the export range defaults to it (D41).
-- **R25.** The wheel zooms the time axis around the cursor, from minutes per screen down to single frames, opening at one second per tick. Shift and the wheel scroll time; Alt and the wheel scroll the rows. The view pages forward while playing. Frame stepping from the keyboard. (D50)
+- **R24.** Transport: return to start, play, pause, jump to the end of the content, a loop toggle that is off by default, scrub, time shown in seconds and frames, snapping to frames. Home and End do the same from the keyboard. The timeline has no fixed length: the content end is derived from the scene, playback stops or loops there, and the export range defaults to it (D41, D59).
+- **R25.** Over the tracks, the wheel zooms the time axis around the cursor, from minutes per screen down to single frames, opening at one second per tick; Shift and the wheel scroll time; Alt and the wheel scroll the rows. Over the row headers, the wheel scrolls the rows. The view pages forward while playing. Frame stepping from the keyboard. (D50)
+- **R27.** Clips that overlap in time stack in lanes within the object's row, so each stays visible and grabbable (D53).
 - **R26.** Audio rows show a waveform. Video rows show thumbnails. (Audio and video checkpoint.)
 
 ## 6. Object pane
 
-- **R30.** A tree of all objects in the scene by hierarchy. Drag to reparent. Drag to reorder, which sets draw order.
+- **R30.** A tree of all objects in the scene by hierarchy, with each object's actions listed under it (D61). Drag to reparent. Drag to reorder, which sets draw order.
 - **R31.** Relationships are visible: parent and child by nesting, property and timing links by an indicator with a hover list.
-- **R32.** Right-click menu: Jump to code, Rename, Group, Duplicate, Delete, and later Save as component.
+- **R32.** Right-click menus on objects, actions, clips, and empty preview space: Jump to code, Delete, Add here, and later Rename, Group, Duplicate, Add effect, and Save as component (D62).
 - **R33.** A per-object hide toggle for editing only. It is UI state, not code, and does not affect export **(proposed)**.
 
 ## 7. Code pane and Now pane
 
-- **R40.** A JavaScript editor with syntax highlighting, line wrapping, autocompletion of classes, attributes, verbs, and values with inline documentation, and inline error display. A class name and Tab expands a full block with every attribute at its default (D36).
+- **R40.** A JavaScript editor with syntax highlighting, line wrapping, autocompletion of classes, objects, verbs, attributes, timing keys, named curves, and time references with inline documentation, and inline error display. Tab accepts a completion, otherwise indents the line to where it belongs. A class name and Tab expands a full block with every attribute at its default, and Tab then steps through the values (D36). Ctrl+F searches. Other occurrences of the selected text are highlighted.
 - **R41.** Organized by default: one file per scene, written as the cast of objects followed by the script of actions in time order (D32); a per-object view that groups an object's declaration with all of its actions; and a project library file for shared functions and components. Every attribute of every object is shown, set ones as code and unset ones as dimmed ghost lines with their defaults, switchable by a preference (D35). Blocks fold. Lines stay short: one attribute per line, one point per line.
 - **R42.** Selecting an object highlights its declaration and all of its actions and expands them. The pane scrolls only on Jump to code, from the right-click menu, a double click in the object pane, or a shortcut, or when a Follow selection toggle is turned on. Moving between an object and its actions is one step each way: the object name in any action line jumps to the declaration, the declaration lists its actions to jump to, and a shortcut cycles through them. (Decision D12.)
 - **R43.** Every attribute line edits like a style rule in browser devtools: attribute names and values autocomplete, a number drags, a color opens a picker, an easing name opens a picker, an asset path opens a file picker. This is the enhanced editing that replaces an inspector.
 - **R44.** Code edited in the pane applies live. Edits made outside the app, by an agent or another editor, are picked up by file watching and applied live. The playhead and selection survive a reload.
 - **R45.** The GUI rewrites code minimally: only the literal that changed. Formatting and comments are preserved.
-- **R46.** The Now pane, below the code pane, shows every attribute of the selection as a literal value at the playhead: what the object is right now, not the code that produces it. It updates while scrubbing and playing. (D42)
+- **R46.** The Selected pane, below the code pane, shows every attribute of the selection as a literal value at the playhead: what the object is right now, not the code that produces it. It updates while scrubbing and playing. (D42, D60)
 - **R47.** Values that are animated or linked at the playhead are marked so, with the action or link named. Display only until keyframes exist; editing then follows D45.
 - **R48.** Nothing is imported in a scene file. Every class and helper is already available, and the editor knows them. Plumbing stays behind the scenes unless dev mode is on (D34, D47).
 

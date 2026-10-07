@@ -167,7 +167,7 @@ export function Layout() {
             <CodePane />
           </Pane>
           <div className={gutterClass('h', 'now')} onPointerDown={beginDrag('now')} />
-          <Pane title="Now" side="now" collapsed={layout.collapsed.now} onToggle={() => toggle('now')}>
+          <Pane title="Selected" side="now" collapsed={layout.collapsed.now} onToggle={() => toggle('now')}>
             <NowPane />
           </Pane>
         </div>
