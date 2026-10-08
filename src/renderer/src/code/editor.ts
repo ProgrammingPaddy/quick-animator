@@ -1,5 +1,5 @@
 import { acceptCompletion, autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete'
-import { defaultKeymap, history, historyKeymap, indentLess, indentSelection, redo, undo } from '@codemirror/commands'
+import { defaultKeymap, history, indentLess, indentSelection, invertedEffects, redo, undo } from '@codemirror/commands'
 import { javascript } from '@codemirror/lang-javascript'
 import { bracketMatching, foldGutter, foldKeymap, indentOnInput, indentUnit, syntaxHighlighting } from '@codemirror/language'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
@@ -7,6 +7,7 @@ import { EditorState, RangeSet, RangeSetBuilder, StateEffect, StateField, type E
 import { Decoration, EditorView, GutterMarker, WidgetType, drawSelection, gutterLineClass, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from '@codemirror/view'
 import type { TextEdit } from '../model/edits'
 import type { Range } from '../model/types'
+import type { SelectionState } from '../state/store'
 import { colorSwatches } from './colors'
 import { sceneCompletions } from './completions'
 import { editorHighlight, editorTheme } from './theme'
@@ -32,6 +33,16 @@ export interface GhostBlock {
 }
 
 const setHighlights = StateEffect.define<HighlightSpec>()
+/**
+ * A change of what is selected in the panes, carried by a transaction so the history can undo
+ * and redo it with the edits around it (D90). Undoing applies the inverse.
+ */
+const selectionEffect = StateEffect.define<{ before: SelectionState; after: SelectionState }>()
+const selectionHistory = invertedEffects.of((tr) => {
+  const inverted: StateEffect<unknown>[] = []
+  for (const effect of tr.effects) if (effect.is(selectionEffect)) inverted.push(selectionEffect.of({ before: effect.value.after, after: effect.value.before }))
+  return inverted
+})
 const setErrorLine = StateEffect.define<number | null>()
 const setGhosts = StateEffect.define<GhostBlock[]>()
 const errorLine = Decoration.line({ class: 'cm-error-line' })
@@ -169,6 +180,27 @@ const ghostField = StateField.define<DecorationSet>({
 let view: EditorView | null = null
 let suppress = false
 let onChange: ((doc: string) => void) | null = null
+let onSelection: ((state: SelectionState) => void) | null = null
+let getSelection: (() => SelectionState) | null = null
+
+/** Undo text edits; selection-only steps along the way are undone too but do not count. */
+function undoText(v: EditorView): boolean {
+  for (let i = 0; i < 100; i++) {
+    const doc = v.state.doc
+    if (!undo(v)) return i > 0
+    if (v.state.doc !== doc) return true
+  }
+  return true
+}
+
+function redoText(v: EditorView): boolean {
+  for (let i = 0; i < 100; i++) {
+    const doc = v.state.doc
+    if (!redo(v)) return i > 0
+    if (v.state.doc !== doc) return true
+  }
+  return true
+}
 
 function extensions(): Extension[] {
   return [
@@ -177,6 +209,7 @@ function extensions(): Extension[] {
     foldGutter(),
     drawSelection(),
     history(),
+    selectionHistory,
     indentUnit.of('  '),
     indentOnInput(),
     bracketMatching(),
@@ -203,18 +236,26 @@ function extensions(): Extension[] {
       ...completionKeymap,
       ...searchKeymap,
       ...defaultKeymap,
-      ...historyKeymap,
+      // Inside the editor, undo skips over selection-only steps so Ctrl+Z always changes text.
+      { key: 'Mod-z', run: undoText, preventDefault: true },
+      { key: 'Mod-y', mac: 'Mod-Shift-z', run: redoText, preventDefault: true },
+      { key: 'Mod-Shift-z', run: redoText, preventDefault: true },
       ...foldKeymap,
     ]),
     EditorView.updateListener.of((update) => {
       if (update.docChanged && !suppress) onChange?.(update.state.doc.toString())
+      for (const tr of update.transactions) for (const effect of tr.effects) if (effect.is(selectionEffect)) onSelection?.(effect.value.after)
     }),
   ]
 }
 
-/** Create the editor once. Later calls only update the change callback. */
-export function createEditor(handleChange: (doc: string) => void): EditorView {
+/** Create the editor once. Later calls only update the callbacks. */
+export function createEditor(handleChange: (doc: string) => void, selection?: { onSelection: (state: SelectionState) => void; getSelection: () => SelectionState }): EditorView {
   onChange = handleChange
+  if (selection) {
+    onSelection = selection.onSelection
+    getSelection = selection.getSelection
+  }
   if (!view) view = new EditorView({ state: EditorState.create({ doc: '', extensions: extensions() }) })
   return view
 }
@@ -255,10 +296,20 @@ export function setEditorDoc(text: string): void {
   }
 }
 
-/** Apply GUI edits as one editor transaction, so the change callback and the history see them. */
-export function applyEdits(edits: TextEdit[]): void {
+/**
+ * Apply GUI edits as one editor transaction, so the change callback and the history see them.
+ * With `select`, the selection changes in the same step, so undo restores both together.
+ */
+export function applyEdits(edits: TextEdit[], select?: SelectionState): void {
   if (!view || edits.length === 0) return
-  view.dispatch({ changes: edits.map((e) => ({ from: e.from, to: e.to, insert: e.insert })) })
+  const effects = select && getSelection ? [selectionEffect.of({ before: getSelection(), after: select })] : []
+  view.dispatch({ changes: edits.map((e) => ({ from: e.from, to: e.to, insert: e.insert })), effects })
+}
+
+/** Record a selection change from the panes as a step of the history (D90). */
+export function recordSelection(before: SelectionState, after: SelectionState): void {
+  if (!view) return
+  view.dispatch({ effects: selectionEffect.of({ before, after }) })
 }
 
 export function highlightRanges(spec: HighlightSpec): void {

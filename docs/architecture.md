@@ -87,18 +87,32 @@ verbs make one action per member declared so far, all sharing one statement: the
 a `ClassAction` with its members, each member action points back at it, and a named class action
 is a time reference over all its members (its start is the earliest, its end the latest). The
 panes show the statement once, as a clip on the class's row and a row in the object pane, and
-on each member as a dashed, derived clip. GUI edits never touch a class statement from a member:
-editing a derived clip first appends the member's own copy of the action, with an explicit `at`
-when the class statement had none, and then edits the copy. Dragging the class clip edits the one
+on each member as a dashed, derived clip. Membership is by `class` names and by type, so `all('Rect')` covers every rectangle. An own
+action with `overrides: name` marks the class member action as overridden: it drops out of
+sampling, timing, time references, and the content end, and the panes draw it switched off. GUI
+edits never touch a class statement from a member: editing a derived clip first appends the
+member's override, naming the class action when it has no name, and then edits the override.
+"Copy as own action" appends a plain copy instead. Dragging the class clip edits the one
 statement.
 
-## Drag modes (D79)
+## The gizmo and drags (D79, D86, D89)
 
-The preview keeps a drag mode, move, rotate, or scale, in the store. Every drag flavor reads it:
-a plain drag edits the mode's attributes at the playhead, Shift-drag appends the mode's verb as
-an action, and a destination drag writes the selected action's targets for those attributes.
-Rotation is the angle around the object's center, scale the ratio of distances from it, both
-relative to where the pointer went down.
+The renderer draws a box around every selected object and, for one selected object, the handles
+of the mode: eight resize handles on the corners and edges, a rotate handle above. It reports the
+handle under a world point, each object's drawn frame and axis-aligned box, and the objects a box
+touches. The preview turns a pointer-down into a drag of one kind, move, rotate, or resize, from
+the handle hit or the mode, and a flavor, plain, timed (Shift), or destination (a matching action
+selected). Resize works in the object's own frame: the far side stays put, corners keep the
+proportions, and the result is factors applied to the dimension attributes, so the same math
+serves Rect, Circle, and Text. Snapping rounds the value being written. A drag on empty space is a
+marquee.
+
+## Selection in the history (D90)
+
+The store hands every selection change to a sink; the controller turns it into an editor
+transaction carrying a selection effect, which the history records through `invertedEffects`. The
+editor's update listener applies the effect's new selection back to the store, flagged so it does
+not become a new step. GUI edits that select something put the effect in the same transaction.
 
 ## Complete view, minimal file (D35)
 

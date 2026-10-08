@@ -112,6 +112,10 @@ export interface Action {
   codeDriven: boolean
   /** Set when the action came from a class statement rather than the object's own. */
   classAction: ClassAction | null
+  /** The class action this action replaces for its object, written as `overrides: name` (D80). */
+  overrides: ClassAction | null
+  /** True on a class member action that the object replaced with its own; it no longer applies. */
+  overridden: boolean
 }
 
 export interface SceneError {

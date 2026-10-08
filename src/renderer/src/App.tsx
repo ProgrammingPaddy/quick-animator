@@ -1,11 +1,12 @@
 import { useEffect } from 'react'
 import { editorRedo, editorUndo } from './code/editor'
+import { ClassesDialogLayer } from './components/ClassesDialog'
 import { ContextMenuLayer } from './components/ContextMenu'
 import { DialogLayer } from './components/Dialog'
 import { HelpOverlay } from './components/HelpOverlay'
 import { Layout } from './Layout'
 import { initProject } from './project/controller'
-import { copySelection, deleteAction, deleteObjects, duplicateObject, pasteClipboard, requestRename } from './project/operations'
+import { copySelection, deleteAction, deleteObjects, duplicateObjects, pasteClipboard, requestRename } from './project/operations'
 import { useClock } from './state/clock'
 import { useStore } from './state/store'
 
@@ -28,6 +29,7 @@ export function App() {
       if (e.code === 'Escape') {
         if (store.contextMenu) return store.closeMenu()
         if (store.dialog) return store.closeDialog()
+        if (store.classesDialog) return store.closeClassesDialog()
         if (store.help) return store.setHelp(false)
       }
       if (e.code === 'F1') {
@@ -35,7 +37,7 @@ export function App() {
         store.setHelp(!store.help)
         return
       }
-      if (store.dialog || isTypingTarget(e.target)) return
+      if (store.dialog || store.classesDialog || isTypingTarget(e.target)) return
       const { togglePlaying, stepFrames, setTime, setPlaying, contentEnd, time, selection, selectedAction, select, tool, setTool } = store
       const ctrl = e.ctrlKey || e.metaKey
       if (ctrl && (e.code === 'KeyZ' || e.code === 'KeyY')) {
@@ -54,7 +56,12 @@ export function App() {
       }
       if (ctrl && e.code === 'KeyD') {
         e.preventDefault()
-        if (selection[0]) duplicateObject(selection[0])
+        if (selection.length > 0) duplicateObjects(selection)
+        return
+      }
+      if (ctrl && e.code === 'KeyA') {
+        e.preventDefault()
+        select(store.model?.objects.map((o) => o.name) ?? [])
         return
       }
       switch (e.code) {
@@ -83,7 +90,7 @@ export function App() {
         case 'F2':
           e.preventDefault()
           if (selectedAction) requestRename({ object: selectedAction.object, index: selectedAction.index })
-          else if (selection[0]) requestRename({ object: selection[0] })
+          else if (selection.length === 1) requestRename({ object: selection[0]! })
           break
         case 'Delete':
         case 'Backspace':
@@ -120,6 +127,7 @@ export function App() {
       <Layout />
       <ContextMenuLayer />
       <DialogLayer />
+      <ClassesDialogLayer />
       <HelpOverlay />
     </>
   )

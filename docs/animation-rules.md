@@ -112,6 +112,7 @@ Timing keys, allowed in every action block:
 - `easeIn`, `easeOut`: seconds of easing at each end. Omitted: 30% of the duration each.
 - `ease`: `'linear'`, `'bounce'`, `'back'`, `'elastic'`, or `'snap'`. Replaces `easeIn` and `easeOut`.
 - `relative`: `true` makes the values changes from where the object is when the action starts. Omitted: `false`.
+- `overrides`: the name of a class action this action replaces for its object. See Classes.
 
 ## Relative and overlapping actions
 
@@ -164,9 +165,25 @@ pulse = all('dots').scale({
 })
 ```
 
-A member's own action written after the class statement takes over from its start, like any
-later action (see "Relative and overlapping actions"). A named class action is a time reference
-for all its members: `pulse.end` is when the last member finishes.
+Classes are not exclusive: `class: 'dots accents'` puts an object in two. Every type is a class
+too: `all('Rect').fade({ opacity: 0, duration: 1 })` fades every rectangle.
+
+A member replaces a class action for itself with its own action that names it in `overrides`.
+The class action is then switched off for that object, and the own action stands in its place:
+
+```js
+right.scale({
+  scale: 2,
+  at: 1,
+  duration: 0.5,
+  overrides: pulse,
+})
+```
+
+A member's own action without `overrides`, written after the class statement, instead takes
+over from its start while the class action still runs, like any later action (see "Relative and
+overlapping actions"). A named class action is a time reference for the members it still drives:
+`pulse.end` is when the last of them finishes.
 
 ## Links
 

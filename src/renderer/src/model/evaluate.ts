@@ -41,6 +41,11 @@ function classNamesOf(attrs: Record<string, AttrSource>): string[] {
   return typeof value === 'string' ? value.split(/\s+/).filter(Boolean) : []
 }
 
+/** An object belongs to its own classes and to its type: `all('Rect')` is every rectangle (D80). */
+export function isMember(obj: SceneObject, name: string): boolean {
+  return obj.className === name || obj.classes.includes(name)
+}
+
 /**
  * Run a scene file and build the model (architecture: "The round trip" and "Evaluation").
  * The file runs as plain JavaScript inside a scope that already holds every class, so nothing is
@@ -71,13 +76,18 @@ export function evaluateScene(source: string): EvaluateResult {
     progress: (fraction: number) => timeRef({ kind: 'progress', actions: own, fraction }),
   })
 
-  const readBlock = (owner: string, verb: Verb, className: string, args: unknown[]): { timing: Timing; changes: Record<string, AttrSource> } => {
+  const readBlock = (owner: string, verb: Verb, className: string, args: unknown[]): { timing: Timing; changes: Record<string, AttrSource>; overrides: unknown } => {
     const props = args.length > 0 ? args[args.length - 1] : {}
     if (typeof props !== 'object' || props === null) throw new Error(`${owner}.${verb}() expects a block of attributes`)
     const timing: Timing = {}
     const changes: Record<string, AttrSource> = {}
+    let overrides: unknown
     const allowed = VERB_ATTRS[verb]
     for (const [key, value] of Object.entries(props as Record<string, unknown>)) {
+      if (key === 'overrides') {
+        overrides = value
+        continue
+      }
       if (TIMING_KEY_NAMES.has(key)) {
         if (key === 'relative') timing.relative = Boolean(value)
         else (timing as Record<string, unknown>)[key] = value
@@ -93,18 +103,31 @@ export function evaluateScene(source: string): EvaluateResult {
       }
       changes[key] = value as AttrSource
     }
-    return { timing, changes }
+    return { timing, changes, overrides }
   }
 
   const makeAction = (obj: SceneObject, verb: Verb, block: { timing: Timing; changes: Record<string, AttrSource> }, classAction: ClassAction | null): Action => {
-    const action: Action = { id: actions.length, object: obj, verb, name: null, changes: block.changes, timing: block.timing, start: 0, end: 0, stmt: null, codeDriven: false, classAction }
+    const action: Action = { id: actions.length, object: obj, verb, name: null, changes: block.changes, timing: block.timing, start: 0, end: 0, stmt: null, codeDriven: false, classAction, overrides: null, overridden: false }
     actions.push(action)
     obj.actions.push(action)
     return action
   }
 
   const addAction = (obj: SceneObject, verb: Verb, args: unknown[]): Record<string | symbol, unknown> => {
-    const action = makeAction(obj, verb, readBlock(obj.name, verb, obj.className, args), null)
+    const block = readBlock(obj.name, verb, obj.className, args)
+    const action = makeAction(obj, verb, block, null)
+    if (block.overrides !== undefined) {
+      // `overrides: rise` switches the class action off for this object; this action stands in for it.
+      const target = behindHandle(block.overrides)
+      const classAction = target && 'members' in target ? target : null
+      const member = classAction?.members.find((m) => m.object === obj)
+      if (!classAction) warnings.push({ message: `${obj.name}.${verb}: overrides must name a class action, such as rise = all('bars').move(...)` })
+      else if (!member) warnings.push({ message: `${obj.name} is not a member of all('${classAction.className}'); nothing to override` })
+      else {
+        member.overridden = true
+        action.overrides = classAction
+      }
+    }
     return actionHandle([action], action)
   }
 
@@ -113,7 +136,7 @@ export function evaluateScene(source: string): EvaluateResult {
     const classAction: ClassAction = { id: classActions.length, className, verb, name: null, stmt: null, members: [] }
     classActions.push(classAction)
     for (const obj of objects) {
-      if (!obj.classes.includes(className)) continue
+      if (!isMember(obj, className)) continue
       // Each member reads the block against its own class, so a Text member ignores `radius`.
       const block = readBlock(`all('${className}')`, verb, obj.className, args)
       classAction.members.push(makeAction(obj, verb, block, classAction))
@@ -225,6 +248,14 @@ export function evaluateScene(source: string): EvaluateResult {
       model.classes.set(name, members)
     }
   }
+  // A class that only an `all()` statement names, such as a type, groups every object it covers.
+  for (const classAction of classActions) {
+    if (model.classes.has(classAction.className)) continue
+    model.classes.set(
+      classAction.className,
+      objects.filter((o) => isMember(o, classAction.className)).map((o) => o.name),
+    )
+  }
   const infosByObject = new Map<string, ActionInfo[]>()
   const infosByClass = new Map<string, ActionInfo[]>()
   for (const info of parsed.actions) {
@@ -275,8 +306,10 @@ export function evaluateScene(source: string): EvaluateResult {
     if (ref === undefined) return fallback
     if (typeof ref === 'number') return Number.isFinite(ref) ? ref : fallback
     if (!isTimeRef(ref)) throw new Error(`${what} must be seconds or a time reference such as other.end`)
-    if (ref.actions.length === 0) return fallback
-    const spans = ref.actions.map((a) => resolveAction(a))
+    // A class action's time covers the members that still follow it.
+    const active = ref.actions.filter((a) => !a.overridden)
+    if (active.length === 0) return fallback
+    const spans = active.map((a) => resolveAction(a))
     const start = Math.min(...spans.map((s) => s[0]))
     const end = Math.max(...spans.map((s) => s[1]))
     if (ref.kind === 'start') return start
@@ -291,7 +324,8 @@ export function evaluateScene(source: string): EvaluateResult {
     if (resolving.has(action.id)) throw new Error(`${label} depends on its own timing`)
     resolving.add(action.id)
     const index = action.object.actions.indexOf(action)
-    const previous = index > 0 ? action.object.actions[index - 1] : undefined
+    let previous: Action | undefined
+    for (let i = index - 1; i >= 0 && !previous; i--) if (!action.object.actions[i]!.overridden) previous = action.object.actions[i]
     const fallbackStart = previous ? resolveAction(previous)[1] : 0
     const start = timeOf(action.timing.at, fallbackStart, `${label} at`) + (action.timing.delay ?? 0)
     const duration =
@@ -313,7 +347,7 @@ export function evaluateScene(source: string): EvaluateResult {
   }
 
   let end: number | null = null
-  for (const action of actions) end = Math.max(end ?? 0, action.end)
+  for (const action of actions) if (!action.overridden) end = Math.max(end ?? 0, action.end)
   model.lastActionEnd = end
 
   return { model, error: null }

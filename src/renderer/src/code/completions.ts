@@ -24,6 +24,7 @@ const TIMING_DOCS: Record<string, string> = {
   easeOut: 'Seconds of easing at the end. Omitted: 30% of the duration.',
   ease: "A named curve: 'linear', 'bounce', 'back', 'elastic', or 'snap'. Replaces easeIn and easeOut.",
   relative: 'true: the values are changes from where the object is when the action starts, and add on top of other actions.',
+  overrides: "The class action this replaces for this object, by name: rise = all('bars').move(...) then box.move({ ..., overrides: rise }). The class action is switched off for the object.",
 }
 
 const TIMING_PLACEHOLDER: Record<string, string> = {
@@ -35,6 +36,7 @@ const TIMING_PLACEHOLDER: Record<string, string> = {
   easeOut: '0.3',
   ease: "'linear'",
   relative: 'true',
+  overrides: '',
 }
 
 const VERB_DOCS: Record<Verb, string> = {
@@ -187,9 +189,20 @@ function timeReferenceOptions(model: SceneModel | null): Completion[] {
   return options
 }
 
-/** The classes objects belong to right now, for `class:` values and `all('`. */
+/** The classes objects belong to right now, for `class:` values. */
 function classNameOptions(model: SceneModel | null): Completion[] {
-  return [...(model?.classes.entries() ?? [])].map(([name, members]) => ({ label: name, type: 'constant', info: `${members.length} ${members.length === 1 ? 'member' : 'members'}: ${members.join(', ')}` }))
+  return [...(model?.classes.entries() ?? [])].filter(([name]) => !(name in classes)).map(([name, members]) => ({ label: name, type: 'constant', info: `${members.length} ${members.length === 1 ? 'member' : 'members'}: ${members.join(', ')}` }))
+}
+
+/** What `all('` can name: the classes in use and every type (D80). */
+function selectorOptions(model: SceneModel | null): Completion[] {
+  const types = Object.keys(classes).map((name) => ({ label: name, type: 'class', info: `Every ${name}.` }))
+  return [...classNameOptions(model), ...types]
+}
+
+/** Named class actions, for `overrides:`. */
+function classActionOptions(model: SceneModel | null): Completion[] {
+  return (model?.classActions ?? []).filter((a) => a.name).map((a) => ({ label: a.name!, type: 'variable', info: `all('${a.className}').${a.verb}` }))
 }
 
 export function sceneCompletions(context: CompletionContext): CompletionResult | null {
@@ -202,14 +215,14 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
   // all('name').| : the verbs, with the first member's attributes.
   const selector = /all\(\s*(['"])([^'"]*)\1\s*\)\.([\w$]*)$/.exec(before)
   if (selector) {
-    const member = model?.objects.find((o) => o.classes.includes(selector[2]!))
+    const member = model?.objects.find((o) => o.classes.includes(selector[2]!) || o.className === selector[2])
     return { from: pos - selector[3]!.length, options: VERBS.map((v) => verbSnippet(v, member?.className)), validFor: /^[\w$]*$/ }
   }
 
   // all('| : the classes in use.
   const inSelector = /all\(\s*['"]([\w$-]*)$/.exec(before)
   if (inSelector) {
-    return { from: pos - inSelector[1]!.length, options: classNameOptions(model), validFor: /^[\w$-]*$/ }
+    return { from: pos - inSelector[1]!.length, options: selectorOptions(model), validFor: /^[\w$-]*$/ }
   }
 
   // object.| or action.|
@@ -256,6 +269,9 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
       if (key === 'relative') {
         return { from: word?.from ?? pos, options: [{ label: 'true', type: 'constant' }, { label: 'false', type: 'constant' }], validFor: /^[\w$]*$/ }
       }
+      if (key === 'overrides') {
+        return { from: word?.from ?? pos, options: classActionOptions(model), validFor: /^[\w$]*$/ }
+      }
       if (key === 'class' && call.kind === 'class') {
         // Inside the quotes only, so the closing quote the editor added stays in place.
         const inQuotes = /['"][\w$ -]*$/.test(before)
@@ -271,7 +287,7 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
     if (call.kind === 'class') {
       for (const attr of classes[call.className!]!.attrs) if (!present.has(attr.name)) options.push(attrCompletion(attr))
     } else {
-      const owner = call.objectName ? model?.objects.find((o) => o.name === call.objectName) : call.cssClass ? model?.objects.find((o) => o.classes.includes(call.cssClass!)) : undefined
+      const owner = call.objectName ? model?.objects.find((o) => o.name === call.objectName) : call.cssClass ? model?.objects.find((o) => o.classes.includes(call.cssClass!) || o.className === call.cssClass) : undefined
       const className = owner?.className
       const allowed = VERB_ATTRS[call.verb!]
       if (className) {
@@ -291,7 +307,7 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
     if (!word || (word.from === word.to && !context.explicit)) return null
     const options: Completion[] = Object.keys(classes).map((c) => classSnippet(c, true))
     for (const obj of model?.objects ?? []) options.push({ label: obj.name, type: 'variable', detail: obj.className, apply: `${obj.name}.` })
-    if (model && model.classes.size > 0) options.push(allSnippet())
+    options.push(allSnippet())
     return { from: word.from, options, validFor: /^[\w$]*$/ }
   }
   return null

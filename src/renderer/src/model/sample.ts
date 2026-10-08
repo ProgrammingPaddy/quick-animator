@@ -36,7 +36,7 @@ function segmentsFor(model: SceneModel, obj: SceneObject, attr: string): Segment
   if (!segments) {
     const type = attrSchema(obj.className, attr)?.type
     segments = { absolute: [], relative: [] }
-    const sorted = obj.actions.filter((a) => attr in a.changes).sort((a, b) => a.start - b.start || a.id - b.id)
+    const sorted = obj.actions.filter((a) => attr in a.changes && !a.overridden).sort((a, b) => a.start - b.start || a.id - b.id)
     for (const action of sorted) {
       const segment: Segment = { action, to: action.changes[attr]!, ease: easingFor(action.timing, action.end - action.start) }
       if (action.timing.relative && type === 'number') segments.relative.push(segment)

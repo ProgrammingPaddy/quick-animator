@@ -12,11 +12,45 @@ interface Item {
   textKey?: string
 }
 
+/** A grab point of the selection gizmo: a corner or edge that resizes, or the handle that rotates (D86). */
+export type Handle = { kind: 'resize'; sx: -1 | 0 | 1; sy: -1 | 0 | 1 } | { kind: 'rotate' }
+
+/** Where an object is drawn right now: center, rotation in degrees, and drawn size in world pixels. */
+export interface Frame {
+  x: number
+  y: number
+  rotation: number
+  width: number
+  height: number
+}
+
+export interface Box {
+  left: number
+  right: number
+  top: number
+  bottom: number
+}
+
 const unitPlane = new THREE.PlaneGeometry(1, 1)
 const unitCircle = new THREE.CircleGeometry(1, 96)
 /** Canvas pixels per world pixel for text, so it stays crisp when zoomed in. */
 const TEXT_SCALE = 2
 const ACCENT = 0x3b82f6
+const RESIZE_HANDLES: { sx: -1 | 0 | 1; sy: -1 | 0 | 1 }[] = [
+  { sx: -1, sy: -1 },
+  { sx: 1, sy: -1 },
+  { sx: -1, sy: 1 },
+  { sx: 1, sy: 1 },
+  { sx: 0, sy: -1 },
+  { sx: 0, sy: 1 },
+  { sx: -1, sy: 0 },
+  { sx: 1, sy: 0 },
+]
+/** Distance of the rotate handle above the top edge, in screen pixels. */
+const ROTATE_OFFSET = 24
+const CORNER_PX = 9
+const EDGE_PX = 7
+const ROTATE_PX = 10
 
 function ringGeometry(): THREE.BufferGeometry {
   const points: THREE.Vector3[] = []
@@ -27,38 +61,56 @@ function ringGeometry(): THREE.BufferGeometry {
   return new THREE.BufferGeometry().setFromPoints(points)
 }
 
-/** Draws the scene model at a time into a Three.js group, and picks objects under the pointer. */
+/** Draws the scene model at a time into a Three.js group, draws the selection gizmo, and picks. */
 export class SceneRenderer {
   readonly group = new THREE.Group()
   private readonly items = new Map<string, Item>()
-  private readonly selectionBox: THREE.LineSegments
+  private readonly lineMaterial = new THREE.LineBasicMaterial({ color: ACCENT, depthTest: false })
+  private readonly handleMaterial = new THREE.MeshBasicMaterial({ color: ACCENT, depthTest: false })
+  private readonly boxes: THREE.LineSegments[] = []
   private readonly rotateRing: THREE.LineLoop
-  private readonly corners: THREE.Mesh[] = []
+  private readonly resizeHandles: THREE.Mesh[] = []
+  private readonly rotateHandle: THREE.Mesh
+  private readonly stem: THREE.Line
+  /** The handles shown right now, with their world positions, for picking. */
+  private handles: { handle: Handle; x: number; y: number; radius: number }[] = []
   private readonly raycaster = new THREE.Raycaster()
 
   constructor() {
-    const lineMaterial = new THREE.LineBasicMaterial({ color: ACCENT, depthTest: false })
-    this.selectionBox = new THREE.LineSegments(new THREE.EdgesGeometry(unitPlane), lineMaterial)
-    this.selectionBox.renderOrder = 1_000_000
-    this.selectionBox.visible = false
-    this.rotateRing = new THREE.LineLoop(ringGeometry(), lineMaterial)
+    this.rotateRing = new THREE.LineLoop(ringGeometry(), this.lineMaterial)
     this.rotateRing.renderOrder = 1_000_000
     this.rotateRing.visible = false
-    const cornerMaterial = new THREE.MeshBasicMaterial({ color: ACCENT, depthTest: false })
-    for (let i = 0; i < 4; i++) {
-      const corner = new THREE.Mesh(unitPlane, cornerMaterial)
-      corner.renderOrder = 1_000_001
-      corner.visible = false
-      this.corners.push(corner)
+    for (const spec of RESIZE_HANDLES) {
+      const handle = new THREE.Mesh(unitPlane, this.handleMaterial)
+      handle.renderOrder = 1_000_001
+      handle.visible = false
+      handle.userData['handle'] = spec
+      this.resizeHandles.push(handle)
     }
-    this.group.add(this.selectionBox, this.rotateRing, ...this.corners)
+    this.rotateHandle = new THREE.Mesh(unitCircle, this.handleMaterial)
+    this.rotateHandle.renderOrder = 1_000_001
+    this.rotateHandle.visible = false
+    this.stem = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0)]), this.lineMaterial)
+    this.stem.renderOrder = 1_000_000
+    this.stem.visible = false
+    this.group.add(this.rotateRing, ...this.resizeHandles, this.rotateHandle, this.stem)
+  }
+
+  private box(index: number): THREE.LineSegments {
+    while (this.boxes.length <= index) {
+      const box = new THREE.LineSegments(new THREE.EdgesGeometry(unitPlane), this.lineMaterial)
+      box.renderOrder = 1_000_000
+      this.group.add(box)
+      this.boxes.push(box)
+    }
+    return this.boxes[index]!
   }
 
   /**
-   * Draw the model at a time, with the selection shown for the transform mode: a box to move,
-   * a ring to rotate, corner handles to scale. `handleSize` is in world pixels.
+   * Draw the model at a time, with a box around every selected object and, for a single
+   * selection, the handles of the mode. `pixel` is the world size of one screen pixel.
    */
-  update(model: SceneModel | null, time: number, selection: string[], mode: TransformMode = 'move', handleSize = 8): void {
+  update(model: SceneModel | null, time: number, selection: string[], mode: TransformMode = 'all', pixel = 1): void {
     const seen = new Set<string>()
     if (model) {
       model.objects.forEach((obj, index) => {
@@ -72,44 +124,117 @@ export class SceneRenderer {
       disposeItem(item)
       this.items.delete(name)
     }
-    const selected = selection.length === 1 ? this.items.get(selection[0]!) : undefined
-    const show = !!selected && selected.mesh.visible
-    this.selectionBox.visible = show && mode !== 'rotate'
-    this.rotateRing.visible = show && mode === 'rotate'
-    for (const corner of this.corners) corner.visible = show && mode === 'scale'
-    if (!selected || !show) return
-    const { position, rotation, scale } = selected.mesh
-    this.selectionBox.position.set(position.x, position.y, position.z + 0.5)
-    this.selectionBox.rotation.copy(rotation)
-    this.selectionBox.scale.copy(scale)
-    const radius = Math.hypot(scale.x, scale.y) / 2
-    this.rotateRing.position.set(position.x, position.y, position.z + 0.5)
-    this.rotateRing.scale.set(radius, radius, 1)
-    this.corners.forEach((corner, i) => {
-      const sx = i % 2 === 0 ? -0.5 : 0.5
-      const sy = i < 2 ? -0.5 : 0.5
-      const local = new THREE.Vector3(sx * scale.x, sy * scale.y, 0).applyEuler(rotation)
-      corner.position.set(position.x + local.x, position.y + local.y, position.z + 0.6)
-      corner.rotation.copy(rotation)
-      corner.scale.set(handleSize, handleSize, 1)
+
+    const selected = selection.map((n) => this.items.get(n)).filter((i): i is Item => !!i && i.mesh.visible)
+    selected.forEach((item, i) => {
+      const box = this.box(i)
+      const { position, rotation, scale } = item.mesh
+      box.visible = true
+      box.position.set(position.x, position.y, position.z + 0.5)
+      box.rotation.copy(rotation)
+      box.scale.copy(scale)
     })
+    for (let i = selected.length; i < this.boxes.length; i++) this.boxes[i]!.visible = false
+
+    const single = selected.length === 1 ? selected[0]! : null
+    const showRing = !!single && mode === 'rotate'
+    const showResize = !!single && (mode === 'resize' || mode === 'all')
+    const showRotate = !!single && mode === 'all'
+    this.rotateRing.visible = showRing
+    this.rotateHandle.visible = showRotate
+    this.stem.visible = showRotate
+    for (const handle of this.resizeHandles) handle.visible = showResize
+    this.handles = []
+    if (!single) return
+    const { position, rotation, scale } = single.mesh
+    const z = position.z + 0.6
+    const w = Math.abs(scale.x)
+    const h = Math.abs(scale.y)
+    const cos = Math.cos(rotation.z)
+    const sin = Math.sin(rotation.z)
+    const local = (lx: number, ly: number) => ({ x: position.x + lx * cos - ly * sin, y: position.y + lx * sin + ly * cos })
+    if (showRing) {
+      const radius = Math.hypot(w, h) / 2
+      this.rotateRing.position.set(position.x, position.y, z)
+      this.rotateRing.scale.set(radius, radius, 1)
+    }
+    if (showResize) {
+      this.resizeHandles.forEach((mesh, i) => {
+        const { sx, sy } = RESIZE_HANDLES[i]!
+        const p = local((sx * w) / 2, (sy * h) / 2)
+        const size = (sx !== 0 && sy !== 0 ? CORNER_PX : EDGE_PX) * pixel
+        mesh.position.set(p.x, p.y, z)
+        mesh.rotation.copy(rotation)
+        mesh.scale.set(size, size, 1)
+        this.handles.push({ handle: { kind: 'resize', sx, sy }, x: p.x, y: p.y, radius: Math.max(size, 8 * pixel) })
+      })
+    }
+    if (showRotate) {
+      const p = local(0, h / 2 + ROTATE_OFFSET * pixel)
+      const radius = (ROTATE_PX * pixel) / 2
+      this.rotateHandle.position.set(p.x, p.y, z)
+      this.rotateHandle.scale.set(radius, radius, 1)
+      const top = local(0, h / 2)
+      this.stem.position.set(top.x, top.y, z)
+      this.stem.rotation.z = rotation.z
+      this.stem.scale.set(1, ROTATE_OFFSET * pixel, 1)
+      this.handles.push({ handle: { kind: 'rotate' }, x: p.x, y: p.y, radius: ROTATE_PX * pixel })
+    }
   }
 
-  /** The box around every visible object, ignoring rotation, or null when nothing is visible. */
-  bounds(): { left: number; right: number; top: number; bottom: number } | null {
-    let box: { left: number; right: number; top: number; bottom: number } | null = null
-    for (const item of this.items.values()) {
-      if (!item.mesh.visible) continue
-      const { x, y } = item.mesh.position
-      const halfWidth = Math.abs(item.mesh.scale.x) / 2
-      const halfHeight = Math.abs(item.mesh.scale.y) / 2
-      const left = x - halfWidth
-      const right = x + halfWidth
-      const top = y + halfHeight
-      const bottom = y - halfHeight
-      box = box ? { left: Math.min(box.left, left), right: Math.max(box.right, right), top: Math.max(box.top, top), bottom: Math.min(box.bottom, bottom) } : { left, right, top, bottom }
+  /** The handle under a world position, if any. Handles win over the objects beneath them. */
+  pickHandle(world: { x: number; y: number }): Handle | null {
+    let best: Handle | null = null
+    let bestDistance = Infinity
+    for (const h of this.handles) {
+      const distance = Math.hypot(world.x - h.x, world.y - h.y)
+      if (distance <= h.radius && distance < bestDistance) {
+        best = h.handle
+        bestDistance = distance
+      }
+    }
+    return best
+  }
+
+  /** Where a visible object is drawn right now, or null. */
+  frameOf(name: string): Frame | null {
+    const item = this.items.get(name)
+    if (!item || !item.mesh.visible) return null
+    const { position, rotation, scale } = item.mesh
+    return { x: position.x, y: position.y, rotation: (rotation.z * 180) / Math.PI, width: Math.abs(scale.x), height: Math.abs(scale.y) }
+  }
+
+  /** The axis-aligned box around a visible object, rotation included, or null. */
+  boxOf(name: string): Box | null {
+    const frame = this.frameOf(name)
+    if (!frame) return null
+    const a = (frame.rotation * Math.PI) / 180
+    const cos = Math.abs(Math.cos(a))
+    const sin = Math.abs(Math.sin(a))
+    const halfWidth = (frame.width * cos + frame.height * sin) / 2
+    const halfHeight = (frame.width * sin + frame.height * cos) / 2
+    return { left: frame.x - halfWidth, right: frame.x + halfWidth, top: frame.y + halfHeight, bottom: frame.y - halfHeight }
+  }
+
+  /** The box around every visible object, or null when nothing is visible. */
+  bounds(): Box | null {
+    let box: Box | null = null
+    for (const name of this.items.keys()) {
+      const b = this.boxOf(name)
+      if (!b) continue
+      box = box ? { left: Math.min(box.left, b.left), right: Math.max(box.right, b.right), top: Math.max(box.top, b.top), bottom: Math.min(box.bottom, b.bottom) } : b
     }
     return box
+  }
+
+  /** The visible objects whose boxes touch a world box, for a selection marquee (D89). */
+  objectsIn(box: Box): string[] {
+    const names: string[] = []
+    for (const name of this.items.keys()) {
+      const b = this.boxOf(name)
+      if (b && b.left <= box.right && b.right >= box.left && b.bottom <= box.top && b.top >= box.bottom) names.push(name)
+    }
+    return names
   }
 
   /** The name of the topmost visible object under a normalized device coordinate, or null. */

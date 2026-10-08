@@ -1,8 +1,8 @@
 import type { FileChange, ProjectData } from '../../../shared/api'
-import { createEditor, resetEditorDoc, setEditorDoc } from '../code/editor'
+import { createEditor, recordSelection, resetEditorDoc, setEditorDoc } from '../code/editor'
 import { evaluateScene } from '../model/evaluate'
 import type { SceneModel } from '../model/types'
-import { useStore, type ProjectSettings } from '../state/store'
+import { applySelection, currentSelection, setSelectionSink, useStore, type ProjectSettings } from '../state/store'
 import { SAMPLE_SCENE } from './sample'
 
 /** Where a new version of the scene text came from. */
@@ -105,7 +105,9 @@ export async function newProject(): Promise<void> {
 
 /** Wire the editor to the store, listen for outside edits, and reopen the last project. */
 export function initProject(): void {
-  createEditor((doc) => commitSource(doc, 'editor'))
+  createEditor((doc) => commitSource(doc, 'editor'), { onSelection: applySelection, getSelection: currentSelection })
+  // Selection changes from the panes become steps of the one undo history (D90).
+  setSelectionSink(recordSelection)
   if (!window.api) {
     // No file access, for example in a plain browser: work on the sample in memory.
     if (!useStore.getState().project) {

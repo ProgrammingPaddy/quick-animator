@@ -1425,3 +1425,147 @@ button.chevron:hover {
   font-size: 12px;
   user-select: text;
 }
+
+/* Fifth review: marquee, snap, handles, overrides, reorder, classes dialog */
+
+.preview-marquee {
+  position: absolute;
+  border: 1px solid var(--accent);
+  background: rgba(59, 130, 246, 0.12);
+  pointer-events: none;
+}
+
+.preview-tools button.on {
+  color: var(--accent);
+}
+
+.snap-field {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: rgba(32, 32, 32, 0.85);
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
+.snap-field input {
+  width: 36px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-pane);
+  color: var(--fg);
+  font: 11px var(--font-mono);
+}
+
+.snap-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.clip.overridden {
+  opacity: 0.35;
+  background: #7f1d1d !important;
+  outline: 1px dashed rgba(255, 120, 120, 0.8);
+  outline-offset: -1px;
+  cursor: default;
+}
+
+.clip.overridden .label {
+  text-decoration: line-through;
+}
+
+.clip .ident.override,
+.action-row .ident.override {
+  color: #fca5a5;
+}
+
+.action-row.overridden {
+  opacity: 0.5;
+}
+
+.action-row.overridden .name {
+  text-decoration: line-through;
+}
+
+.badge.off {
+  background: rgba(239, 68, 68, 0.25);
+  color: #fca5a5;
+}
+
+.tl-playhead-layer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--tl-header-w);
+  right: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.tl-playhead-layer .playhead.line {
+  left: 0;
+}
+
+.tl-row-header {
+  touch-action: none;
+}
+
+.tl-row.dragging .tl-row-header {
+  opacity: 0.5;
+}
+
+.tl-drop-line {
+  position: fixed;
+  left: 0;
+  width: var(--tl-header-w);
+  height: 0;
+  border-top: 2px solid var(--accent);
+  pointer-events: none;
+  z-index: 50;
+}
+
+.class-list li {
+  padding: 2px 0;
+}
+
+.class-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.class-list input {
+  accent-color: var(--accent);
+}
+
+.dialog-input button.create {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.dialog-note {
+  margin: -2px 0 8px;
+  color: #f3c77b;
+  font-size: 12px;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+
+.shake {
+  animation: shake 400ms ease;
+  background: var(--error) !important;
+  color: #ffffff !important;
+}

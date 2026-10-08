@@ -1,10 +1,10 @@
-import type { MouseEvent as ReactMouseEvent } from 'react'
+import { useMemo, type MouseEvent as ReactMouseEvent } from 'react'
 import { showMenu } from '../components/ContextMenu'
-import { classGroups, classKey, classSpan, typeGroups, unclassed, type ClassGroup } from '../model/groups'
+import { classGroups, classKey, classSpan, overrideOf, typeGroups, type ClassGroup } from '../model/groups'
 import { VERB_COLORS } from '../model/registry'
 import type { Action, SceneObject } from '../model/types'
 import { newProject, pickProject } from '../project/controller'
-import { addObject, deleteAction, deleteClassAction, deleteObjects, duplicateObject, jumpToAction, jumpToClass, jumpToObject, materializeClassAction, removeFromClass, requestClasses, requestRename, selectClass, selectClassAction } from '../project/operations'
+import { addObject, deleteAction, deleteClassAction, deleteObjects, duplicateObjects, jumpToAction, jumpToClass, jumpToObject, materializeClassAction, overrideClassAction, removeFromClass, requestClasses, requestRename, selectClass, selectClassAction } from '../project/operations'
 import { useStore, type Tool } from '../state/store'
 import { timecode } from '../state/time'
 
@@ -17,10 +17,11 @@ function actionLabel(action: Action): string {
 }
 
 /**
- * The project, then its objects: class groups first, with the class's actions and its members
- * beneath, then the rest grouped by type (D80, D84). Each object folds its actions away; one
- * button folds or unfolds everything. Click selects, double-click jumps to the code, right-click
- * for more, and a right-click on empty space adds an object.
+ * The project, then its objects in every place they belong: class groups first, with the
+ * class's actions and its members beneath, then every object grouped by type (D80, D84). Each
+ * object folds its actions away; one button folds or unfolds everything. Click selects,
+ * Ctrl-click adds or removes, double-click jumps to the code, right-click for more, and a
+ * right-click on empty space adds an object.
  */
 export function ObjectPane() {
   const project = useStore((s) => s.project)
@@ -31,25 +32,34 @@ export function ObjectPane() {
   const collapsed = useStore((s) => s.collapsed)
   const select = useStore((s) => s.select)
   const selectAction = useStore((s) => s.selectAction)
+  const toggleSelected = useStore((s) => s.toggleSelected)
   const toggleCollapsed = useStore((s) => s.toggleCollapsed)
   const setAllCollapsed = useStore((s) => s.setAllCollapsed)
   const setHelp = useStore((s) => s.setHelp)
   const objects = model?.objects ?? []
-  const groups = model ? classGroups(model) : []
-  const rest = model ? typeGroups(unclassed(model)) : []
+  const groups = useMemo(() => (model ? classGroups(model) : []), [model])
+  const types = useMemo(() => typeGroups(objects), [objects])
   const foldable = [...objects.filter((o) => o.actions.length > 0).map((o) => o.name), ...groups.map((g) => classKey(g.className))]
   const anyExpanded = foldable.some((key) => !collapsed[key])
   const selectedActionRef = selectedAction && model ? model.objects.find((o) => o.name === selectedAction.object)?.actions[selectedAction.index] : undefined
 
+  const clickObject = (name: string) => (e: ReactMouseEvent) => {
+    if (e.ctrlKey || e.metaKey) toggleSelected(name)
+    else select([name])
+  }
+
   const objectMenu = (obj: SceneObject) => (e: ReactMouseEvent) => {
     e.stopPropagation()
-    select([obj.name])
+    const s = useStore.getState()
+    const targets = s.selection.includes(obj.name) ? s.selection : [obj.name]
+    if (!s.selection.includes(obj.name)) select([obj.name])
+    const many = targets.length > 1
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToObject(obj.name) },
-      { label: 'Rename…', run: () => requestRename({ object: obj.name }) },
-      { label: 'Classes…', run: () => requestClasses(obj.name) },
-      { label: 'Duplicate', run: () => duplicateObject(obj.name) },
-      { label: 'Delete object', run: () => deleteObjects([obj.name]), danger: true },
+      ...(many ? [] : [{ label: 'Rename…', run: () => requestRename({ object: obj.name }) }]),
+      { label: 'Classes…', run: () => requestClasses(targets) },
+      { label: many ? `Duplicate ${targets.length} objects` : 'Duplicate', run: () => duplicateObjects(targets) },
+      { label: many ? `Delete ${targets.length} objects` : 'Delete object', run: () => deleteObjects(targets), danger: true },
     ])
   }
 
@@ -58,11 +68,20 @@ export function ObjectPane() {
     selectAction(obj.name, index)
     const action = obj.actions[index]
     if (action?.classAction) {
-      const className = action.classAction.className
+      const classAction = action.classAction
+      if (action.overridden) {
+        const override = overrideOf(obj, classAction)
+        showMenu(e, [
+          { label: 'Jump to the override', run: () => selectAction(obj.name, override) },
+          { label: 'Remove the override', run: () => deleteAction(obj.name, override), danger: true },
+        ])
+        return
+      }
       showMenu(e, [
+        { label: `Override for ${obj.name}`, run: () => overrideClassAction(obj.name, index) },
+        { label: 'Copy as own action', run: () => materializeClassAction(obj.name, index) },
         { label: 'Jump to class code', run: () => jumpToAction(obj.name, index) },
-        { label: 'Edit for this object only', run: () => materializeClassAction(obj.name, index) },
-        { label: `Remove ${obj.name} from ${className}`, run: () => removeFromClass(obj.name, className) },
+        { label: `Remove ${obj.name} from ${classAction.className}`, run: () => removeFromClass(obj.name, classAction.className) },
         { label: 'Delete for every member', run: () => deleteAction(obj.name, index), danger: true },
       ])
       return
@@ -108,8 +127,8 @@ export function ObjectPane() {
     const selected = selection.includes(obj.name) && !selectedAction
     const folded = !!collapsed[obj.name]
     return (
-      <li key={obj.name} className={`object${selected ? ' selected' : ''}${member ? ' member' : ''}`}>
-        <div className="object-row" onClick={() => select([obj.name])} onDoubleClick={() => jumpToObject(obj.name)} onContextMenu={objectMenu(obj)} title="Double-click to jump to the code, right-click for more">
+      <li key={`${member ? 'm:' : ''}${obj.name}`} className={`object${selected ? ' selected' : ''}${member ? ' member' : ''}`}>
+        <div className="object-row" onClick={clickObject(obj.name)} onDoubleClick={() => jumpToObject(obj.name)} onContextMenu={objectMenu(obj)} title="Click to select, Ctrl-click to add, double-click to jump to the code, right-click for more">
           {obj.actions.length > 0 ? (
             <button
               className={`chevron${folded ? '' : ' open'}`}
@@ -134,21 +153,30 @@ export function ObjectPane() {
           <ul className="action-list">
             {obj.actions.map((action, index) => {
               const isSelected = selectedAction?.object === obj.name && selectedAction.index === index
+              const title = action.overridden
+                ? `From all('${action.classAction!.className}'), switched off for ${obj.name} by its own override.`
+                : action.classAction
+                  ? `From all('${action.classAction.className}'). Right-click to override it for this object.`
+                  : action.overrides
+                    ? `Overrides ${action.overrides.name} for ${obj.name}.`
+                    : 'Double-click to jump to the code, right-click for more'
               return (
                 <li
                   key={action.id}
-                  className={`action-row${isSelected ? ' selected' : ''}${action.classAction ? ' derived' : ''}`}
+                  className={`action-row${isSelected ? ' selected' : ''}${action.classAction ? ' derived' : ''}${action.overridden ? ' overridden' : ''}`}
                   onClick={() => selectAction(obj.name, index)}
                   onDoubleClick={() => jumpToAction(obj.name, index)}
                   onContextMenu={action.stmt ? actionMenu(obj, index) : undefined}
-                  title={action.classAction ? `From all('${action.classAction.className}'). Right-click to edit it for this object only.` : 'Double-click to jump to the code, right-click for more'}
+                  title={title}
                 >
                   <span className="dot" style={{ background: VERB_COLORS[action.verb] }} />
                   {action.classAction && <span className="ident">{action.classAction.className}</span>}
-                  {action.name && <span className="ident">{action.name}</span>}
+                  {action.overrides && <span className="ident override">{'↳'} {action.overrides.name}</span>}
+                  {action.name && !action.classAction && <span className="ident">{action.name}</span>}
                   <span className="name">{actionLabel(action)}</span>
                   <span className="dim mono">{timecode(action.start, fps)}</span>
                   {action.codeDriven && <span className="badge">code</span>}
+                  {action.overridden && <span className="badge off">off</span>}
                 </li>
               )
             })}
@@ -240,6 +268,7 @@ export function ObjectPane() {
           <div className="objects-tools">
             <span className="dim">
               {objects.length} {objects.length === 1 ? 'object' : 'objects'}
+              {selection.length > 1 ? `, ${selection.length} selected` : ''}
             </span>
             {foldable.length > 0 && (
               <button className="small" onClick={() => setAllCollapsed(anyExpanded ? foldable : null)} title={anyExpanded ? 'Hide every action list' : 'Show every action list'}>
@@ -249,7 +278,7 @@ export function ObjectPane() {
           </div>
           <ul className="object-list" onContextMenu={blankMenu}>
             {groups.map(renderClass)}
-            {rest.map((group) => (
+            {types.map((group) => (
               <li key={group.className} className="group">
                 <div className="group-head dim">
                   {group.className} <span className="mono">{group.objects.length}</span>

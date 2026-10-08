@@ -84,4 +84,14 @@ rise = all('bars').move({
   duration: 0.6,
   ease: 'back',
 })
+
+// bar2 goes its own way: this replaces rise for bar2 alone.
+
+bar2.move({
+  y: -200,
+  at: 2.4,
+  duration: 0.6,
+  ease: 'back',
+  overrides: rise,
+})
 `

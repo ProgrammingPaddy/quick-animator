@@ -89,7 +89,8 @@ export const VERB_COLORS: Record<Verb, string> = {
 /** The color for an object itself, as opposed to one of its actions. */
 export const OBJECT_COLOR = '#3b82f6'
 
-export const TIMING_KEYS = ['at', 'delay', 'duration', 'until', 'easeIn', 'easeOut', 'ease', 'relative'] as const
+/** Keys allowed in every action block that are not attributes: timing, `relative`, and `overrides` (D80). */
+export const TIMING_KEYS = ['at', 'delay', 'duration', 'until', 'easeIn', 'easeOut', 'ease', 'relative', 'overrides'] as const
 export type TimingKey = (typeof TIMING_KEYS)[number]
 export const TIMING_KEY_NAMES: ReadonlySet<string> = new Set(TIMING_KEYS)
 

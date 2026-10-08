@@ -100,6 +100,14 @@ export class Viewport {
     this.updateCamera()
   }
 
+  /** Put the view's left or top edge at a world coordinate, for the scrollbars (D85). */
+  scrollTo(edge: { left?: number; top?: number }): void {
+    this.adjusted = true
+    if (edge.left !== undefined) this.center.x = edge.left + this.view.width / 2 / this.zoom
+    if (edge.top !== undefined) this.center.y = edge.top - this.view.height / 2 / this.zoom
+    this.updateCamera()
+  }
+
   /** The world rectangle currently in view. */
   viewRect(): { left: number; right: number; top: number; bottom: number } {
     const halfWidth = this.view.width / 2 / this.zoom

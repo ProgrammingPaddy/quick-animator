@@ -1,18 +1,23 @@
 import { applyEdits, scrollToPos } from '../code/editor'
 import { findDependents, type Dependent } from '../model/dependents'
 import { appendStatement, blockText, formatNumber, insertDeclaration, removeProp, removeStatements, setProp, type TextEdit } from '../model/edits'
+import { isMember } from '../model/evaluate'
 import { memberRef } from '../model/groups'
 import { classes, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
 import { identifierEdits, nameProblem, replaceIdentifiers } from '../model/rename'
 import { definingAction, progressAt, valueAt } from '../model/sample'
-import type { Action, ClassAction, Range, SceneModel, SceneObject } from '../model/types'
-import { useStore, type Clip, type Tool, type TransformMode } from '../state/store'
+import type { Action, ActionInfo, ClassAction, Range, SceneModel, SceneObject } from '../model/types'
+import { useStore, type Clip, type ClipObject, type SelectionState, type Tool } from '../state/store'
 
 /**
  * Every GUI gesture that changes the scene ends here as a minimal text edit (decision D24). The
  * edit goes through the editor, which re-evaluates the model and records the undo step. The
- * editor updates synchronously, so an operation can build on the one before it.
+ * editor updates synchronously, so an operation can build on the one before it. When an edit
+ * changes what is selected, the selection travels in the same step (D90).
  */
+
+/** A drag's kind of change: the attributes it edits and the verb that animates them (D79, D86). */
+export type DragKind = 'move' | 'rotate' | 'resize'
 
 /**
  * The current text and the model that describes it. While the text has an error, the last good
@@ -32,6 +37,9 @@ export function canEdit(): boolean {
 function findObject(name: string): SceneObject | null {
   return state().model?.objects.find((o) => o.name === name) ?? null
 }
+
+const objectsSelected = (names: string[]): SelectionState => ({ selection: names, selectedAction: null })
+const actionSelected = (object: string, index: number): SelectionState => ({ selection: [object], selectedAction: { object, index } })
 
 /** Every name in use: objects, named actions, and named class actions. */
 function takenNames(model: SceneModel): Set<string> {
@@ -63,11 +71,27 @@ export function roundSeconds(v: number): number {
   return Math.round(v * 1000) / 1000
 }
 
-/** The attributes a transform mode changes, and the verb that animates them (D79). */
-export function modeAttrs(mode: TransformMode): { attrs: string[]; verb: Verb } {
-  if (mode === 'rotate') return { attrs: ['rotation'], verb: 'rotate' }
-  if (mode === 'scale') return { attrs: ['scale'], verb: 'scale' }
+/** The attributes a kind of drag changes on a class of object, and the verb that animates them. */
+export function dragAttrs(kind: DragKind, className: string): { attrs: string[]; verb: Verb } {
+  if (kind === 'rotate') return { attrs: ['rotation'], verb: 'rotate' }
+  if (kind === 'resize') {
+    const attrs = (VERB_ATTRS['resize'] ?? []).filter((a) => classes[className]?.attrs.some((s) => s.name === a))
+    return { attrs, verb: 'resize' }
+  }
   return { attrs: ['x', 'y'], verb: 'move' }
+}
+
+/**
+ * The dimension attributes of an object after scaling its drawn size by factors along its own
+ * axes: a Rect's width and height follow each axis; a Circle's radius and a Text's font size
+ * follow whichever axis moved.
+ */
+export function resizedValues(className: string, base: Record<string, number>, fx: number, fy: number): Record<string, number> {
+  const uniform = fx !== 1 ? fx : fy
+  if (className === 'Rect') return { width: (base['width'] ?? 0) * fx, height: (base['height'] ?? 0) * fy }
+  if (className === 'Circle') return { radius: (base['radius'] ?? 0) * uniform }
+  if (className === 'Text') return { fontSize: (base['fontSize'] ?? 0) * uniform }
+  return {}
 }
 
 /** Place a new object at a world position. Returns its name. */
@@ -79,8 +103,7 @@ export function addObject(className: Exclude<Tool, 'select'>, x: number, y: numb
   if (className === 'Rect') Object.assign(attrs, { width: 240, height: 140, fill: '#4f8cff' })
   if (className === 'Circle') Object.assign(attrs, { radius: 60, fill: '#f59e0b' })
   if (className === 'Text') Object.assign(attrs, { text: 'Text', fontSize: 48, fill: '#ffffff' })
-  applyEdits([insertDeclaration(model.lastDeclEnd, blockText(`${name} = ${className}`, attrs))])
-  useStore.getState().select([name])
+  applyEdits([insertDeclaration(model.lastDeclEnd, blockText(`${name} = ${className}`, attrs))], objectsSelected([name]))
   return name
 }
 
@@ -111,19 +134,19 @@ function editFor(name: string, attr: string, value: number, time: number): TextE
 
 /**
  * A plain drag: the object has these values at this time. When a class action defines one of
- * them right now, the object first gets its own copy of it, which is what the drag then edits
- * (D80).
+ * them right now, the object first overrides it with its own copy, which is what the drag then
+ * edits (D80).
  */
 export function setAttrsAt(name: string, attrs: Record<string, number>, time: number): boolean {
   const { model } = state()
   const obj = model?.objects.find((o) => o.name === name)
   if (model && obj) {
-    const copied = new Set<ClassAction>()
+    const done = new Set<ClassAction>()
     for (const attr of Object.keys(attrs)) {
       const action = definingAction(model, obj, attr, time)
-      if (!action?.classAction || !action.stmt || copied.has(action.classAction)) continue
-      copied.add(action.classAction)
-      materializeClassAction(name, obj.actions.indexOf(action))
+      if (!action?.classAction || !action.stmt || done.has(action.classAction)) continue
+      done.add(action.classAction)
+      overrideClassAction(name, obj.actions.indexOf(action))
     }
   }
   const edits = Object.entries(attrs)
@@ -163,14 +186,14 @@ export function setActionDestination(name: string, index: number, destination: R
 }
 
 /**
- * Shift-drag begins: add an action of the mode's kind from where the object is now, starting at
+ * Shift-drag begins: add an action of the drag's kind from where the object is now, starting at
  * the playhead (D27, D79). The playhead moves to the action's end so the result is seen (D49).
  */
-export function beginTimed(name: string, mode: TransformMode): boolean {
+export function beginTimed(name: string, kind: DragKind): boolean {
   const { source, model, time } = state()
   const obj = model?.objects.find((o) => o.name === name)
   if (!model || !obj || !obj.decl) return false
-  const { attrs, verb } = modeAttrs(mode)
+  const { attrs, verb } = dragAttrs(kind, obj.className)
   const at = roundSeconds(time)
   const block: Record<string, AttrValue> = {}
   for (const attr of attrs) {
@@ -180,8 +203,7 @@ export function beginTimed(name: string, mode: TransformMode): boolean {
   block['at'] = at
   block['duration'] = 1
   const index = obj.actions.length
-  applyEdits([appendStatement(source, blockText(`${name}.${verb}`, block))])
-  useStore.getState().selectAction(name, index)
+  applyEdits([appendStatement(source, blockText(`${name}.${verb}`, block))], actionSelected(name, index))
   useStore.getState().setTime(at + 1)
   return true
 }
@@ -203,6 +225,14 @@ export function setActionValues(name: string, index: number, values: Record<stri
   const action = findObject(name)?.actions[index]
   if (!action?.stmt || action.classAction) return
   const stmt = action.stmt
+  applyEdits(Object.entries(values).map(([key, value]) => setProp(source, stmt, key, roundAttr(key, value))))
+}
+
+/** Write values into a class action's block, for every member. */
+export function setClassActionValues(id: number, values: Record<string, number>): void {
+  const { source, model } = state()
+  const stmt = model?.classActions[id]?.stmt
+  if (!stmt) return
   applyEdits(Object.entries(values).map(([key, value]) => setProp(source, stmt, key, roundAttr(key, value))))
 }
 
@@ -229,22 +259,18 @@ export function addAction(name: string, verb: Verb, time: number): void {
   const attrs = startingValues(model, obj, verb, time)
   attrs['at'] = roundSeconds(time)
   attrs['duration'] = 1
-  const index = obj.actions.length
-  applyEdits([appendStatement(source, blockText(`${name}.${verb}`, attrs))])
-  useStore.getState().selectAction(name, index)
+  applyEdits([appendStatement(source, blockText(`${name}.${verb}`, attrs))], actionSelected(name, obj.actions.length))
 }
 
 /** Add an action for every member of a class at a time, written once as `all('name').verb` (D80). */
 export function addClassAction(className: string, verb: Verb, time: number): void {
   const { source, model } = state()
-  const first = model?.objects.find((o) => o.classes.includes(className))
+  const first = model?.objects.find((o) => isMember(o, className))
   if (!model || !first) return
   const attrs = startingValues(model, first, verb, time)
   attrs['at'] = roundSeconds(time)
   attrs['duration'] = 1
-  const index = first.actions.length
-  applyEdits([appendStatement(source, blockText(`all('${className}').${verb}`, attrs))])
-  useStore.getState().selectAction(first.name, index)
+  applyEdits([appendStatement(source, blockText(`all('${className}').${verb}`, attrs))], actionSelected(first.name, first.actions.length))
 }
 
 /** Make the object exist from here: base opacity 0, then a fade to 1 at this time, or a pop with `instant`. */
@@ -256,8 +282,7 @@ export function appearHere(name: string, time: number, instant = false): void {
   const base = obj.decl.props.find((p) => p.key === 'opacity')
   if (!base || base.raw.trim() !== '0') edits.push(setProp(source, obj.decl, 'opacity', 0))
   edits.push(appendStatement(source, blockText(`${name}.fade`, { opacity: 1, at: roundSeconds(time), duration: instant ? 0 : 0.3 })))
-  applyEdits(edits)
-  useStore.getState().selectAction(name, obj.actions.length)
+  applyEdits(edits, actionSelected(name, obj.actions.length))
 }
 
 /**
@@ -273,8 +298,37 @@ export function disappearHere(name: string, time: number, instant = false): void
   const now = valueAt(model, obj, 'opacity', time)
   if (typeof now === 'number' && now <= 0) edits.push(setProp(source, obj.decl, 'opacity', 1))
   edits.push(appendStatement(source, blockText(`${name}.fade`, { opacity: 0, at: roundSeconds(time), duration: instant ? 0 : 0.3 })))
-  applyEdits(edits)
-  useStore.getState().selectAction(name, obj.actions.length)
+  applyEdits(edits, actionSelected(name, obj.actions.length))
+}
+
+/** Every member of a class appears here: each base opacity 0, then one class fade to 1 (D93). */
+export function appearClassHere(className: string, time: number, instant = false): void {
+  const { source, model } = state()
+  if (!model) return
+  const members = model.objects.filter((o) => isMember(o, className) && o.decl)
+  if (members.length === 0) return
+  const edits: TextEdit[] = []
+  for (const member of members) {
+    const base = member.decl!.props.find((p) => p.key === 'opacity')
+    if (!base || base.raw.trim() !== '0') edits.push(setProp(source, member.decl!, 'opacity', 0))
+  }
+  edits.push(appendStatement(source, blockText(`all('${className}').fade`, { opacity: 1, at: roundSeconds(time), duration: instant ? 0 : 0.3 })))
+  applyEdits(edits, actionSelected(members[0]!.name, members[0]!.actions.length))
+}
+
+/** Every member of a class disappears here with one class fade to 0; never-visible members first become visible (D71). */
+export function disappearClassHere(className: string, time: number, instant = false): void {
+  const { source, model } = state()
+  if (!model) return
+  const members = model.objects.filter((o) => isMember(o, className) && o.decl)
+  if (members.length === 0) return
+  const edits: TextEdit[] = []
+  for (const member of members) {
+    const now = valueAt(model, member, 'opacity', time)
+    if (typeof now === 'number' && now <= 0) edits.push(setProp(source, member.decl!, 'opacity', 1))
+  }
+  edits.push(appendStatement(source, blockText(`all('${className}').fade`, { opacity: 0, at: roundSeconds(time), duration: instant ? 0 : 0.3 })))
+  applyEdits(edits, actionSelected(members[0]!.name, members[0]!.actions.length))
 }
 
 /** Move or resize a clip. `at` is the start without delay; `duration` the length. */
@@ -300,38 +354,76 @@ export function setClassActionTiming(id: number, timing: { at?: number; duration
 }
 
 /**
- * Give one member its own copy of a class action, so it can be edited on its own. The copy
- * comes later in the script, so it takes over from its start; the class action still applies
- * where the copy does not (D80). A missing `at` is written in, so the copy keeps its time.
- * Returns the index of the new action on the object.
+ * The text of a member's own block copied from a class statement: the same lines, with `at`
+ * written in when the class statement had none (so the copy keeps its time), plus extra lines.
+ */
+function copiedBlock(source: string, stmt: ActionInfo, action: Action, extra: string[]): string {
+  const props = source.slice(stmt.propsOpen, stmt.propsClose)
+  const hasAt = stmt.props.some((p) => p.key === 'at')
+  const lines = [...(hasAt ? [] : [`at: ${formatNumber(roundSeconds(action.start - (action.timing.delay ?? 0)))}`]), ...extra]
+  if (props.includes('\n')) {
+    let body = props.replace(/\s+$/, '')
+    if (body.length > 0 && !/,$/.test(body)) body += ','
+    const before = lines.length > 0 && !hasAt ? `\n${stmt.indent}${lines[0]},` : ''
+    const after = (hasAt ? lines : lines.slice(1)).map((l) => `\n${stmt.indent}${l},`).join('')
+    return `{${before}${body}${after}\n}`
+  }
+  const inner = props.trim().replace(/,$/, '')
+  const parts = hasAt ? [inner, ...lines] : [lines[0]!, inner, ...lines.slice(1)]
+  return `{ ${parts.filter(Boolean).join(', ')} }`
+}
+
+/**
+ * Give one member its own action in place of a class action: the class action is named if it
+ * has no name yet, and the member gets a copy of its block with `overrides: name`, which
+ * switches the class action off for that object (D80). Returns the index of the new action.
+ */
+export function overrideClassAction(name: string, index: number): number | null {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  const action = obj?.actions[index]
+  const classAction = action?.classAction
+  if (!model || !obj || !action || !classAction?.stmt) return null
+  const existing = obj.actions.findIndex((a) => a.overrides === classAction)
+  if (existing >= 0) return existing
+  const stmt = classAction.stmt
+  const edits: TextEdit[] = []
+  let refName = classAction.name
+  if (!refName) {
+    refName = uniqueName(classAction.verb)
+    edits.push({ from: stmt.range.from, to: stmt.range.from, insert: `${refName} = ` })
+  }
+  const newIndex = obj.actions.length
+  edits.push(appendStatement(source, `${name}.${action.verb}(${copiedBlock(source, stmt, action, [`overrides: ${refName}`])})`))
+  applyEdits(edits, actionSelected(name, newIndex))
+  return newIndex
+}
+
+/**
+ * Give one member a standalone copy of a class action, written after the class statement so it
+ * takes over from its start while the class action still applies where the copy does not (D53).
+ * Returns the index of the new action.
  */
 export function materializeClassAction(name: string, index: number): number | null {
   const { source, model } = state()
   const obj = model?.objects.find((o) => o.name === name)
   const action = obj?.actions[index]
   if (!model || !obj || !action?.classAction?.stmt) return null
-  const stmt = action.classAction.stmt
-  const props = source.slice(stmt.propsOpen, stmt.propsClose)
-  const hasAt = stmt.props.some((p) => p.key === 'at')
-  const at = `at: ${formatNumber(roundSeconds(action.start - (action.timing.delay ?? 0)))},`
-  const inserted = hasAt ? '' : props.includes('\n') ? `\n${stmt.indent}${at}` : ` ${at}`
-  const text = `${name}.${action.verb}({${inserted}${props}})`
   const newIndex = obj.actions.length
-  applyEdits([appendStatement(source, text)])
-  useStore.getState().selectAction(name, newIndex)
+  applyEdits([appendStatement(source, `${name}.${action.verb}(${copiedBlock(source, action.classAction.stmt, action, [])})`)], actionSelected(name, newIndex))
   return newIndex
 }
 
-/** The index of an action the object owns: the one given, or its own copy of a class action. */
+/** The index of an action the object owns: the one given, or its override of a class action. */
 export function ownAction(name: string, index: number): number | null {
   const action = findObject(name)?.actions[index]
   if (!action) return null
-  return action.classAction ? materializeClassAction(name, index) : index
+  return action.classAction ? overrideClassAction(name, index) : index
 }
 
 /**
  * Edits that keep other statements valid when names disappear: a time reference becomes the
- * time it currently resolves to, and a link falls back to the attribute's default (D72).
+ * time it currently resolves to, and a link or an `overrides` falls back to nothing (D72).
  */
 function resolutionEdits(model: SceneModel, source: string, dependents: Dependent[]): TextEdit[] {
   const edits: TextEdit[] = []
@@ -356,7 +448,7 @@ function confirmRemoval(title: string, dependents: Dependent[], run: () => void)
   }
   useStore.getState().openDialog({
     title,
-    message: 'These refer to it. Time references keep the time they resolve to now; links fall back to defaults.',
+    message: 'These refer to it. Time references keep the time they resolve to now; links and overrides fall back to nothing.',
     items: dependents.map((d) => d.label),
     confirmLabel: 'Delete',
     danger: true,
@@ -380,8 +472,7 @@ export function deleteObjects(names: string[], confirmed = false): void {
       ranges.push(obj.decl!.range)
       for (const action of obj.actions) if (action.stmt && !action.classAction) ranges.push(action.stmt.range)
     }
-    applyEdits([...removeStatements(source, ranges), ...resolutionEdits(model, source, dependents)])
-    useStore.getState().select([])
+    applyEdits([...removeStatements(source, ranges), ...resolutionEdits(model, source, dependents)], objectsSelected([]))
   }
   if (confirmed) run()
   else confirmRemoval(`Delete ${objects.length === 1 ? objects[0]!.name : `${objects.length} objects`}?`, dependents, run)
@@ -399,8 +490,7 @@ export function deleteAction(name: string, index: number, confirmed = false): vo
   const run = () => {
     const current = state()
     if (!current.model || current.model !== model) return deleteAction(name, index, true)
-    applyEdits([...removeStatements(source, [action.stmt!.range]), ...resolutionEdits(model, source, dependents)])
-    useStore.getState().select([name])
+    applyEdits([...removeStatements(source, [action.stmt!.range]), ...resolutionEdits(model, source, dependents)], objectsSelected([name]))
   }
   const label = classAction ? `all('${classAction.className}').${action.verb} for every member` : action.name ? `${action.name} (${obj.name}.${action.verb})` : `${obj.name}.${action.verb}`
   if (confirmed) run()
@@ -412,6 +502,26 @@ export function deleteClassAction(id: number): void {
   const classAction = state().model?.classActions[id]
   const ref = classAction ? memberRef(classAction) : null
   if (ref) deleteAction(ref.object, ref.index)
+}
+
+/**
+ * Move an object's declaration before or after another's. Declaration order is the order of the
+ * rows and the drawing order, later on top (D92).
+ */
+export function moveDeclaration(name: string, target: { before: string } | { after: string }): void {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  const otherName = 'before' in target ? target.before : target.after
+  const other = model?.objects.find((o) => o.name === otherName)
+  if (!model || !obj?.decl || !other?.decl || obj === other) return
+  const declared = model.objects.filter((o) => o.decl)
+  const at = declared.indexOf(obj)
+  const otherAt = declared.indexOf(other)
+  if ('before' in target ? at === otherAt - 1 : at === otherAt + 1) return
+  const text = source.slice(obj.decl.range.from, obj.decl.range.to)
+  const removal = removeStatements(source, [obj.decl.range])[0]!
+  const insert: TextEdit = 'before' in target ? { from: other.decl.range.from, to: other.decl.range.from, insert: `${text}\n\n` } : { from: other.decl.range.to, to: other.decl.range.to, insert: `\n\n${text}` }
+  applyEdits([removal, insert], objectsSelected([name]))
 }
 
 function numberedCopies(model: SceneModel, names: string[], from: number): Record<string, string> {
@@ -427,18 +537,12 @@ function numberedCopies(model: SceneModel, names: string[], from: number): Recor
   return renames
 }
 
-/** A clip of an object with its own actions, or of one action, from the current code. */
-function clipOf(name: string, index: number | null): Clip | null {
+/** One object with its own actions, as source text. */
+function objectClip(name: string): ClipObject | null {
   const { source, model } = state()
   const obj = model?.objects.find((o) => o.name === name)
   if (!model || !obj?.decl) return null
-  if (index !== null) {
-    const action = obj.actions[index]
-    if (!action?.stmt) return null
-    return { kind: 'action', objectName: name, verb: action.verb, name: action.classAction ? null : action.name, propsText: source.slice(action.stmt.propsOpen, action.stmt.propsClose) }
-  }
   return {
-    kind: 'object',
     name,
     className: obj.className,
     propsText: source.slice(obj.decl.propsOpen, obj.decl.propsClose),
@@ -446,20 +550,33 @@ function clipOf(name: string, index: number | null): Clip | null {
   }
 }
 
-/** Ctrl+C: the selected action, or else the selected object with its actions (D81). */
+/** One action, as source text. */
+function actionClip(name: string, index: number): Clip | null {
+  const { source, model } = state()
+  const action = model?.objects.find((o) => o.name === name)?.actions[index]
+  if (!action?.stmt) return null
+  return { kind: 'action', objectName: name, verb: action.verb, name: action.classAction ? null : action.name, propsText: source.slice(action.stmt.propsOpen, action.stmt.propsClose) }
+}
+
+/** Ctrl+C: the selected action, or else the selected objects with their actions (D81). */
 export function copySelection(): boolean {
   const { selection, selectedAction, setClipboard } = useStore.getState()
-  const clip = selectedAction ? clipOf(selectedAction.object, selectedAction.index) : selection[0] ? clipOf(selection[0], null) : null
+  let clip: Clip | null = null
+  if (selectedAction) clip = actionClip(selectedAction.object, selectedAction.index)
+  else {
+    const items = selection.map(objectClip).filter((c): c is ClipObject => !!c)
+    if (items.length > 0) clip = { kind: 'objects', items }
+  }
   if (!clip) return false
   setClipboard(clip)
-  const text = clip.kind === 'action' ? `${clip.objectName}.${clip.verb}({${clip.propsText}})` : [`${clip.name} = ${clip.className}({${clip.propsText}})`, ...clip.actions.map((a) => a.text)].join('\n\n')
+  const text = clip.kind === 'action' ? `${clip.objectName}.${clip.verb}({${clip.propsText}})` : clip.items.flatMap((item) => [`${item.name} = ${item.className}({${item.propsText}})`, ...item.actions.map((a) => a.text)]).join('\n\n')
   void navigator.clipboard?.writeText(text).catch(() => undefined)
   return true
 }
 
 /**
- * Ctrl+V: an object pastes as a numbered copy; an action pastes onto the selected object, or
- * back onto its own when nothing else is selected (D81).
+ * Ctrl+V: objects paste as numbered copies; an action pastes onto the selected object, or back
+ * onto its own when nothing else is selected (D81).
  */
 export function pasteClipboard(): boolean {
   const { source, model } = state()
@@ -471,41 +588,43 @@ export function pasteClipboard(): boolean {
     if (!obj?.decl) return false
     const renames = clipboard.name ? numberedCopies(model, [clipboard.name], 2) : {}
     const head = clipboard.name ? `${renames[clipboard.name]} = ` : ''
-    const index = obj.actions.length
-    applyEdits([appendStatement(source, `${head}${target}.${clipboard.verb}({${clipboard.propsText}})`)])
-    useStore.getState().selectAction(target, index)
+    applyEdits([appendStatement(source, `${head}${target}.${clipboard.verb}({${clipboard.propsText}})`)], actionSelected(target, obj.actions.length))
     return true
   }
-  return insertCopy(model, source, clipboard, null) !== null
+  return insertCopies(model, source, clipboard.items, null).length > 0
 }
 
 /**
- * Write a copy of an object and its actions, numbered after the original: `box` gives `box2`,
- * and its `slide` gives `slide2`. References inside the copy point at the copy. The declaration
- * goes after `afterDecl`, or after the last declaration.
+ * Write copies of objects and their actions, numbered after the originals: `box` gives `box2`,
+ * and its `slide` gives `slide2`. References among the copies point at the copies. The
+ * declarations go after `afterDecl`, or after the last declaration.
  */
-function insertCopy(model: SceneModel, source: string, clip: Extract<Clip, { kind: 'object' }>, afterDecl: Range | null): string | null {
-  const renames = numberedCopies(model, [clip.name, ...clip.actions.map((a) => a.name).filter((n): n is string => !!n)], 2)
-  const newName = renames[clip.name]!
-  const declText = replaceIdentifiers(`${newName} = ${clip.className}({${clip.propsText}})`, renames)
-  const edits: TextEdit[] = [afterDecl ? { from: afterDecl.to, to: afterDecl.to, insert: `\n\n${declText}` } : insertDeclaration(model.lastDeclEnd, declText)]
-  const actionTexts = clip.actions.map((a) => replaceIdentifiers(a.text, renames))
+function insertCopies(model: SceneModel, source: string, items: ClipObject[], afterDecl: Range | null): string[] {
+  if (items.length === 0) return []
+  const renames = numberedCopies(model, [...items.map((i) => i.name), ...items.flatMap((i) => i.actions.map((a) => a.name).filter((n): n is string => !!n))], 2)
+  const declTexts = items.map((i) => replaceIdentifiers(`${renames[i.name]} = ${i.className}({${i.propsText}})`, renames))
+  const edits: TextEdit[] = [afterDecl ? { from: afterDecl.to, to: afterDecl.to, insert: `\n\n${declTexts.join('\n\n')}` } : insertDeclaration(model.lastDeclEnd, declTexts.join('\n\n'))]
+  const actionTexts = items.flatMap((i) => i.actions.map((a) => replaceIdentifiers(a.text, renames)))
   if (actionTexts.length > 0) {
     const trimmed = source.replace(/\s+$/, '')
     edits.push({ from: trimmed.length, to: source.length, insert: `\n\n${actionTexts.join('\n\n')}\n` })
   }
-  applyEdits(edits)
-  useStore.getState().select([newName])
-  return newName
+  const newNames = items.map((i) => renames[i.name]!)
+  applyEdits(edits, objectsSelected(newNames))
+  return newNames
 }
 
-/** A copy of an object with all its actions, right after the original (D74). */
-export function duplicateObject(name: string): string | null {
-  const clip = clipOf(name, null)
+/** Copies of objects with all their actions, right after the last of them (D74). */
+export function duplicateObjects(names: string[]): string[] {
   const { source, model } = state()
-  const obj = model?.objects.find((o) => o.name === name)
-  if (!clip || clip.kind !== 'object' || !model || !obj?.decl) return null
-  return insertCopy(model, source, clip, obj.decl.range)
+  if (!model) return []
+  const items = names.map(objectClip).filter((c): c is ClipObject => !!c)
+  const last = [...model.objects].reverse().find((o) => names.includes(o.name) && o.decl)
+  return insertCopies(model, source, items, last?.decl?.range ?? null)
+}
+
+export function duplicateObject(name: string): string | null {
+  return duplicateObjects([name])[0] ?? null
 }
 
 type RenameTarget = { object: string } | { object: string; index: number } | { classAction: number }
@@ -561,44 +680,41 @@ function applyRename(target: RenameTarget, newName: string): void {
   const obj = model.objects.find((o) => o.name === target.object)
   if (!obj) return
   if (!('index' in target)) {
-    applyEdits(identifierEdits(source, { [obj.name]: newName }))
-    useStore.getState().select([newName])
+    applyEdits(identifierEdits(source, { [obj.name]: newName }), objectsSelected([newName]))
     return
   }
   const action = obj.actions[target.index]
   if (!action?.stmt) return
-  if (action.name) applyEdits(identifierEdits(source, { [action.name]: newName }))
-  else applyEdits([{ from: action.stmt.range.from, to: action.stmt.range.from, insert: `${newName} = ` }])
-  useStore.getState().selectAction(obj.name, target.index)
+  if (action.name) applyEdits(identifierEdits(source, { [action.name]: newName }), actionSelected(obj.name, target.index))
+  else applyEdits([{ from: action.stmt.range.from, to: action.stmt.range.from, insert: `${newName} = ` }], actionSelected(obj.name, target.index))
 }
 
-const CLASS_LIST = /^[A-Za-z_][\w-]*(\s+[A-Za-z_][\w-]*)*$/
-
-/** Ask which classes an object belongs to, written as `class: 'a b'` in its declaration (D80). */
-export function requestClasses(name: string): void {
-  const obj = findObject(name)
-  if (!obj?.decl) return
-  useStore.getState().openDialog({
-    title: `Classes of ${name}`,
-    message: "Names separated by spaces, like CSS classes. An action on all('name') then applies to every member.",
-    input: { label: 'Classes', value: obj.classes.join(' '), validate: (value) => (value.trim() === '' || CLASS_LIST.test(value.trim()) ? null : 'Use letters, digits, dashes, and underscores, separated by spaces.') },
-    confirmLabel: 'Set',
-    onConfirm: (value) => setClasses(name, value.trim().split(/\s+/).filter(Boolean)),
-  })
+/** Open the Classes dialog for objects (D88). */
+export function requestClasses(names: string[]): void {
+  const { model } = state()
+  const valid = names.filter((n) => model?.objects.some((o) => o.name === n && o.decl))
+  if (valid.length > 0) useStore.getState().openClassesDialog(valid)
 }
 
-export function setClasses(name: string, names: string[]): void {
-  const { source } = state()
-  const obj = findObject(name)
-  if (!obj?.decl) return
-  const edit = names.length > 0 ? setProp(source, obj.decl, 'class', names.join(' ')) : removeProp(source, obj.decl, 'class')
-  if (edit) applyEdits([edit])
-  useStore.getState().select([name])
+/** Add classes to objects and take others away, written into each `class` attribute. */
+export function applyClasses(names: string[], add: string[], remove: string[]): void {
+  const { source, model } = state()
+  if (!model) return
+  const edits: TextEdit[] = []
+  for (const name of names) {
+    const obj = model.objects.find((o) => o.name === name)
+    if (!obj?.decl) continue
+    const next = obj.classes.filter((c) => !remove.includes(c))
+    for (const c of add) if (!next.includes(c)) next.push(c)
+    if (next.join(' ') === obj.classes.join(' ')) continue
+    const edit = next.length > 0 ? setProp(source, obj.decl, 'class', next.join(' ')) : removeProp(source, obj.decl, 'class')
+    if (edit) edits.push(edit)
+  }
+  applyEdits(edits, objectsSelected(names))
 }
 
 export function removeFromClass(name: string, className: string): void {
-  const obj = findObject(name)
-  if (obj) setClasses(name, obj.classes.filter((c) => c !== className))
+  applyClasses([name], [], [className])
 }
 
 /** Scroll the code pane to an object's declaration. */
@@ -618,7 +734,7 @@ export function jumpToClass(className: string): void {
   const model = useStore.getState().model
   const classAction = model?.classActions.find((a) => a.className === className && a.stmt)
   if (classAction?.stmt) return scrollToPos(classAction.stmt.range.from)
-  const member = model?.objects.find((o) => o.classes.includes(className) && o.decl)
+  const member = model?.objects.find((o) => isMember(o, className) && o.decl)
   if (member?.decl) scrollToPos(member.decl.range.from)
 }
 
@@ -628,7 +744,7 @@ export function selectClass(className: string): void {
   useStore.getState().select(names)
 }
 
-/** Select a class action, through its first member, so it is marked everywhere. */
+/** Select a class action, through one of its members, so it is marked everywhere. */
 export function selectClassAction(classAction: ClassAction): void {
   const ref = memberRef(classAction)
   if (ref) useStore.getState().selectAction(ref.object, ref.index)
