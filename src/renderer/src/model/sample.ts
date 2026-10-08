@@ -1,4 +1,4 @@
-import { attrSchema, type AttrType, type AttrValue } from './registry'
+import { attrSchema, defaultFor, type AttrType, type AttrValue } from './registry'
 import { easingFor, type Easing } from './easing'
 import type { Action, AttrSource, SceneModel, SceneObject } from './types'
 
@@ -72,7 +72,7 @@ function resolveSource(model: SceneModel, source: AttrSource, time: number, fall
 }
 
 function fallbackFor(obj: SceneObject, attr: string): AttrValue {
-  return attrSchema(obj.className, attr)?.default ?? 0
+  return defaultFor(obj.className, attr, obj.attrs) ?? 0
 }
 
 /** The attribute before any action touches it. */

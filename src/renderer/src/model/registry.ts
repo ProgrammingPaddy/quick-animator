@@ -14,6 +14,8 @@ export interface AttrSchema {
   doc: string
   /** Whether actions may change it over time. */
   animatable: boolean
+  /** When set, the default comes from the object's other attributes, such as a circle's width from its radius (D106). */
+  derive?: (attrs: Record<string, AttrValue>) => AttrValue
 }
 
 export interface ClassSchema {
@@ -45,8 +47,13 @@ export const classes: Record<string, ClassSchema> = {
   },
   Circle: {
     name: 'Circle',
-    doc: 'A circle.',
-    attrs: [...common, { name: 'radius', type: 'number', default: 60, doc: 'Radius in pixels.', animatable: true }],
+    doc: 'A circle, or an oval when its width and height differ.',
+    attrs: [
+      ...common,
+      { name: 'radius', type: 'number', default: 60, doc: 'Radius in pixels: the width and the height are twice it unless they are set.', animatable: true },
+      { name: 'width', type: 'number', default: 120, doc: 'Width in pixels. Unset: twice the radius.', animatable: true, derive: (a) => 2 * (typeof a['radius'] === 'number' ? a['radius'] : 60) },
+      { name: 'height', type: 'number', default: 120, doc: 'Height in pixels. Unset: twice the radius.', animatable: true, derive: (a) => 2 * (typeof a['radius'] === 'number' ? a['radius'] : 60) },
+    ],
   },
   Text: {
     name: 'Text',
@@ -102,4 +109,14 @@ export function schemaOf(className: string): ClassSchema | undefined {
 
 export function attrSchema(className: string, attr: string): AttrSchema | undefined {
   return classes[className]?.attrs.find((a) => a.name === attr)
+}
+
+/** An attribute's default for one object: derived from its other literal attributes when the schema says so. */
+export function defaultFor(className: string, attr: string, attrs: Record<string, unknown>): AttrValue | undefined {
+  const schema = attrSchema(className, attr)
+  if (!schema) return undefined
+  if (!schema.derive) return schema.default
+  const literals: Record<string, AttrValue> = {}
+  for (const [key, value] of Object.entries(attrs)) if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean') literals[key] = value
+  return schema.derive(literals)
 }

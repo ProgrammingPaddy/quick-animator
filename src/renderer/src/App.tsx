@@ -6,7 +6,7 @@ import { DialogLayer } from './components/Dialog'
 import { HelpOverlay } from './components/HelpOverlay'
 import { Layout } from './Layout'
 import { initProject } from './project/controller'
-import { copySelection, deleteAction, deleteObjects, duplicateObjects, pasteClipboard, requestRename } from './project/operations'
+import { copySelection, cutSelection, deleteActions, deleteObjects, duplicateObjects, nudgeActions, nudgeObjects, pasteClipboard, requestRename } from './project/operations'
 import { useClock } from './state/clock'
 import { useStore } from './state/store'
 
@@ -38,7 +38,7 @@ export function App() {
         return
       }
       if (store.dialog || store.classesDialog || isTypingTarget(e.target)) return
-      const { togglePlaying, stepFrames, setTime, setPlaying, contentEnd, time, selection, selectedAction, select, tool, setTool } = store
+      const { togglePlaying, stepFrames, setTime, setPlaying, contentEnd, time, selection, selectedActions, select, tool, setTool } = store
       const ctrl = e.ctrlKey || e.metaKey
       if (ctrl && (e.code === 'KeyZ' || e.code === 'KeyY')) {
         e.preventDefault()
@@ -54,6 +54,10 @@ export function App() {
         if (pasteClipboard()) e.preventDefault()
         return
       }
+      if (ctrl && e.code === 'KeyX') {
+        if (cutSelection()) e.preventDefault()
+        return
+      }
       if (ctrl && e.code === 'KeyD') {
         e.preventDefault()
         if (selection.length > 0) duplicateObjects(selection)
@@ -64,18 +68,21 @@ export function App() {
         select(store.model?.objects.map((o) => o.name) ?? [])
         return
       }
+      // Arrows act on the selection: actions move by a frame, objects by a pixel (D95). With
+      // nothing selected they step the playhead.
+      const arrow = e.code === 'ArrowLeft' ? [-1, 0] : e.code === 'ArrowRight' ? [1, 0] : e.code === 'ArrowUp' ? [0, 1] : e.code === 'ArrowDown' ? [0, -1] : null
+      if (arrow) {
+        e.preventDefault()
+        if (selectedActions.length > 0) {
+          if (arrow[0] !== 0) nudgeActions(selectedActions, arrow[0]!)
+        } else if (selection.length > 0) nudgeObjects(selection, arrow[0]!, arrow[1]!)
+        else if (arrow[0] !== 0) stepFrames(arrow[0]! * (e.shiftKey ? 10 : 1))
+        return
+      }
       switch (e.code) {
         case 'Space':
           e.preventDefault()
           togglePlaying()
-          break
-        case 'ArrowLeft':
-          e.preventDefault()
-          stepFrames(e.shiftKey ? -10 : -1)
-          break
-        case 'ArrowRight':
-          e.preventDefault()
-          stepFrames(e.shiftKey ? 10 : 1)
           break
         case 'Home':
           e.preventDefault()
@@ -89,15 +96,15 @@ export function App() {
           break
         case 'F2':
           e.preventDefault()
-          if (selectedAction) requestRename({ object: selectedAction.object, index: selectedAction.index })
+          if (selectedActions[0]) requestRename({ object: selectedActions[0].object, index: selectedActions[0].index })
           else if (selection.length === 1) requestRename({ object: selection[0]! })
           break
         case 'Delete':
         case 'Backspace':
-          // Delete what is fully highlighted: the selected action, or else the selected objects (D73).
-          if (selectedAction) {
+          // Delete what is fully highlighted: the selected actions, or else the selected objects (D73).
+          if (selectedActions.length > 0) {
             e.preventDefault()
-            deleteAction(selectedAction.object, selectedAction.index)
+            deleteActions(selectedActions)
           } else if (selection.length > 0) {
             e.preventDefault()
             deleteObjects(selection)
@@ -105,7 +112,7 @@ export function App() {
           break
         case 'Escape':
           if (tool !== 'select') setTool('select')
-          else if (selectedAction) select(selection)
+          else if (selectedActions.length > 0) select(selection)
           else select([])
           break
       }

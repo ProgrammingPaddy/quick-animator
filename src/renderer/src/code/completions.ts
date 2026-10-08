@@ -76,7 +76,7 @@ function classSnippet(className: string, withName: boolean): Completion {
   const schema = classes[className]!
   const f = new Fields()
   const head = withName ? `${f.field(className.toLowerCase())} = ${className}` : className
-  const lines = schema.attrs.map((a) => `  ${a.name}: ${f.field(formatValue(a.default))},`).join('\n')
+  const lines = schema.attrs.filter((a) => !a.derive).map((a) => `  ${a.name}: ${f.field(formatValue(a.default))},`).join('\n')
   return snippetCompletion(`${head}({\n${lines}\n})`, {
     label: className,
     detail: 'new object',

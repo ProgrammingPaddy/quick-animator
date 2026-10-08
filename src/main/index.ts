@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, Menu, shell } from 'electron'
 import { join } from 'node:path'
 import { registerProjectIpc } from './project'
 
@@ -11,9 +11,11 @@ function createWindow(): void {
     minWidth: 1100,
     minHeight: 650,
     show: false,
-    autoHideMenuBar: true,
     backgroundColor: '#121212',
     title: 'Quick Animator',
+    // The app draws its own top bar; the system keeps only the window controls, overlaid (D108).
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#202020', symbolColor: '#d8d8d8', height: 32 },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -43,6 +45,8 @@ function createWindow(): void {
 }
 
 void app.whenReady().then(() => {
+  // No system menu: nothing in it applies to the app, and Alt would pop it up (D108).
+  Menu.setApplicationMenu(null)
   registerProjectIpc(() => mainWindow)
   createWindow()
   app.on('activate', () => {

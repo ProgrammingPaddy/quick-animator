@@ -125,7 +125,9 @@ function watchProject(path: string, win: BrowserWindow): void {
 export function registerProjectIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('project:pick', async () => {
     const win = getWindow()
-    const options: Electron.OpenDialogOptions = { title: 'Open project folder', properties: ['openDirectory'] }
+    // Start where the last project was, so the examples folder is a step away.
+    const last = (await readSettings()).lastProject
+    const options: Electron.OpenDialogOptions = { title: 'Open project folder', message: 'Pick the folder that holds project.json', properties: ['openDirectory'], defaultPath: last ?? join(app.getPath('documents')) }
     const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
     return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
   })

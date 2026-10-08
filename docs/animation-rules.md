@@ -44,7 +44,8 @@ slide = box.move({
 ## Coordinates and units
 
 The origin is the center of the camera frame. `x` grows to the right, `y` grows upward. Units are
-pixels at project resolution. `rotation` is in degrees, counterclockwise. Time is in seconds.
+pixels at project resolution. `rotation` is in degrees, counterclockwise; a rotate to 720 turns
+twice, and a negative angle turns the other way. Time is in seconds.
 
 ## Classes and attributes
 
@@ -62,7 +63,7 @@ Every object has these attributes, with these defaults:
 | Class | Own attributes and defaults |
 |-------|-----------------------------|
 | `Rect` | `width` 200, `height` 120 |
-| `Circle` | `radius` 60 |
+| `Circle` | `radius` 60; `width` and `height`, each twice the radius unless set, for an oval |
 | `Text` | `text` `'Text'`, `fontSize` 48, `font` `'Segoe UI'` |
 
 An omitted attribute takes its default. An unknown attribute is reported and ignored.
@@ -88,7 +89,7 @@ dot.fade({
 })
 ```
 
-An instant appearance is the same fade with `duration: 0`.
+An instant appearance is the same fade over one frame, such as `duration: 0.017` at 60 fps; `duration: 0` behaves the same.
 
 ## Actions
 

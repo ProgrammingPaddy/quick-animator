@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { Pane } from './components/Pane'
+import { TitleBar } from './components/TitleBar'
 import { CodePane } from './panes/CodePane'
 import { NowPane } from './panes/NowPane'
 import { ObjectPane } from './panes/ObjectPane'
@@ -142,6 +143,8 @@ export function Layout() {
   const gutterClass = (axis: 'v' | 'h', side: Side) => `gutter ${axis}${layout.collapsed[side] ? ' disabled' : ''}`
 
   return (
+    <div className="app">
+      <TitleBar />
     <div className="layout" ref={rootRef} style={style}>
       <Pane title="Objects" side="left" collapsed={layout.collapsed.left} onToggle={() => toggle('left')}>
         <ObjectPane />
@@ -172,6 +175,7 @@ export function Layout() {
           </Pane>
         </div>
       )}
+    </div>
     </div>
   )
 }

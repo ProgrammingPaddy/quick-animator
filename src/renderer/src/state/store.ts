@@ -14,7 +14,7 @@ export interface ProjectSettings {
 export type Tool = 'select' | 'Rect' | 'Circle' | 'Text'
 
 /**
- * What the preview's handles do to the selected object (D86). `all` shows every handle: the body
+ * What the preview's handles do to the selection (D86). `all` shows every handle: the body
  * moves, corner and edge handles resize, a handle above rotates. The single modes show one kind.
  * Shift makes the same change an animation (D79).
  */
@@ -30,6 +30,14 @@ export interface PreviewSnap {
   angle: number
 }
 
+/** Where a new animation sits against the playhead: it starts here, or it ends here (D103). */
+export type Pin = 'start' | 'end'
+/** What a resize keeps in place: the far side, or the center (D104). */
+export type Anchor = 'edge' | 'center'
+
+/** Which pane's folding a key belongs to; the panes fold independently (D98). */
+export type Pane = 'objects' | 'timeline'
+
 export interface ProjectInfo {
   path: string
   name: string
@@ -41,7 +49,13 @@ export interface ProjectInfo {
 
 export interface MenuItem {
   label: string
-  run: () => void
+  /** A word after the label shown in `color`, such as the kind of an action (D100). */
+  keyword?: string
+  color?: string
+  /** What clicking the item does. An item with children may do nothing itself. */
+  run?: () => void
+  /** Items that open beside this one on hover (D109). */
+  children?: MenuItem[]
   danger?: boolean
 }
 
@@ -60,7 +74,8 @@ export interface ActionRef {
 /** What is selected, as one value, so a history step can carry it (D90). */
 export interface SelectionState {
   selection: string[]
-  selectedAction: ActionRef | null
+  /** Actions picked in the timeline or the object pane; the first is the primary one (D97). */
+  selectedActions: ActionRef[]
 }
 
 /** A modal question: confirm something, optionally after typing a value. */
@@ -84,11 +99,39 @@ export interface ClipObject {
   actions: { text: string; name: string | null }[]
 }
 
-/** What Ctrl+C took: objects with their actions, or one action, as source text (D81). */
-export type Clip = { kind: 'objects'; items: ClipObject[] } | { kind: 'action'; objectName: string; verb: string; name: string | null; propsText: string }
+/** One action in the clipboard, as source text. */
+export interface ClipAction {
+  objectName: string
+  verb: string
+  name: string | null
+  propsText: string
+}
+
+/** What Ctrl+C took: objects with their actions, or actions, as source text (D81). */
+export type Clip = { kind: 'objects'; items: ClipObject[] } | { kind: 'actions'; items: ClipAction[] }
 
 const DEFAULTS_KEY = 'quick-animator.showDefaults'
 const SNAP_KEY = 'quick-animator.previewSnap'
+const WHEEL_STEP_KEY = 'quick-animator.wheelStep'
+const PIN_KEY = 'quick-animator.pin'
+const ANCHOR_KEY = 'quick-animator.anchor'
+
+function loadChoice<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw && (allowed as readonly string[]).includes(raw) ? (raw as T) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function saveChoice(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // Preference only.
+  }
+}
 
 function loadShowDefaults(): boolean {
   try {
@@ -110,10 +153,21 @@ function loadPreviewSnap(): PreviewSnap {
   }
 }
 
+function loadWheelStep(): number {
+  try {
+    const n = Number(localStorage.getItem(WHEEL_STEP_KEY))
+    return Number.isInteger(n) && n > 0 ? n : 1
+  } catch {
+    return 1
+  }
+}
+
+function sameRefs(a: ActionRef[], b: ActionRef[]): boolean {
+  return a.length === b.length && a.every((r, i) => r.object === b[i]!.object && r.index === b[i]!.index)
+}
+
 function sameSelection(a: SelectionState, b: SelectionState): boolean {
-  if (a.selection.length !== b.selection.length || a.selection.some((n, i) => n !== b.selection[i])) return false
-  if (!a.selectedAction || !b.selectedAction) return a.selectedAction === b.selectedAction
-  return a.selectedAction.object === b.selectedAction.object && a.selectedAction.index === b.selectedAction.index
+  return a.selection.length === b.selection.length && a.selection.every((n, i) => n === b.selection[i]) && sameRefs(a.selectedActions, b.selectedActions)
 }
 
 /** Where selection changes go to become history steps; registered by the controller (D90). */
@@ -133,17 +187,23 @@ interface State {
   loop: boolean
   /** Whether timeline drags snap to whole seconds and to other actions' starts and ends (D64). */
   snap: boolean
+  /** Frames a wheel tick adds to or takes from the selected actions' durations (D97). */
+  wheelStep: number
   /** Where the content ends, hold included, or null while nothing animates. */
   contentEnd: number | null
   /** Names of the selected objects. Shared by every pane. */
   selection: string[]
-  /** The selected action, when one was picked in the timeline or the object pane. */
+  /** The selected actions, when some were picked in the timeline or the object pane. */
+  selectedActions: ActionRef[]
+  /** The primary selected action: the first of `selectedActions`, or null. */
   selectedAction: ActionRef | null
   transformMode: TransformMode
   previewSnap: PreviewSnap
+  pin: Pin
+  anchor: Anchor
   clipboard: Clip | null
-  /** Objects and class groups whose actions are folded away in the panes. */
-  collapsed: Record<string, true>
+  /** Objects and class groups whose rows are folded, per pane (D98). */
+  collapsed: Record<Pane, Record<string, true>>
   /** Objects whose classes are being edited in the Classes dialog, or null (D88). */
   classesDialog: string[] | null
   project: ProjectInfo | null
@@ -165,19 +225,25 @@ interface State {
   togglePlaying: () => void
   toggleLoop: () => void
   toggleSnap: () => void
+  setWheelStep: (frames: number) => void
   /** Pause and move the playhead by a number of frames, snapped to the frame grid. */
   stepFrames: (frames: number) => void
   select: (names: string[]) => void
   selectAction: (object: string, index: number) => void
+  selectActions: (refs: ActionRef[]) => void
+  /** Add an action to the selected actions, or take it out (D97). */
+  toggleSelectedAction: (object: string, index: number) => void
   /** Add an object to the selection, or take it out (D89). */
   toggleSelected: (name: string) => void
   setTransformMode: (mode: TransformMode) => void
   cycleTransformMode: () => void
   setPreviewSnap: (snap: Partial<PreviewSnap>) => void
+  setPin: (pin: Pin) => void
+  setAnchor: (anchor: Anchor) => void
   setClipboard: (clip: Clip | null) => void
-  toggleCollapsed: (name: string) => void
-  /** Fold every listed key, or unfold all with null. */
-  setAllCollapsed: (names: string[] | null) => void
+  toggleCollapsed: (pane: Pane, key: string) => void
+  /** Fold every listed key in a pane, or unfold all with null. */
+  setAllCollapsed: (pane: Pane, keys: string[] | null) => void
   openClassesDialog: (names: string[]) => void
   closeClassesDialog: () => void
   setTool: (tool: Tool) => void
@@ -194,24 +260,29 @@ function createAppStore() {
     /** Change the selection and hand the step to the history, unless it is the history applying one. */
     const changeSelection = (after: SelectionState) => {
       const s = get()
-      const before: SelectionState = { selection: s.selection, selectedAction: s.selectedAction }
+      const before: SelectionState = { selection: s.selection, selectedActions: s.selectedActions }
       if (sameSelection(before, after)) return
-      set({ selection: after.selection, selectedAction: after.selectedAction })
+      set({ selection: after.selection, selectedActions: after.selectedActions, selectedAction: after.selectedActions[0] ?? null })
       if (!applying) selectionSink?.(before, after)
     }
+    const objectsOf = (refs: ActionRef[]): string[] => [...new Set(refs.map((r) => r.object))]
     return {
       settings: { width: 1920, height: 1080, fps: 60, hold: 0 },
       time: 0,
       playing: false,
       loop: false,
       snap: true,
+      wheelStep: loadWheelStep(),
       contentEnd: null,
       selection: [],
+      selectedActions: [],
       selectedAction: null,
       transformMode: 'all',
       previewSnap: loadPreviewSnap(),
+      pin: loadChoice<Pin>(PIN_KEY, ['start', 'end'], 'start'),
+      anchor: loadChoice<Anchor>(ANCHOR_KEY, ['edge', 'center'], 'edge'),
       clipboard: null,
-      collapsed: {},
+      collapsed: { objects: {}, timeline: {} },
       classesDialog: null,
       project: null,
       source: '',
@@ -232,16 +303,32 @@ function createAppStore() {
         }),
       toggleLoop: () => set((s) => ({ loop: !s.loop })),
       toggleSnap: () => set((s) => ({ snap: !s.snap })),
+      setWheelStep: (frames) => {
+        const wheelStep = Math.max(1, Math.round(frames) || 1)
+        try {
+          localStorage.setItem(WHEEL_STEP_KEY, String(wheelStep))
+        } catch {
+          // Preference only.
+        }
+        set({ wheelStep })
+      },
       stepFrames: (frames) => {
         const { time, settings } = get()
         const next = snapToFrame(time, settings.fps) + frames / settings.fps
         set({ playing: false, time: Math.max(0, snapToFrame(next, settings.fps)) })
       },
-      select: (selection) => changeSelection({ selection, selectedAction: null }),
-      selectAction: (object, index) => changeSelection({ selection: [object], selectedAction: { object, index } }),
+      select: (selection) => changeSelection({ selection, selectedActions: [] }),
+      selectAction: (object, index) => changeSelection({ selection: [object], selectedActions: [{ object, index }] }),
+      selectActions: (refs) => changeSelection({ selection: objectsOf(refs), selectedActions: refs }),
+      toggleSelectedAction: (object, index) => {
+        const current = get().selectedActions
+        const without = current.filter((r) => !(r.object === object && r.index === index))
+        const refs = without.length < current.length ? without : [...current, { object, index }]
+        changeSelection({ selection: objectsOf(refs), selectedActions: refs })
+      },
       toggleSelected: (name) => {
         const current = get().selection
-        changeSelection({ selection: current.includes(name) ? current.filter((n) => n !== name) : [...current, name], selectedAction: null })
+        changeSelection({ selection: current.includes(name) ? current.filter((n) => n !== name) : [...current, name], selectedActions: [] })
       },
       setTransformMode: (transformMode) => set({ transformMode }),
       cycleTransformMode: () => set((s) => ({ transformMode: TRANSFORM_MODES[(TRANSFORM_MODES.indexOf(s.transformMode) + 1) % TRANSFORM_MODES.length]! })),
@@ -255,15 +342,23 @@ function createAppStore() {
           }
           return { previewSnap }
         }),
+      setPin: (pin) => {
+        saveChoice(PIN_KEY, pin)
+        set({ pin })
+      },
+      setAnchor: (anchor) => {
+        saveChoice(ANCHOR_KEY, anchor)
+        set({ anchor })
+      },
       setClipboard: (clipboard) => set({ clipboard }),
-      toggleCollapsed: (name) =>
+      toggleCollapsed: (pane, key) =>
         set((s) => {
-          const collapsed = { ...s.collapsed }
-          if (collapsed[name]) delete collapsed[name]
-          else collapsed[name] = true
-          return { collapsed }
+          const keys = { ...s.collapsed[pane] }
+          if (keys[key]) delete keys[key]
+          else keys[key] = true
+          return { collapsed: { ...s.collapsed, [pane]: keys } }
         }),
-      setAllCollapsed: (names) => set({ collapsed: names ? Object.fromEntries(names.map((n) => [n, true as const])) : {} }),
+      setAllCollapsed: (pane, keys) => set((s) => ({ collapsed: { ...s.collapsed, [pane]: keys ? Object.fromEntries(keys.map((k) => [k, true as const])) : {} } })),
       openClassesDialog: (classesDialog) => set({ classesDialog, contextMenu: null }),
       closeClassesDialog: () => set((s) => (s.classesDialog ? { classesDialog: null } : s)),
       setTool: (tool) => set({ tool }),
@@ -298,7 +393,7 @@ if (hot) hot.data.store = useStore
 /** The selection as one value, for history steps. */
 export function currentSelection(): SelectionState {
   const s = useStore.getState()
-  return { selection: s.selection, selectedAction: s.selectedAction }
+  return { selection: s.selection, selectedActions: s.selectedActions }
 }
 
 /** Set the selection on behalf of the history: this is not a new step. */
@@ -306,9 +401,14 @@ export function applySelection(state: SelectionState): void {
   applying = true
   try {
     const s = useStore.getState()
-    if (state.selectedAction) s.selectAction(state.selectedAction.object, state.selectedAction.index)
+    if (state.selectedActions.length > 0) s.selectActions(state.selectedActions)
     else s.select(state.selection)
   } finally {
     applying = false
   }
+}
+
+/** True when an action is among the selected ones. */
+export function isActionSelected(refs: ActionRef[], object: string, index: number): boolean {
+  return refs.some((r) => r.object === object && r.index === index)
 }

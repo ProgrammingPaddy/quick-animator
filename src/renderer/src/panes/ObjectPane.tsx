@@ -1,11 +1,10 @@
 import { useMemo, type MouseEvent as ReactMouseEvent } from 'react'
 import { showMenu } from '../components/ContextMenu'
-import { classGroups, classKey, classSpan, overrideOf, typeGroups, type ClassGroup } from '../model/groups'
+import { actionIdents, classActionIdents, classGroups, classKey, classSpan, overrideOf, typeGroups, type ClassGroup } from '../model/groups'
 import { VERB_COLORS } from '../model/registry'
 import type { Action, SceneObject } from '../model/types'
-import { newProject, pickProject } from '../project/controller'
 import { addObject, deleteAction, deleteClassAction, deleteObjects, duplicateObjects, jumpToAction, jumpToClass, jumpToObject, materializeClassAction, overrideClassAction, removeFromClass, requestClasses, requestRename, selectClass, selectClassAction } from '../project/operations'
-import { useStore, type Tool } from '../state/store'
+import { isActionSelected, useStore, type Tool } from '../state/store'
 import { timecode } from '../state/time'
 
 const GLYPHS: Record<string, string> = { Rect: '▭', Circle: '○', Text: 'T' }
@@ -16,36 +15,59 @@ function actionLabel(action: Action): string {
   return action.timing.relative ? `${what} (relative)` : what
 }
 
+const Idents = ({ words }: { words: string[] }) => (
+  <>
+    {words.map((w, i) => (
+      <span key={i} className="ident">
+        {w}
+      </span>
+    ))}
+  </>
+)
+
 /**
  * The project, then its objects in every place they belong: class groups first, with the
- * class's actions and its members beneath, then every object grouped by type (D80, D84). Each
- * object folds its actions away; one button folds or unfolds everything. Click selects,
- * Ctrl-click adds or removes, double-click jumps to the code, right-click for more, and a
- * right-click on empty space adds an object.
+ * class's actions and its members beneath, then every object grouped by type (D80, D84). The
+ * pane folds on its own, apart from the timeline (D98). Click selects, Ctrl-click adds or
+ * removes, double-click jumps to the code, right-click for more, and a right-click on empty
+ * space adds an object.
  */
 export function ObjectPane() {
   const project = useStore((s) => s.project)
   const model = useStore((s) => s.model)
   const fps = useStore((s) => s.settings.fps)
   const selection = useStore((s) => s.selection)
-  const selectedAction = useStore((s) => s.selectedAction)
-  const collapsed = useStore((s) => s.collapsed)
+  const selectedActions = useStore((s) => s.selectedActions)
+  const collapsed = useStore((s) => s.collapsed.objects)
   const select = useStore((s) => s.select)
   const selectAction = useStore((s) => s.selectAction)
   const toggleSelected = useStore((s) => s.toggleSelected)
+  const toggleSelectedAction = useStore((s) => s.toggleSelectedAction)
   const toggleCollapsed = useStore((s) => s.toggleCollapsed)
   const setAllCollapsed = useStore((s) => s.setAllCollapsed)
-  const setHelp = useStore((s) => s.setHelp)
   const objects = model?.objects ?? []
   const groups = useMemo(() => (model ? classGroups(model) : []), [model])
   const types = useMemo(() => typeGroups(objects), [objects])
   const foldable = [...objects.filter((o) => o.actions.length > 0).map((o) => o.name), ...groups.map((g) => classKey(g.className))]
   const anyExpanded = foldable.some((key) => !collapsed[key])
-  const selectedActionRef = selectedAction && model ? model.objects.find((o) => o.name === selectedAction.object)?.actions[selectedAction.index] : undefined
+  const selectedClassActions = useMemo(() => {
+    const set = new Set<unknown>()
+    if (!model) return set
+    for (const ref of selectedActions) {
+      const action = model.objects.find((o) => o.name === ref.object)?.actions[ref.index]
+      if (action?.classAction) set.add(action.classAction)
+    }
+    return set
+  }, [model, selectedActions])
 
   const clickObject = (name: string) => (e: ReactMouseEvent) => {
     if (e.ctrlKey || e.metaKey) toggleSelected(name)
     else select([name])
+  }
+
+  const clickAction = (name: string, index: number) => (e: ReactMouseEvent) => {
+    if (e.ctrlKey || e.metaKey) toggleSelectedAction(name, index)
+    else selectAction(name, index)
   }
 
   const objectMenu = (obj: SceneObject) => (e: ReactMouseEvent) => {
@@ -65,7 +87,7 @@ export function ObjectPane() {
 
   const actionMenu = (obj: SceneObject, index: number) => (e: ReactMouseEvent) => {
     e.stopPropagation()
-    selectAction(obj.name, index)
+    if (!isActionSelected(useStore.getState().selectedActions, obj.name, index)) selectAction(obj.name, index)
     const action = obj.actions[index]
     if (action?.classAction) {
       const classAction = action.classAction
@@ -119,12 +141,12 @@ export function ObjectPane() {
     if (!(e.target instanceof Element) || !e.target.matches('.object-list, .empty, .group-head')) return
     showMenu(
       e,
-      TOOLS.map((t) => ({ label: `Add ${t}`, run: () => addObject(t, 0, 0) })),
+      TOOLS.map((t) => ({ label: 'Add', keyword: t, run: () => addObject(t, 0, 0) })),
     )
   }
 
   const renderObject = (obj: SceneObject, member: boolean) => {
-    const selected = selection.includes(obj.name) && !selectedAction
+    const selected = selection.includes(obj.name) && selectedActions.length === 0
     const folded = !!collapsed[obj.name]
     return (
       <li key={`${member ? 'm:' : ''}${obj.name}`} className={`object${selected ? ' selected' : ''}${member ? ' member' : ''}`}>
@@ -134,7 +156,7 @@ export function ObjectPane() {
               className={`chevron${folded ? '' : ' open'}`}
               onClick={(e) => {
                 e.stopPropagation()
-                toggleCollapsed(obj.name)
+                toggleCollapsed('objects', obj.name)
               }}
               onDoubleClick={(e) => e.stopPropagation()}
               title={folded ? 'Show actions' : 'Hide actions'}
@@ -152,27 +174,25 @@ export function ObjectPane() {
         {obj.actions.length > 0 && !folded && (
           <ul className="action-list">
             {obj.actions.map((action, index) => {
-              const isSelected = selectedAction?.object === obj.name && selectedAction.index === index
+              const isSelected = isActionSelected(selectedActions, obj.name, index)
               const title = action.overridden
                 ? `From all('${action.classAction!.className}'), switched off for ${obj.name} by its own override.`
                 : action.classAction
                   ? `From all('${action.classAction.className}'). Right-click to override it for this object.`
                   : action.overrides
                     ? `Overrides ${action.overrides.name} for ${obj.name}.`
-                    : 'Double-click to jump to the code, right-click for more'
+                    : 'Click to select, Ctrl-click to add, double-click to jump to the code, right-click for more'
               return (
                 <li
                   key={action.id}
-                  className={`action-row${isSelected ? ' selected' : ''}${action.classAction ? ' derived' : ''}${action.overridden ? ' overridden' : ''}`}
-                  onClick={() => selectAction(obj.name, index)}
+                  className={`action-row${isSelected ? ' selected' : ''}${action.classAction ? ' derived' : ''}${action.overridden ? ' overridden' : ''}${action.overrides ? ' override' : ''}`}
+                  onClick={clickAction(obj.name, index)}
                   onDoubleClick={() => jumpToAction(obj.name, index)}
                   onContextMenu={action.stmt ? actionMenu(obj, index) : undefined}
                   title={title}
                 >
                   <span className="dot" style={{ background: VERB_COLORS[action.verb] }} />
-                  {action.classAction && <span className="ident">{action.classAction.className}</span>}
-                  {action.overrides && <span className="ident override">{'↳'} {action.overrides.name}</span>}
-                  {action.name && !action.classAction && <span className="ident">{action.name}</span>}
+                  <Idents words={actionIdents(action)} />
                   <span className="name">{actionLabel(action)}</span>
                   <span className="dim mono">{timecode(action.start, fps)}</span>
                   {action.codeDriven && <span className="badge">code</span>}
@@ -189,7 +209,7 @@ export function ObjectPane() {
   const renderClass = (group: ClassGroup) => {
     const key = classKey(group.className)
     const folded = !!collapsed[key]
-    const allSelected = group.members.length > 0 && group.members.every((m) => selection.includes(m.name)) && !selectedAction
+    const allSelected = group.members.length > 0 && group.members.every((m) => selection.includes(m.name)) && selectedActions.length === 0
     return (
       <li key={key} className={`group class-group${allSelected ? ' selected' : ''}`}>
         <div className="object-row class-row" onClick={() => selectClass(group.className)} onDoubleClick={() => jumpToClass(group.className)} onContextMenu={classMenu(group)} title="Click to select every member, double-click to jump to the code">
@@ -197,7 +217,7 @@ export function ObjectPane() {
             className={`chevron${folded ? '' : ' open'}`}
             onClick={(e) => {
               e.stopPropagation()
-              toggleCollapsed(key)
+              toggleCollapsed('objects', key)
             }}
             onDoubleClick={(e) => e.stopPropagation()}
             title={folded ? 'Show members' : 'Hide members'}
@@ -213,7 +233,7 @@ export function ObjectPane() {
           <ul className="action-list">
             {group.actions.map((classAction) => {
               const span = classSpan(classAction)
-              const isSelected = selectedActionRef?.classAction === classAction
+              const isSelected = selectedClassActions.has(classAction)
               return (
                 <li
                   key={classAction.id}
@@ -224,8 +244,7 @@ export function ObjectPane() {
                   title="Applies to every member. Double-click to jump to the code, right-click for more"
                 >
                   <span className="dot" style={{ background: VERB_COLORS[classAction.verb] }} />
-                  <span className="ident">all</span>
-                  {classAction.name && <span className="ident">{classAction.name}</span>}
+                  <Idents words={classActionIdents(classAction)} />
                   <span className="name">{classAction.verb}</span>
                   {span && <span className="dim mono">{timecode(span.start, fps)}</span>}
                   {!classAction.stmt && <span className="badge">code</span>}
@@ -241,24 +260,6 @@ export function ObjectPane() {
 
   return (
     <div className="objects">
-      <div className="project-bar">
-        <span className="project-name" title={project?.path}>
-          {project ? project.name : 'No project'}
-        </span>
-        {window.api && (
-          <>
-            <button className="small" onClick={() => void pickProject()} title="Open a project folder">
-              Open
-            </button>
-            <button className="small" onClick={() => void newProject()} title="Create a project folder">
-              New
-            </button>
-          </>
-        )}
-        <button className="small" onClick={() => setHelp(true)} title="Help (F1)" aria-label="Help">
-          ?
-        </button>
-      </div>
       {objects.length === 0 ? (
         <div className="empty" onContextMenu={blankMenu}>
           {project ? 'No objects yet. Pick Rect, Circle, or Text above the preview and click where it goes, or right-click here.' : 'Open or create a project to begin.'}
@@ -271,7 +272,7 @@ export function ObjectPane() {
               {selection.length > 1 ? `, ${selection.length} selected` : ''}
             </span>
             {foldable.length > 0 && (
-              <button className="small" onClick={() => setAllCollapsed(anyExpanded ? foldable : null)} title={anyExpanded ? 'Hide every action list' : 'Show every action list'}>
+              <button className="small" onClick={() => setAllCollapsed('objects', anyExpanded ? foldable : null)} title={anyExpanded ? 'Hide every action list' : 'Show every action list'}>
                 {anyExpanded ? 'Collapse all' : 'Expand all'}
               </button>
             )}

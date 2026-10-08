@@ -8,9 +8,11 @@ export interface TextEdit {
   insert: string
 }
 
+/** A number as written: thousandths, or ten-thousandths under a tenth, so a frame's length survives (D110). */
 export function formatNumber(n: number): string {
   if (!Number.isFinite(n)) return '0'
-  const rounded = Math.round(n * 1000) / 1000
+  const digits = Math.abs(n) < 0.1 ? 10000 : 1000
+  const rounded = Math.round(n * digits) / digits
   return String(Object.is(rounded, -0) ? 0 : rounded)
 }
 

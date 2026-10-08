@@ -34,6 +34,67 @@ export function typeGroups(objects: SceneObject[]): { className: string; objects
   return TYPE_ORDER.map((className) => ({ className, objects: sortByType(objects.filter((o) => o.className === className)) })).filter((g) => g.objects.length > 0)
 }
 
+/**
+ * The classes as a tree (D99, D107): a class nests under the smallest class that holds all its
+ * members, and an object sits under every class it belongs to that is not an ancestor of another
+ * of its classes, so an object in two sibling classes appears under both, marked as a twin.
+ * Objects in no class come after the tree, in declaration order.
+ */
+export interface ClassNode {
+  group: ClassGroup
+  depth: number
+  children: ClassNode[]
+  objects: SceneObject[]
+}
+
+export interface ClassTree {
+  roots: ClassNode[]
+  /** Objects that belong to no class. */
+  objects: SceneObject[]
+  /** For objects shown in more than one place, the classes they appear under. */
+  twins: Map<string, string[]>
+}
+
+export function classTree(model: SceneModel): ClassTree {
+  const groups = classGroups(model)
+  const sets = new Map(groups.map((g) => [g.className, new Set(g.members.map((m) => m.name))]))
+  const size = (g: ClassGroup) => sets.get(g.className)!.size
+  const order = (g: ClassGroup) => groups.indexOf(g)
+  const covers = (outer: ClassGroup, inner: ClassGroup) => [...sets.get(inner.className)!].every((n) => sets.get(outer.className)!.has(n))
+  const nodes = new Map(groups.map((g) => [g.className, { group: g, depth: 0, children: [], objects: [] } as ClassNode]))
+  const roots: ClassNode[] = []
+  for (const g of groups) {
+    let parent: ClassGroup | null = null
+    for (const other of groups) {
+      if (other === g || size(other) < size(g) || (size(other) === size(g) && order(other) > order(g)) || !covers(other, g)) continue
+      if (!parent || size(other) < size(parent) || (size(other) === size(parent) && order(other) < order(parent))) parent = other
+    }
+    if (parent) nodes.get(parent.className)!.children.push(nodes.get(g.className)!)
+    else roots.push(nodes.get(g.className)!)
+  }
+  const parentOf = new Map<string, string | null>()
+  for (const node of nodes.values()) for (const child of node.children) parentOf.set(child.group.className, node.group.className)
+  const isAncestor = (a: string, b: string): boolean => {
+    for (let p = parentOf.get(b) ?? null; p; p = parentOf.get(p) ?? null) if (p === a) return true
+    return false
+  }
+  const free: SceneObject[] = []
+  const twins = new Map<string, string[]>()
+  for (const obj of model.objects) {
+    const mine = groups.filter((g) => sets.get(g.className)!.has(obj.name))
+    const leaves = mine.filter((g) => !mine.some((other) => other !== g && isAncestor(g.className, other.className)))
+    if (leaves.length === 0) free.push(obj)
+    for (const g of leaves) nodes.get(g.className)!.objects.push(obj)
+    if (leaves.length > 1) twins.set(obj.name, leaves.map((g) => g.className))
+  }
+  const setDepth = (node: ClassNode, depth: number) => {
+    node.depth = depth
+    for (const child of node.children) setDepth(child, depth + 1)
+  }
+  for (const root of roots) setDepth(root, 0)
+  return { roots, objects: free, twins }
+}
+
 /** The member actions a class action still drives: those no object replaced with its own. */
 export function activeMembers(action: ClassAction): Action[] {
   const active = action.members.filter((m) => !m.overridden)
@@ -72,4 +133,16 @@ export function classStandIn(group: ClassGroup, index: number): SceneObject | nu
 /** Among an object's actions, the one that overrides a class action, if any. */
 export function overrideOf(obj: SceneObject, classAction: ClassAction): number {
   return obj.actions.findIndex((a) => a.overrides === classAction)
+}
+
+/** The dim words before a class action's verb: its class, then its name. The same everywhere (D100). */
+export function classActionIdents(classAction: ClassAction): string[] {
+  return classAction.name ? [classAction.className, classAction.name] : [classAction.className]
+}
+
+/** The dim words before an action's verb, the same wherever the action is shown (D100). */
+export function actionIdents(action: Action): string[] {
+  if (action.classAction) return classActionIdents(action.classAction)
+  if (action.overrides) return classActionIdents(action.overrides)
+  return action.name ? [action.name] : []
 }

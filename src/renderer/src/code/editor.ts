@@ -23,9 +23,11 @@ export interface HighlightSpec {
   bars: { range: Range; color: string }[]
 }
 
-/** Unset attributes of one object, shown as ghost lines before its closing brace (D35). */
+/** Unset attributes of one object, or unset timing of one action, shown as ghost lines before the closing brace (D35, D114). */
 export interface GhostBlock {
   name: string
+  /** The action's index on the object, for an action block. */
+  index?: number
   /** Position of the closing brace of the attribute block. */
   closePos: number
   indent: string
@@ -119,7 +121,7 @@ const errorGutterField = StateField.define<RangeSet<GutterMarker>>({
   provide: (field) => gutterLineClass.from(field),
 })
 
-let onGhostClick: ((name: string, key: string) => void) | null = null
+let onGhostClick: ((name: string, key: string, index?: number) => void) | null = null
 
 /** The unset attributes of an object, dimmed. Clicking one writes it into the file. */
 class GhostWidget extends WidgetType {
@@ -127,12 +129,13 @@ class GhostWidget extends WidgetType {
     readonly name: string,
     readonly indent: string,
     readonly missing: { key: string; value: string }[],
+    readonly index?: number,
   ) {
     super()
   }
 
   eq(other: GhostWidget): boolean {
-    return other.name === this.name && other.indent === this.indent && JSON.stringify(other.missing) === JSON.stringify(this.missing)
+    return other.name === this.name && other.index === this.index && other.indent === this.indent && JSON.stringify(other.missing) === JSON.stringify(this.missing)
   }
 
   toDOM(): HTMLElement {
@@ -146,7 +149,7 @@ class GhostWidget extends WidgetType {
       line.addEventListener('mousedown', (e) => e.preventDefault())
       line.addEventListener('click', (e) => {
         e.preventDefault()
-        onGhostClick?.(this.name, key)
+        onGhostClick?.(this.name, key, this.index)
       })
       wrap.appendChild(line)
     }
@@ -169,7 +172,7 @@ const ghostField = StateField.define<DecorationSet>({
         .map((g) => ({ pos: tr.state.doc.lineAt(g.closePos).from, g }))
         .sort((a, b) => a.pos - b.pos)
       const builder = new RangeSetBuilder<Decoration>()
-      for (const { pos, g } of entries) builder.add(pos, pos, Decoration.widget({ widget: new GhostWidget(g.name, g.indent, g.missing), block: true, side: -1 }))
+      for (const { pos, g } of entries) builder.add(pos, pos, Decoration.widget({ widget: new GhostWidget(g.name, g.indent, g.missing, g.index), block: true, side: -1 }))
       next = builder.finish()
     }
     return next
@@ -324,7 +327,7 @@ export function setGhostLines(blocks: GhostBlock[]): void {
   view?.dispatch({ effects: setGhosts.of(blocks) })
 }
 
-export function setGhostClickHandler(handler: ((name: string, key: string) => void) | null): void {
+export function setGhostClickHandler(handler: ((name: string, key: string, index?: number) => void) | null): void {
   onGhostClick = handler
 }
 
