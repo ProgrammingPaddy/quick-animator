@@ -107,6 +107,24 @@ proportions, and the result is factors applied to the dimension attributes, so t
 serves Rect, Circle, and Text. Snapping rounds the value being written. A drag on empty space is a
 marquee.
 
+What a drag writes (D118, D122): the sampler builds the position as one thing, x and y together.
+Absolute moves and orbits build it in action order: an absolute move takes over from where the
+position was when it started, and an orbit turns the position built so far around a center `dx, dy`
+from the position at its start; relative moves add on top of all of that, in any order (D53). The
+position at each action's start is memoised per model. A drag
+writes to the latest action naming the attribute, or to the declaration, never to an orbit. To
+find the value it does not invert the stack: it probes the sampler on a copy of the model with the
+written value moved by one unit, exact because everything stacked on top is a shift or a turn that
+does not depend on the value, and solves x and y together. The Selected pane still names an orbit
+as what is changing a position or rotation.
+
+The box around a group (D116, D123) is not refitted around the turned objects each frame, which
+would let its center drift against them. `groupPose` fits it once in the group's own frame, the
+objects sampled with their shared orbits' angles at zero, and carries it by the shared turn read
+from the orbits at the playhead, the same rigid motion that carries the objects. Plain turns add
+their accumulated angle to the box's axes until the selection changes. A group's Shift-move
+writes one relative move per object, so the group stays rigid under any turn.
+
 ## Selection in the history (D90)
 
 The store hands every selection change to a sink; the controller turns it into an editor

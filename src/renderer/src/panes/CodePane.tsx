@@ -14,11 +14,12 @@ interface Mark {
   kind: 'full' | 'bar' | 'error'
 }
 
-/** The timing an action runs with but does not say: its start, delay, length, easing, and relativity (D114). */
+/** The timing an action runs with but does not say: its start, delay, length, easing, and relativity (D114); an orbit's unsaid parameters too. */
 function timingDefaults(action: Action): { key: string; value: string }[] {
   const present = new Set(action.stmt?.props.map((p) => p.key) ?? [])
   const duration = action.end - action.start
   const out: { key: string; value: string }[] = []
+  if (action.verb === 'orbit') for (const key of ['dx', 'dy', 'angle']) if (!present.has(key)) out.push({ key, value: '0' })
   if (!present.has('at')) out.push({ key: 'at', value: formatNumber(action.start - (action.timing.delay ?? 0)) })
   if (!present.has('delay')) out.push({ key: 'delay', value: '0' })
   if (!present.has('duration') && !present.has('until')) out.push({ key: 'duration', value: formatNumber(duration) })

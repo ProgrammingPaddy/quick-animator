@@ -55,6 +55,17 @@ export function ContextMenuLayer() {
   const [open, setOpen] = useState<number | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const subRef = useRef<HTMLDivElement>(null)
+  /** A flyout stays open for a moment after the pointer leaves, so it can cross to the flyout. */
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const enter = (i: number | null) => {
+    if (closeTimer.current) clearTimeout(closeTimer.current)
+    closeTimer.current = null
+    setOpen(i)
+  }
+  const leave = (i: number) => {
+    if (closeTimer.current) clearTimeout(closeTimer.current)
+    closeTimer.current = setTimeout(() => setOpen((o) => (o === i ? null : o)), 300)
+  }
 
   useEffect(() => {
     setOpen(null)
@@ -91,7 +102,7 @@ export function ContextMenuLayer() {
   return (
     <div className="context-menu" ref={menuRef} style={{ left: menu.x, top: menu.y }} role="menu">
       {menu.items.map((item, i) => (
-        <div key={`${item.label} ${item.keyword ?? ''}`} className="menu-item-wrap" onMouseEnter={() => setOpen(item.children ? i : null)} onMouseLeave={() => setOpen((o) => (o === i ? null : o))}>
+        <div key={`${item.label} ${item.keyword ?? ''}`} className="menu-item-wrap" onMouseEnter={() => enter(item.children ? i : null)} onMouseLeave={() => leave(i)}>
           <button role="menuitem" className={`${item.danger ? 'danger' : ''}${item.children ? ' has-children' : ''}`} onClick={() => run(item)} aria-haspopup={item.children ? 'menu' : undefined} aria-expanded={item.children ? open === i : undefined}>
             <Label item={item} />
             {item.children && <span className="caret">{'▸'}</span>}

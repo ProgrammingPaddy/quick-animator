@@ -8,11 +8,10 @@ export interface TextEdit {
   insert: string
 }
 
-/** A number as written: thousandths, or ten-thousandths under a tenth, so a frame's length survives (D110). */
+/** A number as written: at most four decimals, so a frame's length and a frame-aligned start survive (D110). */
 export function formatNumber(n: number): string {
   if (!Number.isFinite(n)) return '0'
-  const digits = Math.abs(n) < 0.1 ? 10000 : 1000
-  const rounded = Math.round(n * digits) / digits
+  const rounded = Math.round(n * 10000) / 10000
   return String(Object.is(rounded, -0) ? 0 : rounded)
 }
 

@@ -5,10 +5,11 @@ box = Rect({
   y: 88,
   width: 391,
   height: 223,
-  fill: '#599a47',
+  fill: '#ffffff',
   rotation: -0.6,
   class: 'test',
   z: 0,
+  opacity: 1,
 })
 
 title = Text({
@@ -19,62 +20,25 @@ title = Text({
   fill: '#ffffff',
 })
 
-// Two objects in one class. all('bars') below acts on both at once.
-
-dot = Circle({
-  x: 0,
-  y: -300,
-  radius: 95,
-  fill: '#f59e0b',
-  opacity: 0,
-  height: 440,
-  width: 440,
-})
-
-bar2 = Rect({
-  x: 130,
-  y: -400,
-  width: 160,
-  height: 24,
-  fill: '#a855f7',
-  class: 'bars',
-  rotation: 0,
-})
-
-bar1 = Rect({
-  x: 84,
-  y: -400,
-  width: 160,
-  height: 24,
-  fill: '#10b981',
-  class: 'bars test',
-})
-
 rect1 = Rect({
-  x: 582,
-  y: 265,
-  width: 240,
-  height: 140,
+  x: -412,
+  y: 101,
+  width: 249,
+  height: 171,
   fill: '#4f8cff',
-  rotation: -0.5,
+  rotation: -243.3,
 })
 
 rect2 = Rect({
-  x: -805,
-  y: 408,
+  x: -812,
+  y: 121,
   width: 240,
   height: 140,
   fill: '#4f8cff',
-  rotation: -0.1,
+  rotation: -126.2,
 })
 
-rect3 = Rect({
-  x: -901,
-  y: 448,
-  width: 240,
-  height: 140,
-  fill: '#4f8cff',
-})
+// Two objects in one class. all('bars') below acts on both at once.
 
 // Script: what happens, in time order. Without `at`, an action starts when the object's
 // previous action ends. An object exists wherever its opacity is above zero.
@@ -85,60 +49,14 @@ slide = box.move({
   duration: 1.2,
 })
 
-dot.fade({
-  opacity: 1,
-  at: slide.end,
-  duration: 0.3,
-})
-
-dot.move({
-  y: 0,
-  duration: 0.8,
-  ease: 'bounce',
-})
-
 title.fade({
   opacity: 0,
   at: 3,
   duration: 1,
 })
 
-rise = all('bars').move({
-  y: -250,
-  at: 2,
-  duration: 0.6,
-  ease: 'back',
-})
 
 // bar2 goes its own way: this replaces rise for bar2 alone.
-
-bar2.move({
-  y: -100,
-  at: 2.4,
-  duration: 0.6,
-  ease: 'back',
-  overrides: rise,
-})
-
-dot.move({
-  x: -30,
-  y: 110,
-  at: 2,
-  duration: 1,
-})
-
-dot.rotate({
-  rotation: -315,
-  at: 3,
-  duration: 1,
-})
-
-dot.move({
-  x: 125,
-  y: -132,
-  at: 4,
-  duration: 1,
-})
 
 box.to({
   width: 300,
@@ -147,22 +65,6 @@ box.to({
   y: -140,
   at: 5,
   duration: 1,
-})
-
-dot.to({
-  radius: 105,
-  x: 61,
-  y: -78,
-  at: 6,
-  duration: 1,
-})
-
-bar1.move({
-  y: -335,
-  at: 2,
-  duration: 0.6,
-  ease: 'back',
-  overrides: rise,
 })
 
 box.to({
@@ -271,59 +173,6 @@ box.to({
   duration: 1,
 })
 
-bar2.rotate({
-  rotation: 0,
-  at: 5.251,
-  duration: 1,
-})
-
-dot.rotate({
-  rotation: -390,
-  at: 7.587,
-  duration: 0.017,
-})
-
-rect1.move({
-  x: 180,
-  y: -150,
-  at: 0.55,
-  duration: 0.857,
-})
-
-rect1.move({
-  x: 520,
-  y: 160,
-  at: 2,
-  duration: 1,
-})
-
-rect1.move({
-  x: 540,
-  y: 70,
-  at: 6.518,
-  duration: 1,
-})
-
-rect1.move({
-  x: 440,
-  y: 14,
-  at: 6.888,
-  duration: 0.969,
-})
-
-rect1.move({
-  x: 510,
-  y: 20,
-  at: 6.857,
-  duration: 1,
-})
-
-rect1.rotate({
-  rotation: 105,
-  at: 6.721,
-  duration: 1.136,
-})
-
 box.rotate({
   rotation: -90,
   at: 6,
@@ -401,6 +250,7 @@ box.resize({
   height: 490,
   at: 18.751,
   duration: 1,
+  relative: false,
 })
 
 box.rotate({
@@ -410,73 +260,79 @@ box.rotate({
 })
 
 box.move({
-  x: -390,
-  y: 90,
+  x: 1344,
+  y: -41,
   at: 20.751,
   duration: 1,
 })
 
-bar1.move({
-  x: 765,
-  y: 361,
-  at: 18.767,
+title.orbit({
+  at: 21.75,
   duration: 1,
 })
 
-rect2.move({
-  x: 702,
-  y: 19,
-  at: 7.84,
-  duration: 0.017,
+title.fade({
+  opacity: 1,
+  at: 18,
+  duration: 2,
 })
 
-rect1.to({
-  x: 703,
-  y: 87,
-  rotation: -43.8,
-  at: 21.917,
+rect1.orbit({
+  dx: -198,
+  dy: 4,
+  angle: -87.3,
+  at: 20.3167,
   duration: 1,
 })
 
-rect2.to({
-  x: 481,
-  y: -52,
-  rotation: -148.9,
-  at: 22,
-  duration: 1,
-})
-
-rect1.move({
-  x: 715,
-  y: -158,
-  at: 23.283,
-  duration: 1,
-})
-
-rect2.move({
-  x: 493,
-  y: -297,
-  at: 24.283,
+rect2.orbit({
+  dx: 202,
+  dy: -16,
+  angle: -87.3,
+  at: 20.3167,
   duration: 1,
 })
 
 rect1.move({
-  x: 699,
-  y: 73,
-  at: 27.267,
+  x: -556,
+  y: -213,
+  at: 20.3167,
   duration: 1,
 })
 
 rect2.move({
-  x: 477,
-  y: -66,
-  at: 27.267,
+  x: -555,
+  y: 187,
+  at: 20.3167,
   duration: 1,
 })
 
-rect3.move({
-  x: 864,
-  y: 458,
-  at: 28.967,
-  duration: 0.627,
+rect2.move({
+  x: -53,
+  y: 165,
+  at: 22.5167,
+  duration: 1,
+})
+
+rect1.move({
+  x: -54,
+  y: -235,
+  at: 22.5167,
+  duration: 1,
+})
+
+rect2.orbit({
+  dx: 501,
+  dy: -228,
+  angle: -92.9,
+  at: 22.5167,
+  duration: 1,
+})
+
+rect1.orbit({
+  dx: 502,
+  dy: 172,
+  angle: -92.9,
+  at: 22.5167,
+  duration: 1,
 })

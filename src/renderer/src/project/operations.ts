@@ -3,9 +3,9 @@ import { findDependents, type Dependent } from '../model/dependents'
 import { appendStatement, blockText, formatNumber, insertDeclaration, removeProp, removeStatements, setProp, type TextEdit } from '../model/edits'
 import { isMember } from '../model/evaluate'
 import { memberRef } from '../model/groups'
-import { classes, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
+import { classes, VERB_ATTRS, VERB_PARAMS, type AttrValue, type Verb } from '../model/registry'
 import { identifierEdits, nameProblem, replaceIdentifiers } from '../model/rename'
-import { definingAction, valueAt } from '../model/sample'
+import { definingAction, positionAt, valueAt, writtenValues } from '../model/sample'
 import type { Action, ActionInfo, ClassAction, Range, SceneModel, SceneObject } from '../model/types'
 import { useStore, type ActionRef, type Clip, type ClipAction, type ClipObject, type Pin, type SelectionState, type Tool } from '../state/store'
 
@@ -66,10 +66,9 @@ function roundAttr(attr: string, value: number): number {
   return Math.round(value)
 }
 
-/** Seconds as written: thousandths, or ten-thousandths under a tenth, so a frame's length survives. */
+/** Seconds as written: at most four decimals, so a frame's length and a frame-aligned start survive. */
 export function roundSeconds(v: number): number {
-  const digits = Math.abs(v) < 0.1 ? 10000 : 1000
-  return Math.round(v * digits) / digits
+  return Math.round(v * 10000) / 10000
 }
 
 /**
@@ -125,26 +124,14 @@ export function addObject(className: Exclude<Tool, 'select'>, x: number, y: numb
 }
 
 /**
- * Make an attribute end up at this value by editing whatever defines it at this time: the
- * action that most recently started changing it gets the value as its end state, written
- * directly (D102); otherwise the declaration gets it. A relative action's change is measured
- * from where the object is when the action starts. Returns null when locked.
+ * Write a value into what defines an attribute: the action that most recently started naming
+ * it gets it as its change, written directly (D102), otherwise the declaration gets it. Returns
+ * null when locked: a linked value, a class action, or code the GUI cannot edit.
  */
-function editFor(name: string, attr: string, value: number, time: number): TextEdit | null {
-  const { source, model } = state()
-  if (!model) return null
-  const obj = model.objects.find((o) => o.name === name)
-  if (!obj) return null
-  const action = definingAction(model, obj, attr, time)
-  if (action) {
-    if (!action.stmt || action.classAction || typeof action.changes[attr] !== 'number') return null
-    let written = value
-    if (action.timing.relative) {
-      const before = valueAt(model, obj, attr, action.start)
-      if (typeof before !== 'number') return null
-      written = value - before
-    }
-    return setProp(source, action.stmt, attr, roundAttr(attr, written))
+function writeTo(source: string, obj: SceneObject, definer: Action | null, attr: string, value: number): TextEdit | null {
+  if (definer) {
+    if (!definer.stmt || definer.classAction || typeof definer.changes[attr] !== 'number') return null
+    return setProp(source, definer.stmt, attr, roundAttr(attr, value))
   }
   if (!obj.decl || typeof obj.attrs[attr] === 'function') return null
   return setProp(source, obj.decl, attr, roundAttr(attr, value))
@@ -162,7 +149,7 @@ export function inProgressActions(names: string[], attrs: string[], time: number
     const obj = model.objects.find((o) => o.name === name)
     if (!obj) continue
     for (const attr of attrs) {
-      const action = definingAction(model, obj, attr, time)
+      const action = definingAction(obj, attr, time)
       if (!action?.stmt || action.classAction || time >= action.end) continue
       const index = obj.actions.indexOf(action)
       if (!refs.some((r) => r.object === name && r.index === index)) refs.push({ object: name, index })
@@ -172,30 +159,34 @@ export function inProgressActions(names: string[], attrs: string[], time: number
 }
 
 /**
- * A plain drag or nudge: these objects have these values at this time, in one step. When a
+ * A plain drag or nudge: these objects show these values at this time, in one step. When a
  * class action defines one of the values right now, the object first overrides it with its own
- * action, which is what then gets edited (D80).
+ * action, which is what then gets edited (D80). What gets written is whatever makes the shown
+ * values true, with everything stacked on top left in place (D122).
  */
 export function setAttrsAtMany(entries: { name: string; attrs: Record<string, number> }[], time: number): boolean {
-  const { model } = state()
-  if (model) {
-    const done = new Set<ClassAction>()
-    for (const { name, attrs } of entries) {
-      const obj = model.objects.find((o) => o.name === name)
-      if (!obj) continue
-      for (const attr of Object.keys(attrs)) {
-        const action = definingAction(model, obj, attr, time)
-        if (!action?.classAction || !action.stmt || done.has(action.classAction)) continue
-        done.add(action.classAction)
-        overrideClassAction(name, obj.actions.indexOf(action))
-      }
+  const done = new Set<ClassAction>()
+  for (const { name, attrs } of entries) {
+    const obj = state().model?.objects.find((o) => o.name === name)
+    if (!obj) continue
+    for (const attr of Object.keys(attrs)) {
+      const action = definingAction(obj, attr, time)
+      if (!action?.classAction || !action.stmt || done.has(action.classAction)) continue
+      done.add(action.classAction)
+      overrideClassAction(name, obj.actions.indexOf(action))
     }
   }
+  const { model, source } = state()
+  if (!model) return false
   const edits: TextEdit[] = []
   for (const { name, attrs } of entries) {
-    for (const [attr, value] of Object.entries(attrs)) {
-      const edit = editFor(name, attr, value, time)
-      if (edit) edits.push(edit)
+    const obj = model.objects.find((o) => o.name === name)
+    if (!obj) continue
+    const definers = Object.fromEntries(['x', 'y', ...Object.keys(attrs)].map((attr) => [attr, definingAction(obj, attr, time)]))
+    for (const [attr, value] of Object.entries(writtenValues(model, obj, time, attrs, definers))) {
+      const edit = writeTo(source, obj, definers[attr] ?? null, attr, value)
+      // Nothing to change is nothing to undo.
+      if (edit && source.slice(edit.from, edit.to) !== edit.insert) edits.push(edit)
     }
   }
   applyEdits(edits)
@@ -235,28 +226,27 @@ export function setActionDestination(name: string, index: number, destination: R
   const obj = model?.objects.find((o) => o.name === name)
   const action = obj?.actions[index]
   if (!model || !obj || !action?.stmt || action.classAction) return false
-  const edits: TextEdit[] = []
   const stmt = action.stmt
   const schema = classes[obj.className]
-  const wantsPosition = ('x' in destination || 'y' in destination) && !('x' in action.changes) && !('y' in action.changes)
-  if (action.verb === 'resize' && wantsPosition) {
+  // A resize whose center moves becomes a `to`, which can hold the position as well.
+  const upgrade = action.verb === 'resize' && ('x' in destination || 'y' in destination) && !('x' in action.changes) && !('y' in action.changes)
+  const takes = (attr: string): boolean => (attr in action.changes && typeof action.changes[attr] !== 'function') || (upgrade && (attr === 'x' || attr === 'y') && !!schema?.attrs.some((a) => a.name === attr))
+  const wanted = Object.fromEntries(Object.entries(destination).filter(([attr]) => takes(attr)))
+  if (Object.keys(wanted).length === 0) return false
+  const definers = Object.fromEntries(['x', 'y', ...Object.keys(wanted)].map((attr) => [attr, takes(attr) ? action : definingAction(obj, attr, action.end)]))
+  const edits: TextEdit[] = []
+  if (upgrade) {
     const head = source.slice(stmt.range.from, stmt.propsOpen)
     const at = head.lastIndexOf('.resize(')
-    if (at >= 0) {
-      edits.push({ from: stmt.range.from + at + 1, to: stmt.range.from + at + 1 + 'resize'.length, insert: 'to' })
-      for (const attr of ['x', 'y']) if (attr in destination && schema?.attrs.some((a) => a.name === attr)) edits.push(setProp(source, stmt, attr, roundAttr(attr, destination[attr]!)))
-    }
+    if (at < 0) return false
+    edits.push({ from: stmt.range.from + at + 1, to: stmt.range.from + at + 1 + 'resize'.length, insert: 'to' })
   }
-  for (const [attr, value] of Object.entries(destination)) {
-    if (!(attr in action.changes) || typeof action.changes[attr] === 'function') continue
-    let written = value
-    if (action.timing.relative) {
-      const before = valueAt(model, obj, attr, action.start)
-      if (typeof before !== 'number') continue
-      written = value - before
-    }
-    edits.push(setProp(source, action.stmt, attr, roundAttr(attr, written)))
+  for (const [attr, value] of Object.entries(writtenValues(model, obj, action.end, wanted, definers))) {
+    if (!takes(attr)) continue
+    const edit = setProp(source, stmt, attr, roundAttr(attr, value))
+    if (source.slice(edit.from, edit.to) !== edit.insert) edits.push(edit)
   }
+  if (edits.length === (upgrade ? 1 : 0)) return false
   applyEdits(edits)
   return edits.length > 0
 }
@@ -266,34 +256,64 @@ export function setActionDestination(name: string, index: number, destination: R
  * pinned to the playhead (D27, D79, D103): with `start` it starts here and lasts a second, and
  * the playhead moves to its end so the result is seen; with `end` it ends here, starting a
  * second earlier, and the playhead stays. The verb follows the attributes: a move, a turn, a
- * resize, or `to`.
+ * resize, or `to`. With `relative` the action is a change from where the object is, starting at
+ * zero, which is how a group moves (D123).
  */
-export function beginTimed(name: string, attrs: string[], pin: Pin = 'start'): boolean {
-  const { source, model, time, fps } = state()
+export function beginTimed(name: string, attrs: string[], pin: Pin = 'start', when = state().time, keep?: SelectionState, relative = false): number | null {
+  const { model } = state()
   const obj = model?.objects.find((o) => o.name === name)
-  if (!model || !obj || !obj.decl) return false
+  if (!model || !obj || !obj.decl) return null
   const present = attrs.filter((a) => classes[obj.className]?.attrs.some((s) => s.name === a))
-  if (present.length === 0) return false
+  if (present.length === 0) return null
   const verb = verbFor(present)
-  const now = roundSeconds(time)
-  const endHere = pin === 'end' && now >= frameSeconds(fps)
-  const at = endHere ? roundSeconds(Math.max(0, now - 1)) : now
-  const duration = endHere ? roundSeconds(now - at) : 1
   const block: Record<string, AttrValue> = {}
   for (const attr of present) {
-    const value = valueAt(model, obj, attr, time)
-    block[attr] = roundAttr(attr, typeof value === 'number' ? value : 0)
+    const value = valueAt(model, obj, attr, when)
+    block[attr] = relative ? 0 : roundAttr(attr, typeof value === 'number' ? value : 0)
   }
+  if (relative) block['relative'] = true
+  return appendTimed(name, verb, block, pin, when, keep)
+}
+
+/**
+ * Shift-drag on the rotate handle with a pivot or a group: each object orbits the center, its
+ * position along the arc and its rotation turning with it, so the group turns as one (D118).
+ */
+export function beginOrbit(name: string, center: { x: number; y: number }, pin: Pin = 'start', when = state().time, keep?: SelectionState): number | null {
+  const { model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl) return null
+  // The center is measured from where the object is when the orbit begins, which is earlier than the playhead when the end is pinned.
+  const from = positionAt(model, obj, pinnedSpan(pin, when).at)
+  return appendTimed(name, 'orbit', { dx: Math.round(center.x - from.x), dy: Math.round(center.y - from.y), angle: 0 }, pin, when, keep)
+}
+
+/** Where an action pinned to a time sits (D103): with `start` it starts here and lasts a second; with `end` it ends here, starting a second earlier or at zero. */
+function pinnedSpan(pin: Pin, when: number): { at: number; duration: number } {
+  const now = roundSeconds(when)
+  const endHere = pin === 'end' && now >= frameSeconds(state().fps)
+  const at = endHere ? roundSeconds(Math.max(0, now - 1)) : now
+  return { at, duration: endHere ? roundSeconds(now - at) : 1 }
+}
+
+/** Write a new action pinned to a time (D103) and select it, or keep `keep` selected with the new action added. Returns its end, or null. */
+function appendTimed(name: string, verb: Verb, block: Record<string, AttrValue>, pin: Pin, when: number, keep?: SelectionState): number | null {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj) return null
+  const { at, duration } = pinnedSpan(pin, when)
   block['at'] = at
   block['duration'] = duration
   const index = obj.actions.length
-  applyEdits([appendStatement(source, blockText(`${name}.${verb}`, block))], actionSelected(name, index))
-  if (!endHere) useStore.getState().setTime(at + duration)
-  return true
+  const selection = keep ? { selection: keep.selection, selectedActions: [...keep.selectedActions, { object: name, index }] } : actionSelected(name, index)
+  applyEdits([appendStatement(source, blockText(`${name}.${verb}`, block))], selection)
+  return at + duration
 }
 
 export function beginMove(name: string): boolean {
-  return beginTimed(name, ['x', 'y'])
+  const end = beginTimed(name, ['x', 'y'])
+  if (end !== null) useStore.getState().setTime(end)
+  return end !== null
 }
 
 /** Update the target of the object's last own action, while a shift-drag continues. */
@@ -303,15 +323,15 @@ export function setLastActionTarget(name: string, attrs: Record<string, number>)
   if (obj && index !== undefined) setActionValues(name, index, attrs)
 }
 
-/** Write values into an action's block: the targets of the change. Only attributes the action has. */
+/** Write values into an action's block: the targets of the change. Only attributes and parameters the action has. */
 export function setActionValues(name: string, index: number, values: Record<string, number>): void {
   const { source } = state()
   const action = findObject(name)?.actions[index]
   if (!action?.stmt) return
   const stmt = action.stmt
   const edits = Object.entries(values)
-    .filter(([key]) => key in action.changes)
-    .map(([key, value]) => setProp(source, stmt, key, roundAttr(key, value)))
+    .filter(([key]) => key in action.changes || VERB_PARAMS[action.verb].includes(key))
+    .map(([key, value]) => setProp(source, stmt, key, key === 'angle' ? Math.round(value * 10) / 10 : roundAttr(key, value)))
   applyEdits(edits)
 }
 
@@ -323,9 +343,13 @@ export function setClassActionValues(id: number, values: Record<string, number>)
   applyEdits(Object.entries(values).map(([key, value]) => setProp(source, stmt, key, roundAttr(key, value))))
 }
 
-/** The values an action of a kind starts with: the object's current ones, so nothing jumps. */
+/** The values an action of a kind starts with: the object's current ones, so nothing jumps. An orbit turns a quarter around the frame center. */
 function startingValues(model: SceneModel, obj: SceneObject, verb: Verb, time: number): Record<string, AttrValue> {
   const attrs: Record<string, AttrValue> = {}
+  if (verb === 'orbit') {
+    const pos = positionAt(model, obj, time)
+    return { dx: Math.round(-pos.x), dy: Math.round(-pos.y), angle: 90 }
+  }
   const allowed = VERB_ATTRS[verb]
   if (!allowed) return attrs
   const schema = classes[obj.className]
@@ -464,9 +488,17 @@ export function retimeActions(refs: ActionRef[], change: { shift?: number; grow?
     const delay = action.timing.delay ?? 0
     const origin = from?.[`${ref.object}:${ref.index}`] ?? { start: action.start, end: action.end }
     const duration = origin.end - origin.start
-    const move = (change.shift ?? 0) + (change.trimStart ?? 0)
+    if (change.trimStart !== undefined) {
+      // The end stays put: the duration changes first, and the start follows it, so hitting the
+      // one-frame floor never nudges the end.
+      const newDuration = Math.max(minimum, duration - change.trimStart)
+      if (!untilProp) edits.push(setProp(source, stmt, 'duration', roundSeconds(newDuration)))
+      if (!atLocked) edits.push(setProp(source, stmt, 'at', roundSeconds(Math.max(0, origin.end - newDuration - delay))))
+      continue
+    }
+    const move = change.shift ?? 0
     if ((move !== 0 || from) && !atLocked) edits.push(setProp(source, stmt, 'at', roundSeconds(Math.max(0, origin.start + move - delay))))
-    const grow = (change.grow ?? 0) - (change.trimStart ?? 0)
+    const grow = change.grow ?? 0
     if ((grow !== 0 || (from && change.grow !== undefined)) && !untilProp) edits.push(setProp(source, stmt, 'duration', roundSeconds(Math.max(minimum, duration + grow))))
   }
   applyEdits(edits)
@@ -595,8 +627,10 @@ export function deleteObjects(names: string[], confirmed = false): void {
   if (!model) return
   const objects = model.objects.filter((o) => names.includes(o.name) && o.decl)
   if (objects.length === 0) return
-  const removedNames = [...objects.map((o) => o.name), ...objects.flatMap((o) => o.actions.filter((a) => !a.classAction).map((a) => a.name).filter((n): n is string => !!n))]
-  const dependents = findDependents(model, removedNames, { objects: objects.map((o) => o.name), actions: [] })
+  // A class statement whose members all go would be left talking to no one: it goes too (D121).
+  const orphaned = model.classActions.filter((c) => c.stmt && c.members.length > 0 && c.members.every((m) => objects.includes(m.object)))
+  const removedNames = [...objects.map((o) => o.name), ...objects.flatMap((o) => o.actions.filter((a) => !a.classAction).map((a) => a.name).filter((n): n is string => !!n)), ...orphaned.map((c) => c.name).filter((n): n is string => !!n)]
+  const dependents = findDependents(model, removedNames, { objects: objects.map((o) => o.name), actions: orphaned.flatMap((c) => c.members.map((m) => ({ object: m.object.name, index: m.object.actions.indexOf(m) }))) })
   const run = () => {
     const current = state()
     if (!current.model || current.model !== model) return deleteObjects(names, true)
@@ -605,6 +639,7 @@ export function deleteObjects(names: string[], confirmed = false): void {
       ranges.push(obj.decl!.range)
       for (const action of obj.actions) if (action.stmt && !action.classAction) ranges.push(action.stmt.range)
     }
+    for (const c of orphaned) ranges.push(c.stmt!.range)
     applyEdits([...removeStatements(source, ranges), ...resolutionEdits(model, source, dependents)], objectsSelected([]))
   }
   if (confirmed) run()
@@ -653,6 +688,32 @@ export function deleteActions(refs: ActionRef[], confirmed = false): void {
 
 export function deleteAction(name: string, index: number): void {
   deleteActions([{ object: name, index }])
+}
+
+/**
+ * Take a class away: its name leaves every member's `class`, and every `all('name')` statement
+ * goes, after confirming when other code refers to them. The objects stay (D121).
+ */
+export function deleteClass(className: string, confirmed = false): void {
+  const { source, model } = state()
+  if (!model) return
+  const statements = model.classActions.filter((c) => c.className === className && c.stmt)
+  const members = model.objects.filter((o) => o.classes.includes(className) && o.decl)
+  const names = statements.map((c) => c.name).filter((n): n is string => !!n)
+  const dependents = names.length > 0 ? findDependents(model, names, { objects: [], actions: statements.flatMap((c) => c.members.map((m) => ({ object: m.object.name, index: m.object.actions.indexOf(m) }))) }) : []
+  const run = () => {
+    const current = state()
+    if (!current.model || current.model !== model) return deleteClass(className, true)
+    const edits: TextEdit[] = [...removeStatements(source, statements.map((c) => c.stmt!.range)), ...resolutionEdits(model, source, dependents)]
+    for (const member of members) {
+      const next = member.classes.filter((c) => c !== className)
+      const edit = next.length > 0 ? setProp(source, member.decl!, 'class', next.join(' ')) : removeProp(source, member.decl!, 'class')
+      if (edit) edits.push(edit)
+    }
+    applyEdits(edits, objectsSelected([]))
+  }
+  if (confirmed) run()
+  else confirmRemoval(`Delete the class ${className}?`, dependents, run)
 }
 
 /** Remove a class action for every member. */

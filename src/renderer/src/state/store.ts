@@ -114,6 +114,7 @@ const DEFAULTS_KEY = 'quick-animator.showDefaults'
 const SNAP_KEY = 'quick-animator.previewSnap'
 const WHEEL_STEP_KEY = 'quick-animator.wheelStep'
 const PIN_KEY = 'quick-animator.pin'
+const FRAME_SNAP_KEY = 'quick-animator.frameSnap'
 const ANCHOR_KEY = 'quick-animator.anchor'
 
 function loadChoice<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
@@ -187,6 +188,8 @@ interface State {
   loop: boolean
   /** Whether timeline drags snap to whole seconds and to other actions' starts and ends (D64). */
   snap: boolean
+  /** Whether every time the timeline writes lands on the project's frame grid (D119). */
+  frameSnap: boolean
   /** Frames a wheel tick adds to or takes from the selected actions' durations (D97). */
   wheelStep: number
   /** Where the content ends, hold included, or null while nothing animates. */
@@ -225,6 +228,7 @@ interface State {
   togglePlaying: () => void
   toggleLoop: () => void
   toggleSnap: () => void
+  toggleFrameSnap: () => void
   setWheelStep: (frames: number) => void
   /** Pause and move the playhead by a number of frames, snapped to the frame grid. */
   stepFrames: (frames: number) => void
@@ -272,6 +276,7 @@ function createAppStore() {
       playing: false,
       loop: false,
       snap: true,
+      frameSnap: loadChoice<'on' | 'off'>(FRAME_SNAP_KEY, ['on', 'off'], 'on') === 'on',
       wheelStep: loadWheelStep(),
       contentEnd: null,
       selection: [],
@@ -303,6 +308,11 @@ function createAppStore() {
         }),
       toggleLoop: () => set((s) => ({ loop: !s.loop })),
       toggleSnap: () => set((s) => ({ snap: !s.snap })),
+      toggleFrameSnap: () =>
+        set((s) => {
+          saveChoice(FRAME_SNAP_KEY, s.frameSnap ? 'off' : 'on')
+          return { frameSnap: !s.frameSnap }
+        }),
       setWheelStep: (frames) => {
         const wheelStep = Math.max(1, Math.round(frames) || 1)
         try {

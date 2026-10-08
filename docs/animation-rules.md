@@ -102,6 +102,7 @@ An instant appearance is the same fade over one frame, such as `duration: 0.017`
 | `scale` | `scale` |
 | `resize` | `width`, `height`, `radius`, `fontSize` |
 | `fade` | `opacity` |
+| `orbit` | turns around a point `dx`, `dy` away from where the object is when the orbit begins, by `angle` degrees: the position follows the arc, on top of any other motion, and the rotation turns with it |
 | `to` | any attributes |
 
 Timing keys, allowed in every action block:
@@ -127,7 +128,10 @@ box.move({
 
 moves 100 pixels to the right of wherever the box is at that moment. When actions on the same
 attribute overlap, an absolute action takes over from its start, blending from wherever the object
-is; a relative action adds its change on top of whatever else is happening.
+is; a relative action adds its change on top of whatever else is happening, whichever started
+first. An orbit turns the position built by the absolute moves before it, and relative moves add
+on top, so a turn and a relative move at the same time make one combined motion: the center moves
+and the object turns around it.
 
 ## Time references
 

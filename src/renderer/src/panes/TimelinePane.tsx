@@ -17,6 +17,7 @@ import {
   canEdit,
   cutSelection,
   deleteAction,
+  deleteClass,
   deleteClassAction,
   deleteObjects,
   disappearClassHere,
@@ -47,7 +48,7 @@ import { formatTime, snapToFrame, timecode } from '../state/time'
 
 /** Zoom limits in pixels per second. At the top, single frames at 60 fps sit about 65 px apart. */
 const MIN_PPS = 4
-const MAX_PPS = 4000
+const MAX_PPS = 8000
 /** One second per labelled tick at the default zoom. */
 const DEFAULT_PPS = 100
 /** Candidate spacings between labelled ticks, in seconds, beyond frame multiples. */
@@ -116,10 +117,13 @@ function assignLanes<T extends { id: number; start: number; end: number }>(items
 
 /**
  * Snap a dragged time to whole seconds and to the starts and ends of other actions when
- * snapping is on (D64); otherwise keep it exact to the millisecond.
+ * snapping is on (D64), then to the frame grid when frame snapping is on (D119); otherwise keep
+ * it exact to the millisecond.
  */
 function snapTime(raw: number, model: SceneModel | null, exclude: Action | ClassAction | null, pps: number, snap: boolean): number {
-  if (!snap) return Math.max(0, roundSeconds(raw))
+  const { frameSnap, settings } = useStore.getState()
+  const toFrames = (t: number) => (frameSnap ? Math.round(t * settings.fps) / settings.fps : t)
+  if (!snap) return Math.max(0, roundSeconds(toFrames(raw)))
   const threshold = SNAP_PX / pps
   const candidates = [0, Math.floor(raw), Math.ceil(raw)]
   if (model) for (const action of model.actions) if (!action.overridden && action !== exclude && action.classAction !== exclude) candidates.push(action.start, action.end)
@@ -132,7 +136,7 @@ function snapTime(raw: number, model: SceneModel | null, exclude: Action | Class
       bestDistance = distance
     }
   }
-  return Math.max(0, roundSeconds(best))
+  return Math.max(0, roundSeconds(toFrames(best)))
 }
 
 /** The opacity of one object over the visible range, as a filled curve. Memoised: it ignores the playhead. */
@@ -183,6 +187,7 @@ export function TimelinePane() {
   const playing = useStore((s) => s.playing)
   const loop = useStore((s) => s.loop)
   const snap = useStore((s) => s.snap)
+  const frameSnap = useStore((s) => s.frameSnap)
   const wheelStep = useStore((s) => s.wheelStep)
   const fps = useStore((s) => s.settings.fps)
   const hold = useStore((s) => s.settings.hold)
@@ -200,6 +205,7 @@ export function TimelinePane() {
   const togglePlaying = useStore((s) => s.togglePlaying)
   const toggleLoop = useStore((s) => s.toggleLoop)
   const toggleSnap = useStore((s) => s.toggleSnap)
+  const toggleFrameSnap = useStore((s) => s.toggleFrameSnap)
   const setWheelStep = useStore((s) => s.setWheelStep)
   const setPlaying = useStore((s) => s.setPlaying)
   const setTime = useStore((s) => s.setTime)
@@ -246,7 +252,7 @@ export function TimelinePane() {
       const overHeaders = e.clientX < grid.getBoundingClientRect().left + HEADER_W
       if (overHeaders || e.altKey) {
         if (bodyRef.current) bodyRef.current.scrollTop += e.deltaY
-      } else if (e.ctrlKey || e.metaKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+      } else if (!(e.ctrlKey || e.metaKey)) {
         const delta = (Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY) / v.pps
         setView({ pps: v.pps, scrollTime: Math.max(0, v.scrollTime + delta) })
       } else {
@@ -546,6 +552,7 @@ export function TimelinePane() {
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToClass(node.group.className) },
       { label: 'Select members', run: () => selectClass(node.group.className) },
+      { label: 'Delete class', run: () => deleteClass(node.group.className), danger: true },
     ])
   }
 
@@ -673,6 +680,8 @@ export function TimelinePane() {
   const firstTick = Math.floor(view.scrollTime / step)
   const tickCount = width > 0 ? Math.ceil(width / (step * view.pps)) + 2 : 0
   const ticks = Array.from({ length: tickCount }, (_, i) => (firstTick + i) * step)
+  const framePx = view.pps / fps
+  const frameTicks = framePx >= 6 && width > 0 ? Array.from({ length: Math.min(600, Math.ceil(width / framePx) + 2) }, (_, i) => (Math.floor(view.scrollTime * fps) + i) / fps) : []
   const selectedClassActions = useMemo(() => {
     const set = new Set<ClassAction>()
     if (!model) return set
@@ -934,6 +943,18 @@ export function TimelinePane() {
         >
           Snap
         </button>
+        <button
+          className={`transport-button text${frameSnap ? ' on' : ''}`}
+          onClick={(e) => {
+            toggleFrameSnap()
+            e.currentTarget.blur()
+          }}
+          title={frameSnap ? 'Every time the timeline writes lands on a frame. Click for free timing.' : 'Times are free. Click to keep every time the timeline writes on a frame.'}
+          aria-label="Frame snap"
+          aria-pressed={frameSnap}
+        >
+          Frames
+        </button>
         <NumberField label="Frames per wheel tick when Shift-scrolling over an object in the preview, lengthening or shortening the selected actions" value={wheelStep} unit="f" onChange={setWheelStep} />
         <span className="time mono">{formatTime(time, fps)}</span>
         <span className="dim">
@@ -945,6 +966,9 @@ export function TimelinePane() {
       <div className="tl-grid" ref={gridRef}>
         <div className="tl-corner" />
         <div className="tl-ruler" ref={rulerRef} onPointerDown={beginScrub} title="Click or drag to move the playhead">
+          {frameTicks.map((t) => (
+            <div key={`f${t}`} className="frame-tick" style={{ left: xAt(t) }} />
+          ))}
           {ticks.map((t) => (
             <div key={t} className="tick" style={{ left: xAt(t) }}>
               <span>{tickLabel(t, step, fps)}</span>

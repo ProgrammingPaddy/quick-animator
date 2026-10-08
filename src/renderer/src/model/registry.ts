@@ -69,7 +69,7 @@ export const classes: Record<string, ClassSchema> = {
 
 export const CLASS_NAMES: ReadonlySet<string> = new Set(Object.keys(classes))
 
-export const VERBS = ['to', 'move', 'rotate', 'scale', 'resize', 'fade'] as const
+export const VERBS = ['to', 'move', 'rotate', 'scale', 'resize', 'fade', 'orbit'] as const
 export type Verb = (typeof VERBS)[number]
 export const VERB_NAMES: ReadonlySet<string> = new Set(VERBS)
 
@@ -81,6 +81,22 @@ export const VERB_ATTRS: Record<Verb, readonly string[] | null> = {
   scale: ['scale'],
   resize: ['width', 'height', 'radius', 'fontSize'],
   fade: ['opacity'],
+  orbit: [],
+}
+
+/**
+ * Parameters a verb takes that are not attributes of the object. `orbit` turns the object around
+ * a point `dx, dy` away from where it is when the orbit starts: the position follows the arc,
+ * on top of whatever else moves it, and the rotation turns by the same angle (D118).
+ */
+export const VERB_PARAMS: Record<Verb, readonly string[]> = {
+  to: [],
+  move: [],
+  rotate: [],
+  scale: [],
+  resize: [],
+  fade: [],
+  orbit: ['dx', 'dy', 'angle'],
 }
 
 /** One color per kind of change, used wherever an action is shown. */
@@ -91,6 +107,7 @@ export const VERB_COLORS: Record<Verb, string> = {
   resize: '#f59e0b',
   fade: '#64748b',
   to: '#10b981',
+  orbit: '#ec4899',
 }
 
 /** The color for an object itself, as opposed to one of its actions. */

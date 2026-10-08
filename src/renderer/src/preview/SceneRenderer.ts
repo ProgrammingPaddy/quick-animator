@@ -1,3 +1,4 @@
+import { groupPose } from './groupPose'
 import * as THREE from 'three'
 import { isVisibleAt, parseColor, valueAt } from '../model/sample'
 import type { SceneModel, SceneObject } from '../model/types'
@@ -245,7 +246,7 @@ export class SceneRenderer {
    * the gizmo frame: the object's own frame for one object, the box around all of them, turned by
    * `groupRotation`, for several (D96, D116). `pixel` is the world size of one screen pixel.
    */
-  update(model: SceneModel | null, time: number, selection: string[], mode: TransformMode = 'all', pixel = 1, pivot: Pivot | null = null, groupRotation = 0): void {
+  update(model: SceneModel | null, time: number, selection: string[], mode: TransformMode = 'all', pixel = 1, pivot: Pivot | null = null, axes = 0): void {
     const seen = new Set<string>()
     if (model) {
       model.objects.forEach((obj, index) => {
@@ -264,7 +265,7 @@ export class SceneRenderer {
     selected.forEach((name, i) => this.outline(i).set(this.frameOf(name)!, pixel))
     for (let i = selected.length; i < this.outlines.length; i++) this.outlines[i]!.hide()
 
-    const frame = selected.length === 1 ? this.frameOf(selected[0]!) : selected.length > 1 ? this.groupFrame(selected, groupRotation) : null
+    const frame = selected.length === 1 ? this.frameOf(selected[0]!) : selected.length > 1 && model ? this.groupFrame(selected, model, time, axes) : null
     const showRing = !!frame && mode === 'rotate'
     const showResize = !!frame && (mode === 'resize' || mode === 'all')
     const showRotate = !!frame && mode === 'all'
@@ -348,43 +349,11 @@ export class SceneRenderer {
   }
 
   /**
-   * The box around several visible objects, as a frame turned by `rotation` degrees: the
-   * tightest box with those axes, so a turned group keeps a box that turns with it (D116).
+   * The box around several visible objects: fitted in the group's own frame, on axes turned by
+   * `axes` degrees, and carried by the turns the group shares at this time (D116, D123).
    */
-  groupFrame(names: string[], rotation = 0): Frame | null {
-    const a = (rotation * Math.PI) / 180
-    const cos = Math.cos(a)
-    const sin = Math.sin(a)
-    let minU = Infinity
-    let maxU = -Infinity
-    let minV = Infinity
-    let maxV = -Infinity
-    for (const name of names) {
-      const f = this.frameOf(name)
-      if (!f) continue
-      const fa = (f.rotation * Math.PI) / 180
-      const fc = Math.cos(fa)
-      const fs = Math.sin(fa)
-      for (const [lx, ly] of [
-        [-f.width / 2, -f.height / 2],
-        [f.width / 2, -f.height / 2],
-        [-f.width / 2, f.height / 2],
-        [f.width / 2, f.height / 2],
-      ]) {
-        const wx = f.x + lx! * fc - ly! * fs
-        const wy = f.y + lx! * fs + ly! * fc
-        const u = wx * cos + wy * sin
-        const v = -wx * sin + wy * cos
-        minU = Math.min(minU, u)
-        maxU = Math.max(maxU, u)
-        minV = Math.min(minV, v)
-        maxV = Math.max(maxV, v)
-      }
-    }
-    if (!Number.isFinite(minU)) return null
-    const cu = (minU + maxU) / 2
-    const cv = (minV + maxV) / 2
-    return { x: cu * cos - cv * sin, y: cu * sin + cv * cos, rotation, width: maxU - minU, height: maxV - minV }
+  groupFrame(names: string[], model: SceneModel, time: number, axes = 0): Frame | null {
+    return groupPose(model, names, time, (name) => this.frameOf(name), axes)
   }
 
   /** The axis-aligned box around a visible object, rotation included, or null. */

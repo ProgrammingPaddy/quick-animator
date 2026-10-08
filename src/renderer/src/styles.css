@@ -605,6 +605,14 @@ button.icon:hover {
   border-left: 1px solid var(--fg-faint);
 }
 
+.tl-ruler .frame-tick {
+  position: absolute;
+  top: 19px;
+  bottom: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  pointer-events: none;
+}
+
 .tl-ruler .tick span {
   position: absolute;
   left: 4px;
@@ -840,12 +848,93 @@ button.icon:hover {
   cursor: pointer;
 }
 
-.cm-color-input {
+.cm-color-picker {
+  position: fixed;
+  z-index: 150;
+  width: 200px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  user-select: none;
+}
+
+.cp-square {
+  position: relative;
+  height: 120px;
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: crosshair;
+}
+
+.cp-white,
+.cp-black {
   position: absolute;
-  width: 0;
-  height: 0;
-  opacity: 0;
+  inset: 0;
   pointer-events: none;
+}
+
+.cp-white {
+  background: linear-gradient(to right, #ffffff, rgba(255, 255, 255, 0));
+}
+
+.cp-black {
+  background: linear-gradient(to top, #000000, rgba(0, 0, 0, 0));
+}
+
+.cp-hue {
+  position: relative;
+  height: 12px;
+  margin-top: 8px;
+  border-radius: 6px;
+  background: linear-gradient(to right, #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
+  cursor: ew-resize;
+}
+
+.cp-marker {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+.cp-hue .cp-marker {
+  top: 50%;
+}
+
+.cp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.cp-preview {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.cp-hex {
+  flex: 1;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-pane);
+  color: var(--fg);
+  font: 12px var(--font-mono);
+}
+
+.cp-hex:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .code .cm-error-line {
@@ -1705,9 +1794,8 @@ button.chevron:hover {
 
 .context-menu .submenu {
   position: absolute;
-  left: 100%;
+  left: calc(100% - 2px);
   top: -4px;
-  margin-left: 2px;
 }
 
 .preview-chip {

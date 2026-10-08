@@ -1,5 +1,5 @@
 import { schemaOf, type AttrValue } from '../model/registry'
-import { definingAction, isVisibleAt, valueAt } from '../model/sample'
+import { changingAction, isVisibleAt, valueAt } from '../model/sample'
 import { useStore } from '../state/store'
 
 function formatValue(value: AttrValue): string {
@@ -34,7 +34,7 @@ export function NowPane() {
         <tbody>
           {schema.attrs.map((attr) => {
             const value = valueAt(model, obj, attr.name, time)
-            const action = definingAction(model, obj, attr.name, time)
+            const action = changingAction(obj, attr.name, time)
             const status = action
               ? `${action.name ? `${action.name} ` : ''}${action.verb}${action.timing.relative ? ' (relative)' : ''}${action.end > time ? ', in progress' : ', done'}`
               : typeof obj.attrs[attr.name] === 'function'

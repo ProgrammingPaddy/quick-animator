@@ -37,7 +37,7 @@ node scripts/inspect.mjs eval "window.__quickAnimator.openProject('C:/path/to/ex
 ```
 
 Use forward slashes in paths passed through the shell. In development the page exposes
-`window.__quickAnimator` with `useStore`, `openProject`, and `getEditor`.
+`window.__quickAnimator` with `useStore`, `openProject`, `getEditor`, and `getRenderer`.
 
 Two traps: the editor is created once, so after editing anything it uses (`src/renderer/src/code/`)
 reload the window (`node scripts/inspect.mjs eval "location.reload()"`) before testing; and Vite's

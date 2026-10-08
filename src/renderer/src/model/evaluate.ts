@@ -1,4 +1,4 @@
-import { CLASS_NAMES, TIMING_KEY_NAMES, VERB_ATTRS, VERB_NAMES, classes, type Verb } from './registry'
+import { CLASS_NAMES, TIMING_KEY_NAMES, VERB_ATTRS, VERB_NAMES, VERB_PARAMS, classes, type Verb } from './registry'
 import { parseScene } from './parse'
 import { samplingContext, valueAt } from './sample'
 import type { Action, ActionInfo, AttrSource, ClassAction, SceneError, SceneModel, SceneObject, TimeRef, Timing } from './types'
@@ -91,6 +91,10 @@ export function evaluateScene(source: string): EvaluateResult {
       if (TIMING_KEY_NAMES.has(key)) {
         if (key === 'relative') timing.relative = Boolean(value)
         else (timing as Record<string, unknown>)[key] = value
+        continue
+      }
+      if (VERB_PARAMS[verb].includes(key)) {
+        changes[key] = value as AttrSource
         continue
       }
       if (!classes[className]?.attrs.some((a) => a.name === key)) {

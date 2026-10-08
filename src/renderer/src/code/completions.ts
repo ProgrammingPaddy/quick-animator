@@ -46,6 +46,7 @@ const VERB_DOCS: Record<Verb, string> = {
   resize: 'Change width, height, radius, or font size over time.',
   fade: 'Change opacity over time. Opacity 0 means the object does not exist.',
   to: 'Change any attributes over time.',
+  orbit: 'Turn around a point dx, dy away from the object: the position follows the arc by `angle` degrees, on top of any other motion, and the rotation turns with it.',
 }
 
 /**
@@ -90,6 +91,7 @@ function verbSnippet(verb: Verb, className: string | undefined): Completion {
   const lines: string[] = []
   const allowed = VERB_ATTRS[verb]
   if (verb === 'to') lines.push(`  ${f.field('')}`)
+  else if (verb === 'orbit') lines.push(`  dx: ${f.field('100')},`, `  dy: ${f.field('0')},`, `  angle: ${f.field('90')},`)
   else if (allowed && className) {
     const schema = classes[className]
     const attrs = allowed.filter((a) => schema?.attrs.some((s) => s.name === a)).slice(0, verb === 'move' ? 2 : 1)

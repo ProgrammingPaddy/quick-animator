@@ -5,7 +5,7 @@ import { ScrollBar } from '../components/ScrollBar'
 import { valueAt } from '../model/sample'
 import type { SceneModel, SceneObject } from '../model/types'
 import { newProject, pickProject } from '../project/controller'
-import { addObject, adjustDurations, beginTimed, deleteObjects, duplicateObjects, inProgressActions, jumpToObject, overrideClassAction, requestClasses, requestRename, resizeAttrs, resizedValues, setActionDestination, setAttrsAtMany, setLastActionTarget } from '../project/operations'
+import { addObject, adjustDurations, beginOrbit, beginTimed, deleteObjects, duplicateObjects, inProgressActions, jumpToObject, overrideClassAction, requestClasses, requestRename, resizeAttrs, resizedValues, setActionDestination, setAttrsAtMany, setLastActionTarget } from '../project/operations'
 import { SceneRenderer, type Frame, type Handle } from '../preview/SceneRenderer'
 import { Viewport } from '../preview/Viewport'
 import { TRANSFORM_MODES, useStore, type Tool, type TransformMode } from '../state/store'
@@ -53,6 +53,8 @@ interface Drag {
   local0: { x: number; y: number }
   moved: boolean
   created: Set<string>
+  /** The playhead has been moved to the end of what a Shift-drag made. */
+  shown: boolean
   /** What a click without movement does. */
   click: 'cycle' | 'object' | 'none'
 }
@@ -119,7 +121,8 @@ export function PreviewPane() {
   const pivotRef = useRef<{ x: number; y: number } | null>(null)
   const pivotArmedRef = useRef(false)
   /** How far a group has been turned since it was selected, so its box turns with it (D116). */
-  const groupRotationRef = useRef(0)
+  /** The turn plain group drags have given the box's axes; it lasts until the selection changes (D116). */
+  const plainTurnRef = useRef(0)
   const paintRef = useRef<() => void>(() => undefined)
   const [altDown, setAltDown] = useState(false)
   const [dragging, setDragging] = useState<'aspect' | null>(null)
@@ -150,10 +153,11 @@ export function PreviewPane() {
     viewport.content.add(renderer.group)
     viewportRef.current = viewport
     rendererRef.current = renderer
+    if (import.meta.env.DEV) Object.assign((window as unknown as { __quickAnimator?: object }).__quickAnimator ?? {}, { getRenderer: () => renderer })
 
     const paint = () => {
       const s = useStore.getState()
-      renderer.update(s.model, s.time, s.selection, s.transformMode, 1 / viewport.zoom, pivotRef.current ? { ...pivotRef.current, armed: pivotArmedRef.current } : pivotArmedRef.current ? { ...(renderer.groupFrame(s.selection, groupRotationRef.current) ?? { x: 0, y: 0 }), armed: true } : null, groupRotationRef.current)
+      renderer.update(s.model, s.time, s.selection, s.transformMode, 1 / viewport.zoom, pivotRef.current ? { ...pivotRef.current, armed: pivotArmedRef.current } : pivotArmedRef.current ? { ...((s.model && renderer.groupFrame(s.selection, s.model, s.time, plainTurnRef.current)) ?? { x: 0, y: 0 }), armed: true } : null, plainTurnRef.current)
       viewport.render()
     }
     paintRef.current = paint
@@ -166,7 +170,7 @@ export function PreviewPane() {
       if (s.selection !== prev.selection) {
         pivotRef.current = null
         pivotArmedRef.current = false
-        groupRotationRef.current = 0
+        plainTurnRef.current = 0
       }
       paint()
       if (s.model !== prev.model) bump()
@@ -406,8 +410,8 @@ export function PreviewPane() {
       }
     }
     const sampleTime = kind === 'destination' ? selectedAction!.end : store.time
-    const drawn = (group ? renderer.groupFrame(names, groupRotationRef.current) : renderer.frameOf(hit)) ?? { x: 0, y: 0, rotation: 0, width: 1, height: 1 }
-    const groupRotation0 = groupRotationRef.current
+    const drawn = (group ? renderer.groupFrame(names, model, store.time, plainTurnRef.current) : renderer.frameOf(hit)) ?? { x: 0, y: 0, rotation: 0, width: 1, height: 1 }
+    const axes0 = plainTurnRef.current
     // A moved pivot is the center a rotation turns around (D112); sizes still work from the drawn frame.
     const pivot = op === 'rotate' ? pivotRef.current : null
     const frame = pivot ? { ...drawn, x: pivot.x, y: pivot.y, rotation: 0 } : drawn
@@ -442,6 +446,7 @@ export function PreviewPane() {
       local0: toLocal(frame, located.world),
       moved: false,
       created: new Set(),
+      shown: false,
       click: alreadySingle && !e.shiftKey && !handle && !onPivot ? 'cycle' : selected && !handle && !e.shiftKey ? 'object' : 'none',
     }
     dragRef.current = drag
@@ -485,7 +490,8 @@ export function PreviewPane() {
           let delta = (drag.turned * 180) / Math.PI
           if (snap.on) delta = orbit ? snapTo(delta, snap.angle) : snapTo(primaryBase['rotation']! + delta, snap.angle) - primaryBase['rotation']!
           const rad = (delta * Math.PI) / 180
-          if (group) groupRotationRef.current = groupRotation0 + delta
+          // A plain turn keeps the box on its new axes (D116); an animated one is read back from the orbits.
+          if (group && drag.kind === 'plain') plainTurnRef.current = axes0 + delta
           for (const name of drag.names) {
             const b = drag.base.get(name)!
             const l = drag.locals.get(name)!
@@ -548,9 +554,27 @@ export function PreviewPane() {
         }
         if (drag.kind === 'timed') {
           const pinNow = useStore.getState().pin
+          const turning = drag.op === 'rotate' && orbit
+          // A group moves by one change written into each object, so it stays rigid under any turn (D123).
+          const shifting = group && drag.op === 'move'
+          let end: number | null = null
           for (const [name, v] of values) {
-            if (!drag.created.has(name) && beginTimed(name, Object.keys(v), pinNow)) drag.created.add(name)
-            if (drag.created.has(name)) setLastActionTarget(name, v)
+            if (!drag.created.has(name)) {
+              // One start for the whole group, so the objects move together (D96). A turn around a
+              // point is an orbit: the arc is the path (D118).
+              const keep = useStore.getState()
+              const kept = { selection: drag.names, selectedActions: keep.selectedActions.filter((r) => drag.names.includes(r.object)) }
+              const created = turning ? beginOrbit(name, { x: drag.frame.x, y: drag.frame.y }, pinNow, restoreTime, kept) : beginTimed(name, Object.keys(v), pinNow, restoreTime, kept, shifting)
+              if (created !== null) {
+                drag.created.add(name)
+                end = Math.max(end ?? 0, created)
+              }
+            }
+            if (drag.created.has(name)) setLastActionTarget(name, turning ? { angle: v['rotation']! - drag.base.get(name)!['rotation']! } : shifting ? { x: v['x']! - drag.base.get(name)!['x']!, y: v['y']! - drag.base.get(name)!['y']! } : v)
+          }
+          if (end !== null && pinNow === 'start' && drag.created.size === values.size && !drag.shown) {
+            drag.shown = true
+            useStore.getState().setTime(end)
           }
         } else if (drag.kind === 'destination') {
           const v = values.get(drag.primary)
@@ -582,7 +606,8 @@ export function PreviewPane() {
     if (!located || useStore.getState().selection.length === 0 || !located.renderer.onPivot(located.world)) return
     pivotArmedRef.current = !pivotArmedRef.current
     if (pivotArmedRef.current && !pivotRef.current) {
-      const frame = located.renderer.groupFrame(useStore.getState().selection, groupRotationRef.current)
+      const s = useStore.getState()
+      const frame = s.model && located.renderer.groupFrame(s.selection, s.model, s.time, plainTurnRef.current)
       if (frame) pivotRef.current = { x: frame.x, y: frame.y }
     }
     paintRef.current()

@@ -3,7 +3,7 @@ import { showMenu } from '../components/ContextMenu'
 import { actionIdents, classActionIdents, classGroups, classKey, classSpan, overrideOf, typeGroups, type ClassGroup } from '../model/groups'
 import { VERB_COLORS } from '../model/registry'
 import type { Action, SceneObject } from '../model/types'
-import { addObject, deleteAction, deleteClassAction, deleteObjects, duplicateObjects, jumpToAction, jumpToClass, jumpToObject, materializeClassAction, overrideClassAction, removeFromClass, requestClasses, requestRename, selectClass, selectClassAction } from '../project/operations'
+import { addObject, deleteAction, deleteClass, deleteClassAction, deleteObjects, duplicateObjects, jumpToAction, jumpToClass, jumpToObject, materializeClassAction, overrideClassAction, removeFromClass, requestClasses, requestRename, selectClass, selectClassAction } from '../project/operations'
 import { isActionSelected, useStore, type Tool } from '../state/store'
 import { timecode } from '../state/time'
 
@@ -121,6 +121,7 @@ export function ObjectPane() {
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToClass(group.className) },
       { label: 'Select members', run: () => selectClass(group.className) },
+      { label: 'Delete class', run: () => deleteClass(group.className), danger: true },
     ])
   }
 
