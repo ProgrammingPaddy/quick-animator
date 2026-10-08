@@ -80,6 +80,26 @@ that has to agree:
 - the Now pane,
 - the generated reference section of `animation-rules.md`.
 
+## Classes (D80)
+
+An object's `class` attribute lists CSS-like class names. `all('name')` returns a selector whose
+verbs make one action per member declared so far, all sharing one statement: the model records
+a `ClassAction` with its members, each member action points back at it, and a named class action
+is a time reference over all its members (its start is the earliest, its end the latest). The
+panes show the statement once, as a clip on the class's row and a row in the object pane, and
+on each member as a dashed, derived clip. GUI edits never touch a class statement from a member:
+editing a derived clip first appends the member's own copy of the action, with an explicit `at`
+when the class statement had none, and then edits the copy. Dragging the class clip edits the one
+statement.
+
+## Drag modes (D79)
+
+The preview keeps a drag mode, move, rotate, or scale, in the store. Every drag flavor reads it:
+a plain drag edits the mode's attributes at the playhead, Shift-drag appends the mode's verb as
+an action, and a destination drag writes the selected action's targets for those attributes.
+Rotation is the angle around the object's center, scale the ratio of distances from it, both
+relative to where the pointer went down.
+
 ## Complete view, minimal file (D35)
 
 The file holds only the attributes the author set. The code pane shows every attribute of every
@@ -302,3 +322,4 @@ Vocabulary. Items marked "coming" are not built yet.
 4. Everything else is free JavaScript. It runs, it shows, it is not GUI-editable.
 5. The GUI replaces the smallest literal span, inserts new objects at the end of the cast and new actions at the end of the script, writes one attribute per line and one point per line, and never reformats existing lines.
 6. While the file has an error, the GUI does not edit it (D63): the last good model describes older text.
+7. A class action is a top level `all('name').verb({ ... })`, optionally assigned. The GUI edits its literals from the class row only. A member's edit appends the member's own copy of the block after the class statement and edits that; the class statement is left alone.

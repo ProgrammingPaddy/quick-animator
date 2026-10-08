@@ -36,17 +36,18 @@ See `checkpoints.md` for what is scheduled and what is backlog.
 - **R3.** One selection is shared by all panes. Selecting in any pane selects in all of them.
 - **R4.** An edit in any pane is reflected in every other pane within the same display frame for direct manipulation, and within 100 ms for typed code.
 - **R5.** Undo and redo cover every edit from every pane as one history. A drag is one undo step.
-- **R6.** Errors in user code never crash or blank the app. The last good state stays visible. The error is shown inline at its source line and in a status line. While the code has an error, the preview and timeline do not edit it (D63).
-- **R7.** Keyboard: space plays and pauses, arrow keys step frames, standard shortcuts for undo, redo, delete, duplicate, and group. The full list is short and documented.
+- **R6.** Errors in user code never crash or blank the app. The last good state stays visible. The error is shown at its source line, in the gutter, on the overview ruler, and in a status line that jumps to it when clicked (D76). While the code has an error, the preview and timeline do not edit it (D63). Deleting from the preview or timeline never causes such an error: references to the deleted thing are resolved after a confirmation (D72).
+- **R7.** Keyboard: space plays and pauses, arrow keys step frames, Delete removes what is highlighted (D73), Ctrl+D duplicates, F2 renames, F1 opens Help, Ctrl+Z and Ctrl+Y undo and redo. The full list is in the Help pane.
 
 ## 4. Preview pane
 
 - **R10.** Shows the world with the camera frame drawn at project resolution. Objects exist and move outside the frame. The wheel zooms around the cursor, Shift and the wheel pan sideways, Alt and the wheel pan up and down, the middle button drags, Fit shows the frame, and the zoom readout jumps to 100%. Only what the camera sees is rendered. Transparent areas are distinguishable from black. (D40, D50)
 - **R11.** Click selects. Drag moves. Handles scale and rotate. Shift constrains. Snapping to the frame center and edges is on by default **(proposed)**. Object to object snapping is later.
-- **R12.** New objects are placed by choosing a type from an add toolbar and clicking in the preview. The click sets the position.
+- **R12.** New objects are placed by choosing a type from an add toolbar and clicking in the preview. The click sets the position. Right-click on empty space in the preview, the timeline rows, or the object pane also adds one (D84).
 - **R13.** Shift and drag an object to its destination to create a move: an action from where it was to where it was dropped, starting at the playhead, with the default duration. A plain drag is positional at the playhead time (R15). (Decision D27.)
 - **R14.** The selected object's motion path is drawn with editable points and keyframe marks. Dragging a point edits the code.
-- **R15.** The preview renders the state at the playhead. Dragging an object while the playhead is inside one of its actions edits that action's target values.
+- **R15.** The preview renders the state at the playhead. Dragging an object edits whatever defines its position at the playhead. Dragging it while one of its actions is selected sets that action's destination instead, measured from the action's start when the action is relative (D70). Scrollbars on both axes show where the view sits in the world (D78).
+- **R18.** A selected object has a drag mode, move, rotate, or scale, cycled by clicking the selected object and shown by its outline and a control above the preview. The drag, the Shift-drag that makes an animation, and the destination drag all follow the mode (D79).
 - **R16.** Properties bound to expressions show a link indicator on the handle. Dragging follows the lock, offset, or replace choice (R65).
 - **R17.** In 3D, the preview has a free viewport camera for orbiting while editing, separate from the scene camera, draws the scene camera's frustum, and returns to the exact render view in one click. (Core for the 3D checkpoint.)
 
@@ -57,7 +58,8 @@ See `checkpoints.md` for what is scheduled and what is backlog.
 - **R22.** Keyframes inside an action are marks on the clip and can be dragged.
 - **R23.** Relative timing links are drawn as connectors. Moving an action moves everything that depends on it.
 - **R24.** Transport: return to start, play, pause, jump to the end of the content, a loop toggle that is off by default, a snap toggle, scrub, time shown in seconds and frames. Home and End do the same from the keyboard. With snapping on, drags land on whole seconds and on other actions' starts and ends; off, they land exactly (D64). The timeline has no fixed length: the content end is the last action plus the hold, drawn as a marker on the ruler that drags to set the hold; playback stops or loops there, and the export range defaults to it (D41, D54, D59).
-- **R28.** Right-click on empty track space adds an action of a chosen kind at that time, with the object's current values so nothing jumps, or makes the object appear or disappear there (D52, D62).
+- **R29.** Classes: a row per class with the class's actions as clips and the members beneath it, folding. A member's clip from a class action is dashed; editing it gives the member its own copy (D80). Right-click on a class track adds an action for every member.
+- **R28.** Right-click on empty track space adds an action of a chosen kind at that time, with the object's current values so nothing jumps, or makes the object fade in, pop in, fade out, or pop out there (D52, D62, D71). A horizontal scrollbar under the tracks shows the visible stretch of time (D78).
 - **R25.** Over the tracks, the wheel zooms the time axis around the cursor, from minutes per screen down to single frames, opening at one second per tick; Shift and the wheel scroll time; Alt and the wheel scroll the rows. Over the row headers, the wheel scrolls the rows. The view pages forward while playing. Frame stepping from the keyboard. (D50)
 - **R27.** Clips that overlap in time stack in lanes within the object's row, so each stays visible and grabbable (D53).
 - **R26.** Audio rows show a waveform. Video rows show thumbnails. (Audio and video checkpoint.)
@@ -65,15 +67,16 @@ See `checkpoints.md` for what is scheduled and what is backlog.
 ## 6. Object pane
 
 - **R30.** A tree of all objects in the scene by hierarchy, with each object's actions listed under it (D61). Drag to reparent. Drag to reorder, which sets draw order.
+- **R34.** Objects are grouped by type, class groups come first with their members beneath, every object folds its actions away, and one button folds or unfolds all (D84).
 - **R31.** Relationships are visible: parent and child by nesting, property and timing links by an indicator with a hover list.
-- **R32.** Right-click menus on objects, actions, clips, and empty preview space: Jump to code, Delete, Add here, and later Rename, Group, Duplicate, Add effect, and Save as component (D62).
+- **R32.** Right-click menus on objects, actions, clips, and empty preview space: Jump to code, Rename, Duplicate, Delete, Add here, and later Group, Add effect, and Save as component (D62, D74, D75). Duplicates are numbered copies with their actions; renames reach every reference.
 - **R33.** A per-object hide toggle for editing only. It is UI state, not code, and does not affect export **(proposed)**.
 
 ## 7. Code pane and Now pane
 
 - **R40.** A JavaScript editor with syntax highlighting, line wrapping, autocompletion of classes, objects, verbs, attributes, timing keys, named curves, and time references with inline documentation, and inline error display. Tab accepts a completion, otherwise indents the line to where it belongs. A class name and Tab expands a full block with every attribute at its default, also after a written `name = `, and Tab then steps through the values (D36, D69). Ctrl+F searches. Other occurrences of the selected text are highlighted. Every color literal shows a swatch that opens a picker (D68).
 - **R41.** Organized by default: one file per scene, written as the cast of objects followed by the script of actions in time order (D32); a per-object view that groups an object's declaration with all of its actions; and a project library file for shared functions and components. Every attribute of every object is shown, set ones as code and unset ones as dimmed ghost lines with their defaults, switchable by a preference (D35). Blocks fold. Lines stay short: one attribute per line, one point per line.
-- **R42.** Selecting an object tints its declaration and puts a left bar, in each kind's color, on its actions; selecting an action tints the action in its kind's color and puts a left bar on its object (D67). The pane scrolls only on Jump to code, from the right-click menu, a double click in the object pane, or a shortcut, or when a Follow selection toggle is turned on. Moving between an object and its actions is one step each way: the object name in any action line jumps to the declaration, the declaration lists its actions to jump to, and a shortcut cycles through them. (Decision D12.)
+- **R42.** Selecting an object tints its declaration and puts a left bar, in each kind's color, on its actions; selecting an action tints the action in its kind's color and puts a left bar on its object (D67). Selecting anything scrolls the code to it (D77). An overview ruler beside the code shows every mark and the error at its place in the whole file, and clicking a mark jumps there (D78). Unset attributes show as dimmed ghost lines that write themselves into the file when clicked, with a Defaults toggle (D35).
 - **R43.** Every attribute line edits like a style rule in browser devtools: attribute names and values autocomplete, a number drags, a color opens a picker, an easing name opens a picker, an asset path opens a file picker. This is the enhanced editing that replaces an inspector.
 - **R44.** Code edited in the pane applies live. Edits made outside the app, by an agent or another editor, are picked up by file watching and applied live. The playhead and selection survive a reload.
 - **R45.** The GUI rewrites code minimally: only the literal that changed. Formatting and comments are preserved.
@@ -85,6 +88,7 @@ See `checkpoints.md` for what is scheduled and what is backlog.
 
 - **R50.** Every object belongs to a class with a declared list of attributes, defaults, and verbs (D36). Core classes: Rect, Circle, Line, Polygon, Text, Image, Group, Path **(proposed set)**. Video is added in the audio and video checkpoint. Camera and 3D shapes in the 3D checkpoint. Visible objects are shapes with a kind, so one object can morph into another kind (D43).
 - **R51.** Every object has a 3D transform as scalar attributes: `x`, `y`, `z`, rotation, scale, plus opacity and anchor (D33). A 2D object simply leaves `z` and the extra rotation axes at zero.
+- **R55.** An object's `class` attribute names the CSS-like classes it belongs to; `all('name').verb({ ... })` acts on every member with one statement (D80).
 - **R52.** An object is identified by its name. The variable name in code is the name. Renaming propagates to every reference. (Decision D23.)
 - **R53.** Objects created by loops or functions in code appear in every pane but are marked code-driven. Their values are not GUI-editable; the GUI offers Jump to code instead. (Decision D24.)
 - **R54.** A group's transform applies to its children. Groups nest.
@@ -100,7 +104,7 @@ See `checkpoints.md` for what is scheduled and what is backlog.
 - **R66.** Presets for common techniques, such as fade in, slide in, pop, bounce in, and snap in, apply in at most two clicks and produce ordinary actions in code. No hidden magic **(proposed list)**.
 - **R67.** Deterministic: a frame is a pure function of time. No hidden state. The same frame renders identically in the preview and in export.
 - **R68.** Morph: an object changes kind and dimensions smoothly, such as a circle into a rectangle, as one action with a duration and easing (D43).
-- **R69.** Visibility is opacity, and nothing else (D52). An object exists wherever its opacity is above zero and costs nothing where it is not. Fades are fade actions; the timeline shows the result as the opacity lane and offers appear and disappear at a time, which write a base opacity of 0 and a fade.
+- **R69.** Visibility is opacity, and nothing else (D52). An object exists wherever its opacity is above zero and costs nothing where it is not. Fades are fade actions; the timeline shows the result as the opacity lane and offers fade in, pop in, fade out, and pop out at a time. Fading out something never yet visible first makes it visible from the start (D71).
 
 ## 10. Paths
 

@@ -3,8 +3,8 @@ import { defaultKeymap, history, historyKeymap, indentLess, indentSelection, red
 import { javascript } from '@codemirror/lang-javascript'
 import { bracketMatching, foldGutter, foldKeymap, indentOnInput, indentUnit, syntaxHighlighting } from '@codemirror/language'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
-import { EditorState, RangeSetBuilder, StateEffect, StateField, type Extension } from '@codemirror/state'
-import { Decoration, EditorView, drawSelection, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from '@codemirror/view'
+import { EditorState, RangeSet, RangeSetBuilder, StateEffect, StateField, type Extension } from '@codemirror/state'
+import { Decoration, EditorView, GutterMarker, WidgetType, drawSelection, gutterLineClass, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from '@codemirror/view'
 import type { TextEdit } from '../model/edits'
 import type { Range } from '../model/types'
 import { colorSwatches } from './colors'
@@ -22,8 +22,18 @@ export interface HighlightSpec {
   bars: { range: Range; color: string }[]
 }
 
+/** Unset attributes of one object, shown as ghost lines before its closing brace (D35). */
+export interface GhostBlock {
+  name: string
+  /** Position of the closing brace of the attribute block. */
+  closePos: number
+  indent: string
+  missing: { key: string; value: string }[]
+}
+
 const setHighlights = StateEffect.define<HighlightSpec>()
 const setErrorLine = StateEffect.define<number | null>()
+const setGhosts = StateEffect.define<GhostBlock[]>()
 const errorLine = Decoration.line({ class: 'cm-error-line' })
 
 function linesIn(state: EditorState, range: Range): number[] {
@@ -79,6 +89,83 @@ const errorField = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 })
 
+/** A red mark in the gutter on the error line. */
+const errorGutterMarker = new (class extends GutterMarker {
+  elementClass = 'cm-error-gutter'
+})()
+
+const errorGutterField = StateField.define<RangeSet<GutterMarker>>({
+  create: () => RangeSet.empty,
+  update(markers, tr) {
+    let next = markers.map(tr.changes)
+    for (const effect of tr.effects) {
+      if (!effect.is(setErrorLine)) continue
+      if (effect.value === null || effect.value < 1 || effect.value > tr.state.doc.lines) next = RangeSet.empty
+      else next = RangeSet.of(errorGutterMarker.range(tr.state.doc.line(effect.value).from))
+    }
+    return next
+  },
+  provide: (field) => gutterLineClass.from(field),
+})
+
+let onGhostClick: ((name: string, key: string) => void) | null = null
+
+/** The unset attributes of an object, dimmed. Clicking one writes it into the file. */
+class GhostWidget extends WidgetType {
+  constructor(
+    readonly name: string,
+    readonly indent: string,
+    readonly missing: { key: string; value: string }[],
+  ) {
+    super()
+  }
+
+  eq(other: GhostWidget): boolean {
+    return other.name === this.name && other.indent === this.indent && JSON.stringify(other.missing) === JSON.stringify(this.missing)
+  }
+
+  toDOM(): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'cm-ghost-lines'
+    for (const { key, value } of this.missing) {
+      const line = document.createElement('div')
+      line.className = 'cm-ghost-line'
+      line.textContent = `${this.indent}${key}: ${value},`
+      line.title = 'Default. Click to set it.'
+      line.addEventListener('mousedown', (e) => e.preventDefault())
+      line.addEventListener('click', (e) => {
+        e.preventDefault()
+        onGhostClick?.(this.name, key)
+      })
+      wrap.appendChild(line)
+    }
+    return wrap
+  }
+
+  ignoreEvent(): boolean {
+    return true
+  }
+}
+
+const ghostField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(decorations, tr) {
+    let next = decorations.map(tr.changes)
+    for (const effect of tr.effects) {
+      if (!effect.is(setGhosts)) continue
+      const entries = effect.value
+        .filter((g) => g.missing.length > 0 && g.closePos >= 0 && g.closePos <= tr.state.doc.length)
+        .map((g) => ({ pos: tr.state.doc.lineAt(g.closePos).from, g }))
+        .sort((a, b) => a.pos - b.pos)
+      const builder = new RangeSetBuilder<Decoration>()
+      for (const { pos, g } of entries) builder.add(pos, pos, Decoration.widget({ widget: new GhostWidget(g.name, g.indent, g.missing), block: true, side: -1 }))
+      next = builder.finish()
+    }
+    return next
+  },
+  provide: (field) => EditorView.decorations.from(field),
+})
+
 let view: EditorView | null = null
 let suppress = false
 let onChange: ((doc: string) => void) | null = null
@@ -105,6 +192,8 @@ function extensions(): Extension[] {
     editorTheme,
     highlightField,
     errorField,
+    errorGutterField,
+    ghostField,
     keymap.of([
       // Tab accepts a completion when one is open, otherwise indents the line to where it belongs.
       { key: 'Tab', run: acceptCompletion },
@@ -180,10 +269,28 @@ export function markErrorLine(line: number | null): void {
   view?.dispatch({ effects: setErrorLine.of(line) })
 }
 
+export function setGhostLines(blocks: GhostBlock[]): void {
+  view?.dispatch({ effects: setGhosts.of(blocks) })
+}
+
+export function setGhostClickHandler(handler: ((name: string, key: string) => void) | null): void {
+  onGhostClick = handler
+}
+
 export function scrollToPos(pos: number): void {
   if (!view) return
   const clamped = Math.max(0, Math.min(pos, view.state.doc.length))
   view.dispatch({ effects: EditorView.scrollIntoView(clamped, { y: 'start', yMargin: 24 }) })
+}
+
+/** Put the cursor somewhere, optionally selecting a span, scroll to it, and focus the editor. */
+export function placeCursor(from: number, to = from): void {
+  if (!view) return
+  const length = view.state.doc.length
+  const anchor = Math.max(0, Math.min(from, length))
+  const head = Math.max(0, Math.min(to, length))
+  view.dispatch({ selection: { anchor, head }, effects: EditorView.scrollIntoView(anchor, { y: 'center' }) })
+  view.focus()
 }
 
 export function editorUndo(): void {

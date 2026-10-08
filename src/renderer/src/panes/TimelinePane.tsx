@@ -1,11 +1,13 @@
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { showMenu } from '../components/ContextMenu'
+import { ScrollBar } from '../components/ScrollBar'
+import { classGroups, classKey, classSpan, unclassed, type ClassGroup } from '../model/groups'
 import { VERB_COLORS, VERBS } from '../model/registry'
-import { valueAt } from '../model/sample'
-import type { Action, SceneModel, SceneObject } from '../model/types'
+import { isVisibleAt, valueAt } from '../model/sample'
+import type { Action, ClassAction, SceneModel, SceneObject } from '../model/types'
 import { updateSettings } from '../project/controller'
-import { addAction, appearHere, canEdit, deleteAction, deleteObjects, disappearHere, jumpToAction, jumpToObject, roundSeconds, setActionTiming } from '../project/operations'
-import { useStore } from '../state/store'
+import { addAction, addClassAction, addObject, appearHere, canEdit, deleteAction, deleteClassAction, deleteObjects, disappearHere, duplicateObject, jumpToAction, jumpToClass, jumpToObject, materializeClassAction, ownAction, removeFromClass, requestClasses, requestRename, roundSeconds, selectClass, selectClassAction, setActionTiming, setActionValues, setClassActionTiming } from '../project/operations'
+import { useStore, type Tool } from '../state/store'
 import { formatTime, snapToFrame, timecode } from '../state/time'
 
 /** Zoom limits in pixels per second. At the top, single frames at 60 fps sit about 65 px apart. */
@@ -21,10 +23,13 @@ const TICK_SPACING = 80
 const HEADER_W = 180
 /** Height of one lane of clips in a row. Overlapping clips stack in lanes. */
 const LANE_H = 22
-/** Height of the opacity lane at the bottom of every row. */
-const OPACITY_H = 14
+/** Height of the opacity lane at the bottom of every object row. */
+const OPACITY_H = 18
+/** Pixels of vertical drag on an opacity handle for the whole 0 to 1 range. */
+const OPACITY_GAIN = 40
 /** How close a drag must come to a snap target, in pixels. */
 const SNAP_PX = 8
+const TOOLS: Exclude<Tool, 'select'>[] = ['Rect', 'Circle', 'Text']
 
 interface View {
   /** Pixels per second. */
@@ -32,6 +37,9 @@ interface View {
   /** Time at the left edge of the track, in seconds. */
   scrollTime: number
 }
+
+/** A row of the timeline: a class with its members beneath it, or an object (D80). */
+type Row = { kind: 'class'; group: ClassGroup } | { kind: 'object'; obj: SceneObject; member: boolean }
 
 /** The coarsest spacing that keeps labelled ticks at least TICK_SPACING apart. */
 function tickStep(pps: number, fps: number): number {
@@ -53,18 +61,18 @@ function clipLabel(action: Action): string {
 }
 
 /** Overlapping clips go in separate lanes so each stays visible and grabbable. */
-function assignLanes(actions: Action[]): { lanes: Map<number, number>; count: number } {
-  const sorted = [...actions].sort((a, b) => a.start - b.start || a.id - b.id)
+function assignLanes<T extends { id: number; start: number; end: number }>(items: T[]): { lanes: Map<number, number>; count: number } {
+  const sorted = [...items].sort((a, b) => a.start - b.start || a.id - b.id)
   const laneEnds: number[] = []
   const lanes = new Map<number, number>()
-  for (const action of sorted) {
-    let lane = laneEnds.findIndex((end) => end <= action.start)
+  for (const item of sorted) {
+    let lane = laneEnds.findIndex((end) => end <= item.start)
     if (lane < 0) {
       lane = laneEnds.length
       laneEnds.push(0)
     }
-    laneEnds[lane] = Math.max(action.end, action.start + 1e-6)
-    lanes.set(action.id, lane)
+    laneEnds[lane] = Math.max(item.end, item.start + 1e-6)
+    lanes.set(item.id, lane)
   }
   return { lanes, count: Math.max(1, laneEnds.length) }
 }
@@ -73,11 +81,11 @@ function assignLanes(actions: Action[]): { lanes: Map<number, number>; count: nu
  * Snap a dragged time to whole seconds and to the starts and ends of other actions when
  * snapping is on (D64); otherwise keep it exact to the millisecond.
  */
-function snapTime(raw: number, model: SceneModel | null, exclude: Action | null, pps: number, snap: boolean): number {
+function snapTime(raw: number, model: SceneModel | null, exclude: Action | ClassAction | null, pps: number, snap: boolean): number {
   if (!snap) return Math.max(0, roundSeconds(raw))
   const threshold = SNAP_PX / pps
   const candidates = [0, Math.floor(raw), Math.ceil(raw)]
-  if (model) for (const action of model.actions) if (action !== exclude) candidates.push(action.start, action.end)
+  if (model) for (const action of model.actions) if (action !== exclude && action.classAction !== exclude) candidates.push(action.start, action.end)
   let best = raw
   let bestDistance = threshold
   for (const candidate of candidates) {
@@ -112,10 +120,13 @@ const OpacityLane = memo(function OpacityLane({ model, obj, scrollTime, pps, wid
 type ClipMode = 'move' | 'start' | 'end'
 
 /**
- * Transport, ruler, and a row per object with its clips in lanes and its opacity below, over an
- * open-ended time axis. Over the tracks the wheel zooms around the cursor, Shift and the wheel
- * scroll time, Alt and the wheel scroll the rows; over the row headers the wheel scrolls the
- * rows. Clips drag by the body to move and by the edges to resize; right-click for more.
+ * Transport, ruler, and rows over an open-ended time axis: a row per class with its members
+ * beneath, then a row per object, each with its clips in lanes and its opacity below. Over the
+ * tracks the wheel zooms around the cursor, Shift and the wheel scroll time, Alt and the wheel
+ * scroll the rows; over the row headers the wheel scrolls the rows. Clips drag by the body to
+ * move and by the edges to resize; a clip that comes from a class action is drawn dashed and
+ * becomes the object's own copy when dragged (D80). The opacity lane has handles on every fade
+ * and toggles existence on a double-click (D83, a prototype). Right-click for more.
  */
 export function TimelinePane() {
   const time = useStore((s) => s.time)
@@ -129,8 +140,10 @@ export function TimelinePane() {
   const source = useStore((s) => s.source)
   const selection = useStore((s) => s.selection)
   const selectedAction = useStore((s) => s.selectedAction)
+  const collapsed = useStore((s) => s.collapsed)
   const select = useStore((s) => s.select)
   const selectAction = useStore((s) => s.selectAction)
+  const toggleCollapsed = useStore((s) => s.toggleCollapsed)
   const togglePlaying = useStore((s) => s.togglePlaying)
   const toggleLoop = useStore((s) => s.toggleLoop)
   const toggleSnap = useStore((s) => s.toggleSnap)
@@ -226,31 +239,99 @@ export function TimelinePane() {
     capture(e.currentTarget, e.pointerId, (ev) => scrub(ev.clientX))
   }
 
+  /** Whether a block's start and end may be dragged: a written time reference is left alone. */
+  const timingLocks = (stmt: NonNullable<Action['stmt']>, mode: ClipMode | 'start' | 'end'): boolean => {
+    const atProp = stmt.props.find((p) => p.key === 'at')
+    const untilProp = stmt.props.find((p) => p.key === 'until')
+    if (atProp && atProp.kind !== 'literal' && mode !== 'end') return true
+    if (untilProp && mode !== 'move') return true
+    return false
+  }
+
+  /**
+   * Drag a clip by its body or an edge. A clip from a class action first becomes the object's
+   * own copy, which is what then moves (D80).
+   */
   const beginClipDrag = (obj: SceneObject, index: number, mode: ClipMode) => (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
     e.stopPropagation()
     selectAction(obj.name, index)
     const action = obj.actions[index]
-    if (!action?.stmt || !canEdit()) return
-    const atProp = action.stmt.props.find((p) => p.key === 'at')
-    const untilProp = action.stmt.props.find((p) => p.key === 'until')
-    if (atProp && atProp.kind !== 'literal' && mode !== 'end') return
-    if (untilProp && mode !== 'move') return
+    if (!action?.stmt || !canEdit() || timingLocks(action.stmt, mode)) return
     const origin = { x: e.clientX, start: action.start, end: action.end, pps: viewRef.current.pps, delay: action.timing.delay ?? 0 }
+    const minimum = 1 / fps
+    const snapOn = useStore.getState().snap
+    const currentModel = useStore.getState().model
+    let target: number | null = action.classAction ? null : index
+    capture(e.currentTarget, e.pointerId, (ev) => {
+      if (target === null) target = ownAction(obj.name, index)
+      if (target === null) return
+      const dt = (ev.clientX - origin.x) / origin.pps
+      if (mode === 'move') {
+        const start = snapTime(origin.start + dt, currentModel, action, origin.pps, snapOn)
+        setActionTiming(obj.name, target, { at: start - origin.delay })
+      } else if (mode === 'end') {
+        const end = Math.max(origin.start + minimum, snapTime(origin.end + dt, currentModel, action, origin.pps, snapOn))
+        setActionTiming(obj.name, target, { duration: end - origin.start })
+      } else {
+        const start = Math.min(origin.end - minimum, snapTime(origin.start + dt, currentModel, action, origin.pps, snapOn))
+        setActionTiming(obj.name, target, { at: start - origin.delay, duration: origin.end - start })
+      }
+    })
+  }
+
+  /** Drag a class action's clip: the one statement every member follows moves. */
+  const beginClassClipDrag = (classAction: ClassAction, mode: ClipMode) => (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    selectClassAction(classAction)
+    const span = classSpan(classAction)
+    if (!classAction.stmt || !span || !canEdit() || timingLocks(classAction.stmt, mode)) return
+    const origin = { x: e.clientX, start: span.start, end: span.end, pps: viewRef.current.pps, delay: classAction.members[0]?.timing.delay ?? 0 }
     const minimum = 1 / fps
     const snapOn = useStore.getState().snap
     const currentModel = useStore.getState().model
     capture(e.currentTarget, e.pointerId, (ev) => {
       const dt = (ev.clientX - origin.x) / origin.pps
       if (mode === 'move') {
-        const start = snapTime(origin.start + dt, currentModel, action, origin.pps, snapOn)
-        setActionTiming(obj.name, index, { at: start - origin.delay })
+        const start = snapTime(origin.start + dt, currentModel, classAction, origin.pps, snapOn)
+        setClassActionTiming(classAction.id, { at: start - origin.delay })
       } else if (mode === 'end') {
-        const end = Math.max(origin.start + minimum, snapTime(origin.end + dt, currentModel, action, origin.pps, snapOn))
-        setActionTiming(obj.name, index, { duration: end - origin.start })
+        const end = Math.max(origin.start + minimum, snapTime(origin.end + dt, currentModel, classAction, origin.pps, snapOn))
+        setClassActionTiming(classAction.id, { duration: end - origin.start })
       } else {
-        const start = Math.min(origin.end - minimum, snapTime(origin.start + dt, currentModel, action, origin.pps, snapOn))
-        setActionTiming(obj.name, index, { at: start - origin.delay, duration: origin.end - start })
+        const start = Math.min(origin.end - minimum, snapTime(origin.start + dt, currentModel, classAction, origin.pps, snapOn))
+        setClassActionTiming(classAction.id, { at: start - origin.delay, duration: origin.end - start })
+      }
+    })
+  }
+
+  /**
+   * Opacity handles (D83, prototype): the start handle slides the fade in time; the end handle
+   * sets how long it takes sideways and the opacity it reaches up and down.
+   */
+  const beginFadeDrag = (obj: SceneObject, index: number, part: 'start' | 'end') => (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    selectAction(obj.name, index)
+    const action = obj.actions[index]
+    if (!action?.stmt || !canEdit() || timingLocks(action.stmt, part)) return
+    const written = action.changes['opacity']
+    const origin = { x: e.clientX, y: e.clientY, start: action.start, end: action.end, delay: action.timing.delay ?? 0, value: typeof written === 'number' ? written : 1, pps: viewRef.current.pps }
+    const snapOn = useStore.getState().snap
+    const currentModel = useStore.getState().model
+    let target: number | null = action.classAction ? null : index
+    capture(e.currentTarget, e.pointerId, (ev) => {
+      if (target === null) target = ownAction(obj.name, index)
+      if (target === null) return
+      const dt = (ev.clientX - origin.x) / origin.pps
+      if (part === 'start') {
+        setActionTiming(obj.name, target, { at: snapTime(origin.start + dt, currentModel, action, origin.pps, snapOn) - origin.delay })
+      } else {
+        const end = Math.max(origin.start, snapTime(origin.end + dt, currentModel, action, origin.pps, snapOn))
+        const value = Math.max(0, Math.min(1, origin.value - (ev.clientY - origin.y) / OPACITY_GAIN))
+        setActionTiming(obj.name, target, { duration: end - origin.start })
+        setActionValues(obj.name, target, { opacity: value })
       }
     })
   }
@@ -266,42 +347,258 @@ export function TimelinePane() {
     })
   }
 
+  const snappedAt = (clientX: number): number => snapTime(rawTimeAt(clientX), model, null, viewRef.current.pps, useStore.getState().snap)
+
   const objectMenu = (obj: SceneObject) => (e: ReactMouseEvent) => {
     e.stopPropagation()
     select([obj.name])
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToObject(obj.name) },
+      { label: 'Rename…', run: () => requestRename({ object: obj.name }) },
+      { label: 'Classes…', run: () => requestClasses(obj.name) },
+      { label: 'Duplicate', run: () => duplicateObject(obj.name) },
       { label: 'Delete object', run: () => deleteObjects([obj.name]), danger: true },
+    ])
+  }
+
+  const classMenu = (group: ClassGroup) => (e: ReactMouseEvent) => {
+    e.stopPropagation()
+    selectClass(group.className)
+    showMenu(e, [
+      { label: 'Jump to code', run: () => jumpToClass(group.className) },
+      { label: 'Select members', run: () => selectClass(group.className) },
     ])
   }
 
   const clipMenu = (obj: SceneObject, index: number) => (e: ReactMouseEvent) => {
     e.stopPropagation()
     selectAction(obj.name, index)
+    const action = obj.actions[index]
+    if (action?.classAction) {
+      const className = action.classAction.className
+      showMenu(e, [
+        { label: 'Jump to class code', run: () => jumpToAction(obj.name, index) },
+        { label: 'Edit for this object only', run: () => materializeClassAction(obj.name, index) },
+        { label: `Remove ${obj.name} from ${className}`, run: () => removeFromClass(obj.name, className) },
+        { label: 'Delete for every member', run: () => deleteAction(obj.name, index), danger: true },
+      ])
+      return
+    }
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToAction(obj.name, index) },
+      { label: action?.name ? 'Rename…' : 'Name…', run: () => requestRename({ object: obj.name, index }) },
       { label: 'Delete action', run: () => deleteAction(obj.name, index), danger: true },
     ])
   }
 
-  /** Right-click on empty track space: add an action of a kind at that time. */
+  const classClipMenu = (group: ClassGroup, classAction: ClassAction) => (e: ReactMouseEvent) => {
+    e.stopPropagation()
+    selectClassAction(classAction)
+    showMenu(e, [
+      { label: 'Jump to code', run: () => jumpToClass(group.className) },
+      { label: classAction.name ? 'Rename…' : 'Name…', run: () => requestRename({ classAction: classAction.id }) },
+      { label: 'Delete for every member', run: () => deleteClassAction(classAction.id), danger: true },
+    ])
+  }
+
+  /** Right-click on empty track space: add an action of a kind at that time, or appear or disappear there. */
   const trackMenu = (obj: SceneObject) => (e: ReactMouseEvent) => {
     if (!canEdit() || obj.codeDriven) return
     select([obj.name])
-    const t = snapTime(rawTimeAt(e.clientX), model, null, viewRef.current.pps, useStore.getState().snap)
+    const t = snappedAt(e.clientX)
     const label = timecode(t, fps)
     showMenu(e, [
       ...VERBS.map((verb) => ({ label: `Add ${verb} at ${label}`, run: () => addAction(obj.name, verb, t) })),
-      { label: `Appear at ${label} (fade in)`, run: () => appearHere(obj.name, t) },
-      { label: `Disappear at ${label} (fade out)`, run: () => disappearHere(obj.name, t) },
+      { label: `Fade in at ${label}`, run: () => appearHere(obj.name, t) },
+      { label: `Pop in at ${label}`, run: () => appearHere(obj.name, t, true) },
+      { label: `Fade out at ${label}`, run: () => disappearHere(obj.name, t) },
+      { label: `Pop out at ${label}`, run: () => disappearHere(obj.name, t, true) },
     ])
+  }
+
+  /** Right-click on a class's track: add an action for every member at that time. */
+  const classTrackMenu = (group: ClassGroup) => (e: ReactMouseEvent) => {
+    if (!canEdit() || group.members.length === 0) return
+    selectClass(group.className)
+    const t = snappedAt(e.clientX)
+    const label = timecode(t, fps)
+    showMenu(
+      e,
+      VERBS.map((verb) => ({ label: `Add ${verb} for all at ${label}`, run: () => addClassAction(group.className, verb, t) })),
+    )
+  }
+
+  /** Right-click below the rows: add an object at the frame center. */
+  const blankMenu = (e: ReactMouseEvent) => {
+    if (!(e.target instanceof Element) || !e.target.matches('.tl-rows, .empty') || !canEdit()) return
+    showMenu(
+      e,
+      TOOLS.map((t) => ({ label: `Add ${t}`, run: () => addObject(t, 0, 0) })),
+    )
+  }
+
+  /** Double-click on the opacity lane: the object stops existing here, or starts to (D83, prototype). */
+  const toggleExistence = (obj: SceneObject) => (e: ReactMouseEvent) => {
+    if (!model || !canEdit() || obj.codeDriven) return
+    if (e.target instanceof Element && e.target.closest('.opacity-handle')) return
+    const t = snappedAt(e.clientX)
+    if (isVisibleAt(model, obj, t)) disappearHere(obj.name, t)
+    else appearHere(obj.name, t)
   }
 
   const step = tickStep(view.pps, fps)
   const firstTick = Math.floor(view.scrollTime / step)
   const tickCount = width > 0 ? Math.ceil(width / (step * view.pps)) + 2 : 0
   const ticks = Array.from({ length: tickCount }, (_, i) => (firstTick + i) * step)
-  const objects = model?.objects ?? []
+  const selectedRef = selectedAction && model ? model.objects.find((o) => o.name === selectedAction.object)?.actions[selectedAction.index] : undefined
+
+  const rows: Row[] = []
+  if (model) {
+    for (const group of classGroups(model)) {
+      rows.push({ kind: 'class', group })
+      if (!collapsed[classKey(group.className)]) for (const obj of group.members) rows.push({ kind: 'object', obj, member: true })
+    }
+    for (const obj of unclassed(model)) rows.push({ kind: 'object', obj, member: false })
+  }
+
+  const opacityY = (value: unknown): number => OPACITY_H - 1 - Math.max(0, Math.min(1, typeof value === 'number' ? value : 0)) * (OPACITY_H - 3)
+
+  const renderObjectRow = (obj: SceneObject, member: boolean) => {
+    const selected = selection.includes(obj.name)
+    const { lanes, count } = assignLanes(obj.actions)
+    const rowHeight = 6 + count * LANE_H + OPACITY_H
+    return (
+      <div key={obj.name} className={`tl-row${selected ? ' selected' : ''}${member ? ' member' : ''}`} style={{ height: rowHeight }}>
+        <div className="tl-row-header" onClick={() => select([obj.name])} onDoubleClick={() => jumpToObject(obj.name)} onContextMenu={objectMenu(obj)} title="Double-click to jump to the code, right-click for more">
+          <span className="name">{obj.name}</span>
+          <span className="dim">{obj.className}</span>
+          {obj.codeDriven && <span className="badge">code</span>}
+        </div>
+        <div className="tl-track" onPointerDown={beginScrub} onContextMenu={trackMenu(obj)}>
+          {ticks.map((t) => (
+            <div key={t} className="grid-line" style={{ left: xAt(t) }} />
+          ))}
+          {model && width > 0 && (
+            <div className="opacity-slot" style={{ top: 4 + count * LANE_H, height: OPACITY_H }} onDoubleClick={toggleExistence(obj)} title="Opacity. Double-click to appear or disappear here; drag the handles of a fade.">
+              <OpacityLane model={model} obj={obj} scrollTime={view.scrollTime} pps={view.pps} width={width} height={OPACITY_H} />
+              {editable &&
+                !obj.codeDriven &&
+                obj.actions.map((action, index) => {
+                  if (!('opacity' in action.changes) || !action.stmt || action.codeDriven || typeof action.changes['opacity'] !== 'number') return null
+                  const isSelected = selectedAction?.object === obj.name && selectedAction.index === index
+                  return [
+                    <div
+                      key={`s${action.id}`}
+                      className={`opacity-handle start${isSelected ? ' selected' : ''}`}
+                      style={{ left: xAt(action.start), top: opacityY(valueAt(model, obj, 'opacity', action.start)) }}
+                      onPointerDown={beginFadeDrag(obj, index, 'start')}
+                      title="Drag sideways to move this fade"
+                    />,
+                    <div
+                      key={`e${action.id}`}
+                      className={`opacity-handle end${isSelected ? ' selected' : ''}`}
+                      style={{ left: xAt(action.end), top: opacityY(valueAt(model, obj, 'opacity', action.end)) }}
+                      onPointerDown={beginFadeDrag(obj, index, 'end')}
+                      title="Drag sideways to change how long the fade takes, up or down to change the opacity it reaches"
+                    />,
+                  ]
+                })}
+            </div>
+          )}
+          {obj.actions.map((action, index) => {
+            const locked = action.codeDriven || !action.stmt || !editable
+            const derived = !!action.classAction
+            const isSelected = selectedAction?.object === obj.name && selectedAction.index === index
+            const kin = !isSelected && derived && selectedRef?.classAction === action.classAction
+            const left = xAt(action.start)
+            const clipWidth = Math.max(8, (action.end - action.start) * view.pps)
+            const top = 4 + (lanes.get(action.id) ?? 0) * LANE_H
+            const title = derived
+              ? `all('${action.classAction!.className}').${action.verb}  ${timecode(action.start, fps)} to ${timecode(action.end, fps)}. Drag to edit it for ${obj.name} only.`
+              : `${action.name ? `${action.name} = ` : ''}${obj.name}.${action.verb}  ${timecode(action.start, fps)} to ${timecode(action.end, fps)}`
+            return (
+              <div
+                key={action.id}
+                className={`clip${locked ? ' locked' : ''}${derived ? ' derived' : ''}${isSelected ? ' selected' : ''}${kin ? ' kin' : ''}`}
+                style={{ left, top, width: clipWidth, background: VERB_COLORS[action.verb] }}
+                onPointerDown={locked ? undefined : beginClipDrag(obj, index, 'move')}
+                onContextMenu={action.stmt ? clipMenu(obj, index) : undefined}
+                title={title}
+              >
+                {!locked && <div className="clip-edge left" onPointerDown={beginClipDrag(obj, index, 'start')} />}
+                <span className="label">
+                  {derived && <span className="ident">{action.classAction!.className}</span>}
+                  {action.name && <span className="ident">{action.name}</span>}
+                  {clipLabel(action)}
+                </span>
+                {!locked && <div className="clip-edge right" onPointerDown={beginClipDrag(obj, index, 'end')} />}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  const renderClassRow = (group: ClassGroup) => {
+    const key = classKey(group.className)
+    const folded = !!collapsed[key]
+    const items = group.actions.flatMap((classAction) => {
+      const span = classSpan(classAction)
+      return span ? [{ id: classAction.id, start: span.start, end: span.end, classAction }] : []
+    })
+    const { lanes, count } = assignLanes(items)
+    const allSelected = group.members.length > 0 && group.members.every((m) => selection.includes(m.name))
+    const selected = allSelected || selectedRef?.classAction?.className === group.className
+    return (
+      <div key={key} className={`tl-row class-row${selected ? ' selected' : ''}`} style={{ height: 6 + count * LANE_H }}>
+        <div className="tl-row-header" onClick={() => selectClass(group.className)} onDoubleClick={() => jumpToClass(group.className)} onContextMenu={classMenu(group)} title="Every object with this class. Click to select them, double-click to jump to the code">
+          <button
+            className={`chevron${folded ? '' : ' open'}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              toggleCollapsed(key)
+            }}
+            onDoubleClick={(e) => e.stopPropagation()}
+            title={folded ? 'Show members' : 'Hide members'}
+            aria-label={folded ? 'Show members' : 'Hide members'}
+            aria-expanded={!folded}
+          />
+          <span className="name">{group.className}</span>
+          <span className="badge">class</span>
+          <span className="dim mono">{group.members.length}</span>
+        </div>
+        <div className="tl-track" onPointerDown={beginScrub} onContextMenu={classTrackMenu(group)}>
+          {ticks.map((t) => (
+            <div key={t} className="grid-line" style={{ left: xAt(t) }} />
+          ))}
+          {items.map((item) => {
+            const { classAction } = item
+            const locked = !classAction.stmt || !editable
+            const isSelected = selectedRef?.classAction === classAction
+            return (
+              <div
+                key={item.id}
+                className={`clip${locked ? ' locked' : ''}${isSelected ? ' selected' : ''}`}
+                style={{ left: xAt(item.start), top: 4 + (lanes.get(item.id) ?? 0) * LANE_H, width: Math.max(8, (item.end - item.start) * view.pps), background: VERB_COLORS[classAction.verb] }}
+                onPointerDown={locked ? undefined : beginClassClipDrag(classAction, 'move')}
+                onContextMenu={classAction.stmt ? classClipMenu(group, classAction) : undefined}
+                title={`${classAction.name ? `${classAction.name} = ` : ''}all('${group.className}').${classAction.verb}  ${timecode(item.start, fps)} to ${timecode(item.end, fps)}, for every member`}
+              >
+                {!locked && <div className="clip-edge left" onPointerDown={beginClassClipDrag(classAction, 'start')} />}
+                <span className="label">
+                  <span className="ident">all</span>
+                  {classAction.name && <span className="ident">{classAction.name}</span>}
+                  {classAction.verb}
+                </span>
+                {!locked && <div className="clip-edge right" onPointerDown={beginClassClipDrag(classAction, 'end')} />}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="timeline">
@@ -390,64 +687,23 @@ export function TimelinePane() {
           <div className="playhead head" style={{ left: xAt(time) }} />
         </div>
         <div className="tl-body" ref={bodyRef}>
-          <div className="tl-rows">
-            {objects.length === 0 && <div className="empty">No objects yet.</div>}
-            {objects.map((obj) => {
-              const selected = selection.includes(obj.name)
-              const { lanes, count } = assignLanes(obj.actions)
-              const rowHeight = 6 + count * LANE_H + OPACITY_H
-              return (
-                <div key={obj.name} className={`tl-row${selected ? ' selected' : ''}`} style={{ height: rowHeight }}>
-                  <div
-                    className="tl-row-header"
-                    onClick={() => select([obj.name])}
-                    onDoubleClick={() => jumpToObject(obj.name)}
-                    onContextMenu={objectMenu(obj)}
-                    title="Double-click to jump to the code, right-click for more"
-                  >
-                    <span className="name">{obj.name}</span>
-                    <span className="dim">{obj.className}</span>
-                    {obj.codeDriven && <span className="badge">code</span>}
-                  </div>
-                  <div className="tl-track" onPointerDown={beginScrub} onContextMenu={trackMenu(obj)}>
-                    {ticks.map((t) => (
-                      <div key={t} className="grid-line" style={{ left: xAt(t) }} />
-                    ))}
-                    {model && width > 0 && (
-                      <div className="opacity-slot" style={{ top: 4 + count * LANE_H, height: OPACITY_H }} title="Opacity. Right-click the row to appear or disappear here.">
-                        <OpacityLane model={model} obj={obj} scrollTime={view.scrollTime} pps={view.pps} width={width} height={OPACITY_H} />
-                      </div>
-                    )}
-                    {obj.actions.map((action, index) => {
-                      const locked = action.codeDriven || !action.stmt || !editable
-                      const isSelected = selectedAction?.object === obj.name && selectedAction.index === index
-                      const left = xAt(action.start)
-                      const clipWidth = Math.max(8, (action.end - action.start) * view.pps)
-                      const top = 4 + (lanes.get(action.id) ?? 0) * LANE_H
-                      return (
-                        <div
-                          key={action.id}
-                          className={`clip${locked ? ' locked' : ''}${isSelected ? ' selected' : ''}`}
-                          style={{ left, top, width: clipWidth, background: VERB_COLORS[action.verb] }}
-                          onPointerDown={locked ? undefined : beginClipDrag(obj, index, 'move')}
-                          onContextMenu={action.stmt ? clipMenu(obj, index) : undefined}
-                          title={`${action.name ? `${action.name} = ` : ''}${obj.name}.${action.verb}  ${timecode(action.start, fps)} to ${timecode(action.end, fps)}`}
-                        >
-                          {!locked && <div className="clip-edge left" onPointerDown={beginClipDrag(obj, index, 'start')} />}
-                          <span className="label">
-                            {action.name && <span className="ident">{action.name}</span>}
-                            {clipLabel(action)}
-                          </span>
-                          {!locked && <div className="clip-edge right" onPointerDown={beginClipDrag(obj, index, 'end')} />}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })}
+          <div className="tl-rows" onContextMenu={blankMenu}>
+            {rows.length === 0 && <div className="empty">No objects yet. Right-click to add one.</div>}
+            {rows.map((row) => (row.kind === 'class' ? renderClassRow(row.group) : renderObjectRow(row.obj, row.member)))}
             <div className="playhead line" style={{ left: HEADER_W + xAt(time) }} />
           </div>
+        </div>
+        <div className="tl-hscroll">
+          {width > 0 && (
+            <ScrollBar
+              axis="x"
+              rangeStart={0}
+              rangeEnd={Math.max(contentEnd ?? 0, view.scrollTime + width / view.pps) + (width / view.pps) * 0.25}
+              windowStart={view.scrollTime}
+              windowEnd={view.scrollTime + width / view.pps}
+              onScroll={(start) => setView({ pps: viewRef.current.pps, scrollTime: Math.max(0, start) })}
+            />
+          )}
         </div>
       </div>
     </div>

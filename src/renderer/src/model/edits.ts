@@ -41,6 +41,20 @@ export function setProp(source: string, block: BlockInfo, key: string, value: At
     : { from: block.lastPropEnd, to: block.lastPropEnd, insert: `,\n${block.indent}${key}: ${text}` }
 }
 
+/** Remove one attribute line from a block, or just the property when it shares a line. Null when absent. */
+export function removeProp(source: string, block: BlockInfo, key: string): TextEdit | null {
+  const prop = block.props.find((p) => p.key === key)
+  if (!prop) return null
+  const lineStart = source.lastIndexOf('\n', prop.range.from - 1) + 1
+  const lineEndIndex = source.indexOf('\n', prop.range.to)
+  const lineEnd = lineEndIndex < 0 ? source.length : lineEndIndex
+  const before = source.slice(lineStart, prop.range.from)
+  const after = source.slice(prop.range.to, lineEnd)
+  if (/^\s*$/.test(before) && /^\s*,?\s*$/.test(after)) return { from: lineStart, to: Math.min(source.length, lineEnd + 1), insert: '' }
+  const comma = /^\s*,\s*/.exec(after)
+  return { from: prop.range.from, to: prop.range.to + (comma ? comma[0].length : 0), insert: '' }
+}
+
 /** A statement such as `box = Rect({ ... })` or `box.move({ ... })`, one attribute per line. */
 export function blockText(head: string, attrs: Record<string, AttrValue>): string {
   const lines = Object.entries(attrs).map(([key, value]) => `  ${key}: ${formatValue(value)},`)

@@ -100,8 +100,15 @@ function watchProject(path: string, win: BrowserWindow): void {
         file,
         setTimeout(() => {
           timers.delete(file)
-          fs.readFile(join(path, file), 'utf8')
-            .then((source) => {
+          const full = join(path, file)
+          fs.readFile(full, 'utf8')
+            .then(async (source) => {
+              // An empty read usually means the writer truncated the file and has not written
+              // the new text yet; look again before reporting an empty scene.
+              if (source === '') {
+                await new Promise((resolve) => setTimeout(resolve, 100))
+                source = await fs.readFile(full, 'utf8')
+              }
               if (!win.isDestroyed()) win.webContents.send('project:changed', { path, file, source })
             })
             .catch(() => {

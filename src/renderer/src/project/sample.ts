@@ -25,6 +25,26 @@ title = Text({
   fill: '#ffffff',
 })
 
+// Two objects in one class. all('bars') below acts on both at once.
+
+bar1 = Rect({
+  x: -120,
+  y: -400,
+  width: 160,
+  height: 24,
+  fill: '#10b981',
+  class: 'bars',
+})
+
+bar2 = Rect({
+  x: 120,
+  y: -400,
+  width: 160,
+  height: 24,
+  fill: '#a855f7',
+  class: 'bars',
+})
+
 // Script: what happens, in time order. Without \`at\`, an action starts when the object's
 // previous action ends. An object exists wherever its opacity is above zero.
 
@@ -56,5 +76,12 @@ title.fade({
   opacity: 0,
   at: 3,
   duration: 1,
+})
+
+rise = all('bars').move({
+  y: -250,
+  at: 2,
+  duration: 0.6,
+  ease: 'back',
 })
 `

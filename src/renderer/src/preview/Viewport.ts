@@ -100,6 +100,18 @@ export class Viewport {
     this.updateCamera()
   }
 
+  /** The world rectangle currently in view. */
+  viewRect(): { left: number; right: number; top: number; bottom: number } {
+    const halfWidth = this.view.width / 2 / this.zoom
+    const halfHeight = this.view.height / 2 / this.zoom
+    return { left: this.center.x - halfWidth, right: this.center.x + halfWidth, top: this.center.y + halfHeight, bottom: this.center.y - halfHeight }
+  }
+
+  /** The camera frame in world coordinates. */
+  frameRect(): { left: number; right: number; top: number; bottom: number } {
+    return { left: -this.composition.width / 2, right: this.composition.width / 2, top: this.composition.height / 2, bottom: -this.composition.height / 2 }
+  }
+
   /** World coordinates of a pane position. */
   toWorld(paneX: number, paneY: number): { x: number; y: number } {
     return {

@@ -9,17 +9,22 @@ export interface Range {
 export type AttrFn = () => AttrValue
 export type AttrSource = AttrValue | AttrFn
 
-/** A moment defined relative to an action, such as `fly.end` or `fly.progress(0.5)`. */
+/**
+ * A moment defined relative to actions, such as `fly.end` or `fly.progress(0.5)`. A class
+ * action names one action per member; its start is the earliest and its end the latest.
+ */
 export interface TimeRef {
   readonly __timeRef: true
   kind: 'start' | 'end' | 'progress'
-  action: Action
+  actions: Action[]
   fraction?: number
 }
 
-/** One `key: value` line inside a block, with where its value lives in the source. */
+/** One `key: value` line inside a block, with where it lives in the source. */
 export interface PropInfo {
   key: string
+  /** The whole `key: value` property. */
+  range: Range
   valueRange: Range
   raw: string
   kind: 'literal' | 'function' | 'other'
@@ -47,8 +52,10 @@ export interface DeclInfo extends BlockInfo {
   className: string
 }
 
+/** `object.verb({ ... })`, or `all('class').verb({ ... })` when `className` is set. */
 export interface ActionInfo extends BlockInfo {
   objectName: string
+  className?: string
   verb: string
   name?: string
 }
@@ -77,6 +84,18 @@ export interface SceneObject {
   decl: DeclInfo | null
   /** In creation order. */
   actions: Action[]
+  /** The CSS-like classes this object belongs to (D80). */
+  classes: string[]
+}
+
+/** One statement on `all('class')`, which made one action per member (D80). */
+export interface ClassAction {
+  id: number
+  className: string
+  verb: Verb
+  name: string | null
+  stmt: ActionInfo | null
+  members: Action[]
 }
 
 export interface Action {
@@ -91,6 +110,8 @@ export interface Action {
   end: number
   stmt: ActionInfo | null
   codeDriven: boolean
+  /** Set when the action came from a class statement rather than the object's own. */
+  classAction: ClassAction | null
 }
 
 export interface SceneError {
@@ -103,6 +124,9 @@ export interface SceneModel {
   source: string
   objects: SceneObject[]
   actions: Action[]
+  classActions: ClassAction[]
+  /** Class name to member object names, in first-seen order. */
+  classes: Map<string, string[]>
   /** End of the last action, or null when nothing animates. The hold is added elsewhere. */
   lastActionEnd: number | null
   /** End of the last object declaration statement, where new objects are inserted. */

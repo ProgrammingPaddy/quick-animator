@@ -30,6 +30,7 @@ const common: AttrSchema[] = [
   { name: 'scale', type: 'number', default: 1, doc: 'Size multiplier.', animatable: true },
   { name: 'opacity', type: 'number', default: 1, doc: '0 is invisible and costs nothing, 1 is solid. This is the one visibility control (D52).', animatable: true },
   { name: 'fill', type: 'color', default: '#ffffff', doc: 'Fill color, as #rrggbb.', animatable: true },
+  { name: 'class', type: 'string', default: '', doc: "Class names separated by spaces, like CSS classes. An action on all('name') applies to every member (D80).", animatable: false },
 ]
 
 export const classes: Record<string, ClassSchema> = {

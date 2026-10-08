@@ -13,6 +13,10 @@ export interface ProjectSettings {
 /** What a click in the preview does: select, or place a new object of a class. */
 export type Tool = 'select' | 'Rect' | 'Circle' | 'Text'
 
+/** What a drag does to the selected object. Shift makes the same change an animation (D79). */
+export type TransformMode = 'move' | 'rotate' | 'scale'
+export const TRANSFORM_MODES: TransformMode[] = ['move', 'rotate', 'scale']
+
 export interface ProjectInfo {
   path: string
   name: string
@@ -40,6 +44,34 @@ export interface ActionRef {
   index: number
 }
 
+/** A modal question: confirm something, optionally after typing a value. */
+export interface DialogState {
+  title: string
+  message?: string
+  /** Things affected, listed under the message. */
+  items?: string[]
+  /** When set, the dialog asks for text and passes it to onConfirm. */
+  input?: { label: string; value: string; validate?: (value: string) => string | null }
+  confirmLabel: string
+  danger?: boolean
+  onConfirm: (value: string) => void
+}
+
+/** What Ctrl+C took: an object with its actions, or one action, as source text (D81). */
+export type Clip =
+  | { kind: 'object'; name: string; className: string; propsText: string; actions: { text: string; name: string | null }[] }
+  | { kind: 'action'; objectName: string; verb: string; name: string | null; propsText: string }
+
+const DEFAULTS_KEY = 'quick-animator.showDefaults'
+
+function loadShowDefaults(): boolean {
+  try {
+    return localStorage.getItem(DEFAULTS_KEY) !== 'false'
+  } catch {
+    return true
+  }
+}
+
 interface State {
   settings: ProjectSettings
   /** Playhead position in seconds. Never negative, not limited at the top. */
@@ -55,6 +87,10 @@ interface State {
   selection: string[]
   /** The selected action, when one was picked in the timeline or the object pane. */
   selectedAction: ActionRef | null
+  transformMode: TransformMode
+  clipboard: Clip | null
+  /** Objects whose actions are folded away in the object pane. */
+  collapsed: Record<string, true>
   project: ProjectInfo | null
   /** The scene file text. The truth; everything else derives from it. */
   source: string
@@ -63,6 +99,10 @@ interface State {
   error: SceneError | null
   tool: Tool
   contextMenu: ContextMenuState | null
+  dialog: DialogState | null
+  /** Show unset attributes as ghost lines in the code pane (D35). */
+  showDefaults: boolean
+  help: boolean
 
   setTime: (time: number) => void
   setPlaying: (playing: boolean) => void
@@ -74,9 +114,19 @@ interface State {
   stepFrames: (frames: number) => void
   select: (names: string[]) => void
   selectAction: (object: string, index: number) => void
+  setTransformMode: (mode: TransformMode) => void
+  cycleTransformMode: () => void
+  setClipboard: (clip: Clip | null) => void
+  toggleCollapsed: (name: string) => void
+  /** Fold every listed object, or unfold all with null. */
+  setAllCollapsed: (names: string[] | null) => void
   setTool: (tool: Tool) => void
   openMenu: (menu: ContextMenuState) => void
   closeMenu: () => void
+  openDialog: (dialog: DialogState) => void
+  closeDialog: () => void
+  toggleDefaults: () => void
+  setHelp: (open: boolean) => void
 }
 
 function createAppStore() {
@@ -89,12 +139,18 @@ function createAppStore() {
     contentEnd: null,
     selection: [],
     selectedAction: null,
+    transformMode: 'move',
+    clipboard: null,
+    collapsed: {},
     project: null,
     source: '',
     model: null,
     error: null,
     tool: 'select',
     contextMenu: null,
+    dialog: null,
+    showDefaults: loadShowDefaults(),
+    help: false,
 
     setTime: (time) => set({ time: Math.max(0, time) }),
     setPlaying: (playing) => set({ playing }),
@@ -112,9 +168,33 @@ function createAppStore() {
     },
     select: (selection) => set({ selection, selectedAction: null }),
     selectAction: (object, index) => set({ selection: [object], selectedAction: { object, index } }),
+    setTransformMode: (transformMode) => set({ transformMode }),
+    cycleTransformMode: () => set((s) => ({ transformMode: TRANSFORM_MODES[(TRANSFORM_MODES.indexOf(s.transformMode) + 1) % TRANSFORM_MODES.length]! })),
+    setClipboard: (clipboard) => set({ clipboard }),
+    toggleCollapsed: (name) =>
+      set((s) => {
+        const collapsed = { ...s.collapsed }
+        if (collapsed[name]) delete collapsed[name]
+        else collapsed[name] = true
+        return { collapsed }
+      }),
+    setAllCollapsed: (names) => set({ collapsed: names ? Object.fromEntries(names.map((n) => [n, true as const])) : {} }),
     setTool: (tool) => set({ tool }),
     openMenu: (contextMenu) => set({ contextMenu }),
     closeMenu: () => set((s) => (s.contextMenu ? { contextMenu: null } : s)),
+    openDialog: (dialog) => set({ dialog, contextMenu: null }),
+    closeDialog: () => set((s) => (s.dialog ? { dialog: null } : s)),
+    toggleDefaults: () =>
+      set((s) => {
+        const showDefaults = !s.showDefaults
+        try {
+          localStorage.setItem(DEFAULTS_KEY, String(showDefaults))
+        } catch {
+          // Preference only.
+        }
+        return { showDefaults }
+      }),
+    setHelp: (help) => set({ help }),
   }))
 }
 

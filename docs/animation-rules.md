@@ -57,6 +57,7 @@ Every object has these attributes, with these defaults:
 | `scale` | 1 | size multiplier |
 | `opacity` | 1 | 0 means the object does not exist; 1 is solid |
 | `fill` | `'#ffffff'` | color, as `'#rrggbb'` |
+| `class` | `''` | class names separated by spaces, see Classes |
 
 | Class | Own attributes and defaults |
 |-------|-----------------------------|
@@ -138,6 +139,34 @@ dot.fade({
   duration: 0.3,
 })
 ```
+
+## Classes
+
+`class` names the CSS-like classes an object belongs to, separated by spaces. `all('name')` acts
+on every member declared above it, with one statement: one action per member, with the same
+block.
+
+```js
+left = Circle({
+  x: -200,
+  class: 'dots',
+})
+
+right = Circle({
+  x: 200,
+  class: 'dots',
+})
+
+pulse = all('dots').scale({
+  scale: 1.5,
+  at: 1,
+  duration: 0.5,
+})
+```
+
+A member's own action written after the class statement takes over from its start, like any
+later action (see "Relative and overlapping actions"). A named class action is a time reference
+for all its members: `pulse.end` is when the last member finishes.
 
 ## Links
 

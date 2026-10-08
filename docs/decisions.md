@@ -86,6 +86,28 @@ gestures could be judged by hand. Each one is still open to veto.
 - **D68. The code pane borrows from VS Code where it helps:** a color swatch before every color literal that opens a picker, search, and highlighting of other occurrences of the selection.
 - **D69. Completion knows a written name.** After `box2 = `, the class expands without adding a name.
 
+## Confirmed by the owner after the third review, 2026-10-07
+
+- **D70. A drag with an action selected sets that action's destination.** If the selected action changes x or y, dragging its object in the preview writes the end position, and the playhead moves to the action's end so the result is seen. For a relative action the written change is measured from where the object is when the action starts. The same rule will apply to keyframes.
+- **D71. Fading out something that was never visible makes it visible first.** A fade out at a time where the object has opacity 0 sets the base opacity to 1, so the object exists until it fades. Pop in and pop out, fades with a duration of 0, sit beside fade in and fade out in the menu.
+- **D72. Deleting what other code refers to asks first.** A dialog lists every reference. On confirm, a time reference such as `at: slide.end` becomes the time it resolves to now, so nothing moves, and a link falls back to the attribute's default. Deleting through the code pane is a code edit and shows the error as before.
+- **D73. Delete removes exactly what is highlighted:** the selected action, or else the selected object with its actions.
+- **D74. Duplicate copies an object with its actions.** Copies are numbered, `box` to `box2`, and a named action `slide` becomes `slide2`; references inside the copy point at the copy. Ctrl+D and the right-click menu.
+- **D75. Rename from any pane renames every reference** in the code, by token, so strings and comments are left alone. An unnamed action can be given a name the same way. F2 and the right-click menu.
+- **D76. Errors are reachable.** The error line is marked in the gutter and on the overview ruler, and clicking the message jumps to it. A "not defined" error points at the first use of the missing name.
+- **D77. Selecting anything scrolls the code to it.** Supersedes the highlight-only rule in D12; the per-object grouping of D12 stands.
+- **D78. Scrollbars.** Native scrollbars are themed. The code pane has an overview ruler of marks and the error, like VS Code's, without a minimap. The timeline has a horizontal scrollbar and the preview has two.
+- **D35 and D55 are built:** ghost default lines, clickable, with a Defaults toggle in the code pane; the Help pane on F1 and the ? button.
+
+## Confirmed by the owner after the fourth review, 2026-10-07
+
+- **D79. Drag modes.** A selected object has a drag mode: move, rotate, or scale. Clicking the selected object cycles the mode; a segmented control above the preview shows and sets it; the selection outline changes with it (a box, a ring, corner handles). A plain drag applies the mode at the playhead, Shift-drag makes it an animation (`move`, `rotate`, or `scale` from the playhead), and a drag while a matching action is selected sets that action's destination, relative or absolute, under the same rules as D70. Rotation drags measure the angle around the object's center, counterclockwise positive; scale drags the distance from it.
+- **D80. Classes.** An object's `class` attribute holds space-separated names, like CSS classes. `all('name').verb({ ... })` is one statement that makes one action per member declared above it; it is written once, reads once, and shows once. The timeline has a row per class with the class's clips, and the members beneath it, folding; the object pane groups the same way. Member rows show the class's actions as dashed clips. Editing a dashed clip or dragging a member that a class action is moving gives that object its own copy of the action, written after the class statement with its time, so the copy takes over from its start while the class action still applies where the copy does not (D53). Right-click on a member's dashed clip offers that copy, removing the object from the class, or deleting the action for every member. Classes are set in code or from the Classes dialog in the right-click menus.
+- **D81. Copy and paste are Ctrl+C and Ctrl+V everywhere outside the editor.** Copying takes the selected action, or else the selected object with its own actions, as code, and puts the text on the system clipboard too. Pasting an object makes a numbered copy (D74); pasting an action appends it to the selected object, or to its own when nothing else is selected, at the same time. Ctrl+D remains duplicate.
+- **D82. The preview's scrollable area is stable.** It is the camera frame with a frame's width and height around it, grown by what objects occupy and never by the view, so scrolling cannot change the scale of the bar.
+- **D83. Opacity lane controls, prototype for testing.** Every fade has a handle at its start, dragging sideways to slide it in time, and at its end, dragging sideways for its length and up or down for the opacity it reaches. A double-click on the lane makes the object disappear there, or appear there when it is not visible. To be judged by hand before it is final.
+- **D84. Objects are grouped by type**, in registry order (Rect, Circle, Text), in the object pane and the timeline. Each object folds its actions away; one button folds or unfolds everything. Right-click on empty space in the timeline rows or the object pane adds an object at the frame center.
+
 ## Open
 
 None.

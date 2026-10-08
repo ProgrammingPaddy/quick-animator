@@ -1,7 +1,7 @@
 import { CLASS_NAMES, TIMING_KEY_NAMES, VERB_ATTRS, VERB_NAMES, classes, type Verb } from './registry'
 import { parseScene } from './parse'
 import { samplingContext, valueAt } from './sample'
-import type { Action, ActionInfo, AttrSource, SceneError, SceneModel, SceneObject, TimeRef, Timing } from './types'
+import type { Action, ActionInfo, AttrSource, ClassAction, SceneError, SceneModel, SceneObject, TimeRef, Timing } from './types'
 
 /** Links a handle (what user code holds) to the model entry behind it. */
 const HANDLE = Symbol('handle')
@@ -19,10 +19,26 @@ function timeRef(partial: Omit<TimeRef, '__timeRef'>): TimeRef {
   return { __timeRef: true, ...partial }
 }
 
-function behindHandle(value: unknown): SceneObject | Action | null {
+function behindHandle(value: unknown): SceneObject | Action | ClassAction | null {
   if (typeof value !== 'object' || value === null) return null
   const behind = (value as Record<symbol, unknown>)[HANDLE]
-  return typeof behind === 'object' && behind !== null ? (behind as SceneObject | Action) : null
+  return typeof behind === 'object' && behind !== null ? (behind as SceneObject | Action | ClassAction) : null
+}
+
+/** For "x is not defined" and "x is not a function", the line of the first use of x. */
+function lineOfName(source: string, message: string): number | undefined {
+  const match = /^([A-Za-z_$][\w$]*) is not (?:defined|a function)/.exec(message)
+  if (!match) return undefined
+  const name = match[1]!
+  const use = new RegExp(`(^|[^\\w$.])${name.replace(/\$/g, '\\$')}(?![\\w$])`, 'm').exec(source)
+  if (!use) return undefined
+  const pos = use.index + use[1]!.length
+  return source.slice(0, pos).split('\n').length
+}
+
+function classNamesOf(attrs: Record<string, AttrSource>): string[] {
+  const value = attrs['class']
+  return typeof value === 'string' ? value.split(/\s+/).filter(Boolean) : []
 }
 
 /**
@@ -44,19 +60,20 @@ export function evaluateScene(source: string): EvaluateResult {
 
   const objects: SceneObject[] = []
   const actions: Action[] = []
+  const classActions: ClassAction[] = []
   const warnings: SceneError[] = []
-  const model: SceneModel = { source, objects, actions, lastActionEnd: null, lastDeclEnd: parsed.lastDeclEnd, warnings }
+  const model: SceneModel = { source, objects, actions, classActions, classes: new Map(), lastActionEnd: null, lastDeclEnd: parsed.lastDeclEnd, warnings }
 
-  const actionHandle = (action: Action): Record<string | symbol, unknown> => ({
-    [HANDLE]: action,
-    start: timeRef({ kind: 'start', action }),
-    end: timeRef({ kind: 'end', action }),
-    progress: (fraction: number) => timeRef({ kind: 'progress', action, fraction }),
+  const actionHandle = (own: Action[], behind: Action | ClassAction): Record<string | symbol, unknown> => ({
+    [HANDLE]: behind,
+    start: timeRef({ kind: 'start', actions: own }),
+    end: timeRef({ kind: 'end', actions: own }),
+    progress: (fraction: number) => timeRef({ kind: 'progress', actions: own, fraction }),
   })
 
-  const addAction = (obj: SceneObject, verb: Verb, args: unknown[]): Record<string | symbol, unknown> => {
+  const readBlock = (owner: string, verb: Verb, className: string, args: unknown[]): { timing: Timing; changes: Record<string, AttrSource> } => {
     const props = args.length > 0 ? args[args.length - 1] : {}
-    if (typeof props !== 'object' || props === null) throw new Error(`${obj.name}.${verb}() expects a block of attributes`)
+    if (typeof props !== 'object' || props === null) throw new Error(`${owner}.${verb}() expects a block of attributes`)
     const timing: Timing = {}
     const changes: Record<string, AttrSource> = {}
     const allowed = VERB_ATTRS[verb]
@@ -66,8 +83,8 @@ export function evaluateScene(source: string): EvaluateResult {
         else (timing as Record<string, unknown>)[key] = value
         continue
       }
-      if (!classes[obj.className]?.attrs.some((a) => a.name === key)) {
-        warnings.push({ message: `${obj.className} has no attribute "${key}"` })
+      if (!classes[className]?.attrs.some((a) => a.name === key)) {
+        warnings.push({ message: `${className} has no attribute "${key}"` })
         continue
       }
       if (allowed && !allowed.includes(key)) {
@@ -76,10 +93,33 @@ export function evaluateScene(source: string): EvaluateResult {
       }
       changes[key] = value as AttrSource
     }
-    const action: Action = { id: actions.length, object: obj, verb, name: null, changes, timing, start: 0, end: 0, stmt: null, codeDriven: false }
+    return { timing, changes }
+  }
+
+  const makeAction = (obj: SceneObject, verb: Verb, block: { timing: Timing; changes: Record<string, AttrSource> }, classAction: ClassAction | null): Action => {
+    const action: Action = { id: actions.length, object: obj, verb, name: null, changes: block.changes, timing: block.timing, start: 0, end: 0, stmt: null, codeDriven: false, classAction }
     actions.push(action)
     obj.actions.push(action)
-    return actionHandle(action)
+    return action
+  }
+
+  const addAction = (obj: SceneObject, verb: Verb, args: unknown[]): Record<string | symbol, unknown> => {
+    const action = makeAction(obj, verb, readBlock(obj.name, verb, obj.className, args), null)
+    return actionHandle([action], action)
+  }
+
+  /** `all('name').verb({ ... })`: one action per member declared so far. */
+  const addClassAction = (className: string, verb: Verb, args: unknown[]): Record<string | symbol, unknown> => {
+    const classAction: ClassAction = { id: classActions.length, className, verb, name: null, stmt: null, members: [] }
+    classActions.push(classAction)
+    for (const obj of objects) {
+      if (!obj.classes.includes(className)) continue
+      // Each member reads the block against its own class, so a Text member ignores `radius`.
+      const block = readBlock(`all('${className}')`, verb, obj.className, args)
+      classAction.members.push(makeAction(obj, verb, block, classAction))
+    }
+    if (classAction.members.length === 0) warnings.push({ message: `all('${className}') has no members yet; declare objects with class: '${className}' above it` })
+    return actionHandle(classAction.members, classAction)
   }
 
   const objectHandle = (obj: SceneObject): unknown => {
@@ -125,10 +165,20 @@ export function evaluateScene(source: string): EvaluateResult {
         codeDriven: true,
         decl: null,
         actions: [],
+        classes: classNamesOf(attrs),
       }
       objects.push(obj)
       return objectHandle(obj)
     }
+  }
+  api['all'] = (className: unknown) => {
+    if (typeof className !== 'string' || !className) throw new Error("all() expects a class name, as in all('logos')")
+    return new Proxy({} as Record<string | symbol, unknown>, {
+      get(_target, key) {
+        if (typeof key === 'string' && VERB_NAMES.has(key)) return (...args: unknown[]) => addClassAction(className, key as Verb, args)
+        return undefined
+      },
+    })
   }
 
   const names: Record<string, unknown> = {}
@@ -157,7 +207,8 @@ export function evaluateScene(source: string): EvaluateResult {
     const run = new Function('__scope', `with (__scope) {\n${runnable}\n}`) as (scope: unknown) => void
     run(scope)
   } catch (err) {
-    return { model: null, error: { message: err instanceof Error ? err.message : String(err) } }
+    const message = err instanceof Error ? err.message : String(err)
+    return { model: null, error: { message, line: lineOfName(source, message) } }
   }
 
   // Tie objects and actions back to the statements that made them.
@@ -168,17 +219,26 @@ export function evaluateScene(source: string): EvaluateResult {
       obj.decl = decl
       obj.codeDriven = false
     }
+    for (const name of obj.classes) {
+      const members = model.classes.get(name) ?? []
+      members.push(obj.name)
+      model.classes.set(name, members)
+    }
   }
   const infosByObject = new Map<string, ActionInfo[]>()
+  const infosByClass = new Map<string, ActionInfo[]>()
   for (const info of parsed.actions) {
-    const list = infosByObject.get(info.objectName) ?? []
+    const key = info.className !== undefined ? infosByClass : infosByObject
+    const id = info.className ?? info.objectName
+    const list = key.get(id) ?? []
     list.push(info)
-    infosByObject.set(info.objectName, list)
+    key.set(id, list)
   }
   for (const obj of objects) {
     const infos = infosByObject.get(obj.name) ?? []
     let next = 0
     for (const action of obj.actions) {
+      if (action.classAction) continue
       const info = infos[next]
       if (info && info.verb === action.verb) {
         action.stmt = info
@@ -187,6 +247,23 @@ export function evaluateScene(source: string): EvaluateResult {
       } else {
         action.codeDriven = true
       }
+    }
+  }
+  const classNext = new Map<string, number>()
+  for (const classAction of classActions) {
+    const infos = infosByClass.get(classAction.className) ?? []
+    const next = classNext.get(classAction.className) ?? 0
+    const info = infos[next]
+    if (info && info.verb === classAction.verb) {
+      classAction.stmt = info
+      if (info.name && !classAction.name) classAction.name = info.name
+      classNext.set(classAction.className, next + 1)
+      for (const member of classAction.members) {
+        member.stmt = info
+        member.name = classAction.name
+      }
+    } else {
+      for (const member of classAction.members) member.codeDriven = true
     }
   }
 
@@ -198,7 +275,10 @@ export function evaluateScene(source: string): EvaluateResult {
     if (ref === undefined) return fallback
     if (typeof ref === 'number') return Number.isFinite(ref) ? ref : fallback
     if (!isTimeRef(ref)) throw new Error(`${what} must be seconds or a time reference such as other.end`)
-    const [start, end] = resolveAction(ref.action)
+    if (ref.actions.length === 0) return fallback
+    const spans = ref.actions.map((a) => resolveAction(a))
+    const start = Math.min(...spans.map((s) => s[0]))
+    const end = Math.max(...spans.map((s) => s[1]))
     if (ref.kind === 'start') return start
     if (ref.kind === 'end') return end
     return start + (end - start) * (ref.fraction ?? 0)

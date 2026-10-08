@@ -8,10 +8,11 @@ import type { SceneModel } from '../model/types'
 import { useStore } from '../state/store'
 
 /**
- * Completions driven by the class registry and the current model (decision D36): classes and
- * objects at a statement start, classes after `name = `, verbs after `object.`, attributes and
- * timing keys inside a block, named curves after `ease:`, time references after `at:` and
- * `until:`.
+ * Completions driven by the class registry and the current model (decision D36): classes,
+ * objects, and `all` at a statement start, classes after `name = `, verbs after `object.` and
+ * after `all('name').`, attributes and timing keys inside a block, named curves after `ease:`,
+ * time references after `at:` and `until:`, and the classes in use after `class:` and inside
+ * `all('`.
  */
 
 const TIMING_DOCS: Record<string, string> = {
@@ -96,15 +97,31 @@ function verbSnippet(verb: Verb, className: string | undefined): Completion {
   return snippetCompletion(`${verb}({\n${lines.join('\n')}\n})`, { label: verb, info: VERB_DOCS[verb], type: 'method' })
 }
 
+/** `all('name').verb({ ... })`: an action for every member of a class (D80). */
+function allSnippet(): Completion {
+  const f = new Fields()
+  return snippetCompletion(`all('${f.field('name')}').${f.field('fade')}({\n  ${f.field('')}\n})`, {
+    label: 'all',
+    detail: 'class action',
+    info: "An action on every object whose class includes the name, as in all('logos').fade({ ... }).",
+    type: 'function',
+  })
+}
+
 interface CallInfo {
   block: SyntaxNode
   kind: 'class' | 'verb'
+  /** For a class block, the class being declared. */
   className?: string
+  /** For a verb block, the object acted on, or else the CSS-like class of `all('name')`. */
   objectName?: string
+  cssClass?: string
   verb?: Verb
 }
 
-/** The `Class({ ... })` or `object.verb({ ... })` block the cursor is inside, if any. */
+const SELECTOR = /^all\(\s*(['"])(.*?)\1\s*\)$/
+
+/** The `Class({ ... })`, `object.verb({ ... })`, or `all('name').verb({ ... })` block the cursor is inside, if any. */
 function enclosingCall(state: EditorState, node: SyntaxNode | null): CallInfo | null {
   for (let n: SyntaxNode | null = node; n; n = n.parent) {
     if (n.name !== 'ObjectExpression') continue
@@ -120,10 +137,13 @@ function enclosingCall(state: EditorState, node: SyntaxNode | null): CallInfo | 
     if (callee.name === 'MemberExpression') {
       const object = callee.firstChild
       const property = callee.lastChild
-      if (!object || !property || object.name !== 'VariableName') return null
+      if (!object || !property) return null
       const verb = state.sliceDoc(property.from, property.to)
       if (!(VERBS as readonly string[]).includes(verb)) return null
-      return { block: n, kind: 'verb', objectName: state.sliceDoc(object.from, object.to), verb: verb as Verb }
+      if (object.name === 'VariableName') return { block: n, kind: 'verb', objectName: state.sliceDoc(object.from, object.to), verb: verb as Verb }
+      const selector = object.name === 'CallExpression' ? SELECTOR.exec(state.sliceDoc(object.from, object.to)) : null
+      if (selector) return { block: n, kind: 'verb', cssClass: selector[2], verb: verb as Verb }
+      return null
     }
     return null
   }
@@ -156,13 +176,20 @@ function valueKey(state: EditorState, node: SyntaxNode | null, pos: number): str
 
 function timeReferenceOptions(model: SceneModel | null): Completion[] {
   const options: Completion[] = []
+  const seen = new Set<string>()
   for (const action of model?.actions ?? []) {
-    if (!action.name) continue
+    if (!action.name || seen.has(action.name)) continue
+    seen.add(action.name)
     options.push({ label: `${action.name}.end`, type: 'variable', info: `When ${action.name} ends.` })
     options.push({ label: `${action.name}.start`, type: 'variable', info: `When ${action.name} starts.` })
     options.push(snippetCompletion(`${action.name}.progress(\${1:0.5})`, { label: `${action.name}.progress()`, type: 'variable', info: `A fraction of the way through ${action.name}.` }))
   }
   return options
+}
+
+/** The classes objects belong to right now, for `class:` values and `all('`. */
+function classNameOptions(model: SceneModel | null): Completion[] {
+  return [...(model?.classes.entries() ?? [])].map(([name, members]) => ({ label: name, type: 'constant', info: `${members.length} ${members.length === 1 ? 'member' : 'members'}: ${members.join(', ')}` }))
 }
 
 export function sceneCompletions(context: CompletionContext): CompletionResult | null {
@@ -171,6 +198,19 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
   const line = state.doc.lineAt(pos)
   const before = state.sliceDoc(line.from, pos)
   const word = context.matchBefore(/[\w$]*/)
+
+  // all('name').| : the verbs, with the first member's attributes.
+  const selector = /all\(\s*(['"])([^'"]*)\1\s*\)\.([\w$]*)$/.exec(before)
+  if (selector) {
+    const member = model?.objects.find((o) => o.classes.includes(selector[2]!))
+    return { from: pos - selector[3]!.length, options: VERBS.map((v) => verbSnippet(v, member?.className)), validFor: /^[\w$]*$/ }
+  }
+
+  // all('| : the classes in use.
+  const inSelector = /all\(\s*['"]([\w$-]*)$/.exec(before)
+  if (inSelector) {
+    return { from: pos - inSelector[1]!.length, options: classNameOptions(model), validFor: /^[\w$-]*$/ }
+  }
 
   // object.| or action.|
   const member = /([A-Za-z_$][\w$]*)\.([\w$]*)$/.exec(before)
@@ -197,7 +237,7 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
   // name = | : the name is already there, so the class expands without one.
   if (/^\s*(?:const\s+|let\s+|var\s+)?[A-Za-z_$][\w$]*\s*=\s*[\w$]*$/.test(before)) {
     if (!word || (word.from === word.to && !context.explicit)) return null
-    return { from: word.from, options: Object.keys(classes).map((c) => classSnippet(c, false)), validFor: /^[\w$]*$/ }
+    return { from: word.from, options: [...Object.keys(classes).map((c) => classSnippet(c, false)), allSnippet()], validFor: /^[\w$]*$/ }
   }
 
   const node = syntaxTree(state).resolveInner(pos, -1)
@@ -216,6 +256,12 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
       if (key === 'relative') {
         return { from: word?.from ?? pos, options: [{ label: 'true', type: 'constant' }, { label: 'false', type: 'constant' }], validFor: /^[\w$]*$/ }
       }
+      if (key === 'class' && call.kind === 'class') {
+        // Inside the quotes only, so the closing quote the editor added stays in place.
+        const inQuotes = /['"][\w$ -]*$/.test(before)
+        const partial = /[\w$-]*$/.exec(before)![0]
+        return inQuotes ? { from: pos - partial.length, options: classNameOptions(model), validFor: /^[\w$-]*$/ } : null
+      }
       return null
     }
     if (!/^\s*[\w$]*$/.test(before)) return null
@@ -225,7 +271,8 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
     if (call.kind === 'class') {
       for (const attr of classes[call.className!]!.attrs) if (!present.has(attr.name)) options.push(attrCompletion(attr))
     } else {
-      const className = model?.objects.find((o) => o.name === call.objectName)?.className
+      const owner = call.objectName ? model?.objects.find((o) => o.name === call.objectName) : call.cssClass ? model?.objects.find((o) => o.classes.includes(call.cssClass!)) : undefined
+      const className = owner?.className
       const allowed = VERB_ATTRS[call.verb!]
       if (className) {
         for (const attr of classes[className]!.attrs) {
@@ -239,11 +286,12 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
     return { from: word.from, options, validFor: /^[\w$]*$/ }
   }
 
-  // A statement start: a new object, or an object to act on.
+  // A statement start: a new object, an object to act on, or a class to act on.
   if (/^\s*[\w$]*$/.test(before)) {
     if (!word || (word.from === word.to && !context.explicit)) return null
     const options: Completion[] = Object.keys(classes).map((c) => classSnippet(c, true))
     for (const obj of model?.objects ?? []) options.push({ label: obj.name, type: 'variable', detail: obj.className, apply: `${obj.name}.` })
+    if (model && model.classes.size > 0) options.push(allSnippet())
     return { from: word.from, options, validFor: /^[\w$]*$/ }
   }
   return null

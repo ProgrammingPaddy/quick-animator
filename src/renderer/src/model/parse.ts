@@ -105,6 +105,7 @@ function blockInfo(source: string, stmt: Node, block: ObjectExpression, keywordR
     if (key === null) continue
     props.push({
       key,
+      range: { from: property.start, to: property.end },
       valueRange: { from: property.value.start, to: property.value.end },
       raw: source.slice(property.value.start, property.value.end),
       kind: propKind(property.value),
@@ -175,10 +176,22 @@ export function parseScene(source: string, classNames: ReadonlySet<string>, verb
     }
     if (call.callee.type === 'MemberExpression') {
       const member = call.callee as MemberExpression
-      if (member.computed || member.object.type !== 'Identifier' || member.property.type !== 'Identifier' || !block) return
+      if (member.computed || member.property.type !== 'Identifier' || !block) return
       const verb = (member.property as Identifier).name
       if (!verbNames.has(verb)) return
-      actions.push({ ...blockInfo(source, stmt, block, keywordRange), objectName: (member.object as Identifier).name, verb, name: name ?? undefined })
+      if (member.object.type === 'Identifier') {
+        actions.push({ ...blockInfo(source, stmt, block, keywordRange), objectName: (member.object as Identifier).name, verb, name: name ?? undefined })
+        return
+      }
+      // all('class').verb({ ... })
+      if (member.object.type === 'CallExpression') {
+        const selector = member.object as CallExpression
+        const arg = selector.arguments[0]
+        if (selector.callee.type !== 'Identifier' || (selector.callee as Identifier).name !== 'all' || !arg || arg.type !== 'Literal') return
+        const className = (arg as Literal).value
+        if (typeof className !== 'string') return
+        actions.push({ ...blockInfo(source, stmt, block, keywordRange), objectName: '', className, verb, name: name ?? undefined })
+      }
     }
   }
 

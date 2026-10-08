@@ -2,22 +2,56 @@
 
 box = Rect({
   x: -400,
-  y: 667,
+  y: 0,
   width: 240,
   height: 140,
   fill: '#4f8cff',
 })
 
 dot = Circle({
-  x: -2,
+  x: 0,
   y: -300,
   radius: 50,
   fill: '#f59e0b',
-  opacity: 1,
+  opacity: 0,
+})
+
+title = Text({
+  text: 'Quick Animator',
+  x: 0,
+  y: 320,
+  fontSize: 72,
+  fill: '#ffffff',
+})
+
+// Two objects in one class. all('bars') below acts on both at once.
+
+bar1 = Rect({
+  x: -120,
+  y: -400,
+  width: 160,
+  height: 24,
+  fill: '#10b981',
+  class: 'bars',
+})
+
+bar2 = Rect({
+  x: 120,
+  y: -400,
+  width: 160,
+  height: 24,
+  fill: '#a855f7',
+  class: 'bars',
 })
 
 // Script: what happens, in time order. Without `at`, an action starts when the object's
 // previous action ends. An object exists wherever its opacity is above zero.
+
+slide = box.move({
+  x: 400,
+  at: 0.5,
+  duration: 1.2,
+})
 
 box.rotate({
   rotation: 360,
@@ -25,35 +59,27 @@ box.rotate({
   duration: 1,
 })
 
+dot.fade({
+  opacity: 1,
+  at: slide.end,
+  duration: 0.3,
+})
+
 dot.move({
-  y: -669,
+  y: 0,
   duration: 0.8,
   ease: 'bounce',
-  at: 0.598,
 })
 
-box2 = Rect({
-  x: -337,
-  y: 655,
-  z: 0,
-  rotation: 0,
-  scale: 1,
-  opacity: 1,
-  fill: '#ffffff',
-  width: 200,
-  height: 120,
-})
-
-box2.move({
-  x: -357,
-  y: 205,
-  at: 2.25,
+title.fade({
+  opacity: 0,
+  at: 3,
   duration: 1,
 })
 
-box.move({
-  x: 336,
-  y: 179,
-  at: 2.25,
-  duration: 1,
+rise = all('bars').move({
+  y: -250,
+  at: 2,
+  duration: 0.6,
+  ease: 'back',
 })

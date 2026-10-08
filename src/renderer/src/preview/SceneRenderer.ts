@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { isVisibleAt, parseColor, valueAt } from '../model/sample'
 import type { SceneModel, SceneObject } from '../model/types'
+import type { TransformMode } from '../state/store'
 
 interface Item {
   mesh: THREE.Mesh
@@ -15,22 +16,49 @@ const unitPlane = new THREE.PlaneGeometry(1, 1)
 const unitCircle = new THREE.CircleGeometry(1, 96)
 /** Canvas pixels per world pixel for text, so it stays crisp when zoomed in. */
 const TEXT_SCALE = 2
+const ACCENT = 0x3b82f6
+
+function ringGeometry(): THREE.BufferGeometry {
+  const points: THREE.Vector3[] = []
+  for (let i = 0; i < 96; i++) {
+    const a = (i / 96) * Math.PI * 2
+    points.push(new THREE.Vector3(Math.cos(a), Math.sin(a), 0))
+  }
+  return new THREE.BufferGeometry().setFromPoints(points)
+}
 
 /** Draws the scene model at a time into a Three.js group, and picks objects under the pointer. */
 export class SceneRenderer {
   readonly group = new THREE.Group()
   private readonly items = new Map<string, Item>()
   private readonly selectionBox: THREE.LineSegments
+  private readonly rotateRing: THREE.LineLoop
+  private readonly corners: THREE.Mesh[] = []
   private readonly raycaster = new THREE.Raycaster()
 
   constructor() {
-    this.selectionBox = new THREE.LineSegments(new THREE.EdgesGeometry(unitPlane), new THREE.LineBasicMaterial({ color: 0x3b82f6, depthTest: false }))
+    const lineMaterial = new THREE.LineBasicMaterial({ color: ACCENT, depthTest: false })
+    this.selectionBox = new THREE.LineSegments(new THREE.EdgesGeometry(unitPlane), lineMaterial)
     this.selectionBox.renderOrder = 1_000_000
     this.selectionBox.visible = false
-    this.group.add(this.selectionBox)
+    this.rotateRing = new THREE.LineLoop(ringGeometry(), lineMaterial)
+    this.rotateRing.renderOrder = 1_000_000
+    this.rotateRing.visible = false
+    const cornerMaterial = new THREE.MeshBasicMaterial({ color: ACCENT, depthTest: false })
+    for (let i = 0; i < 4; i++) {
+      const corner = new THREE.Mesh(unitPlane, cornerMaterial)
+      corner.renderOrder = 1_000_001
+      corner.visible = false
+      this.corners.push(corner)
+    }
+    this.group.add(this.selectionBox, this.rotateRing, ...this.corners)
   }
 
-  update(model: SceneModel | null, time: number, selection: string[]): void {
+  /**
+   * Draw the model at a time, with the selection shown for the transform mode: a box to move,
+   * a ring to rotate, corner handles to scale. `handleSize` is in world pixels.
+   */
+  update(model: SceneModel | null, time: number, selection: string[], mode: TransformMode = 'move', handleSize = 8): void {
     const seen = new Set<string>()
     if (model) {
       model.objects.forEach((obj, index) => {
@@ -45,15 +73,43 @@ export class SceneRenderer {
       this.items.delete(name)
     }
     const selected = selection.length === 1 ? this.items.get(selection[0]!) : undefined
-    if (selected && selected.mesh.visible) {
-      this.selectionBox.visible = true
-      this.selectionBox.position.copy(selected.mesh.position)
-      this.selectionBox.position.z += 0.5
-      this.selectionBox.rotation.copy(selected.mesh.rotation)
-      this.selectionBox.scale.copy(selected.mesh.scale)
-    } else {
-      this.selectionBox.visible = false
+    const show = !!selected && selected.mesh.visible
+    this.selectionBox.visible = show && mode !== 'rotate'
+    this.rotateRing.visible = show && mode === 'rotate'
+    for (const corner of this.corners) corner.visible = show && mode === 'scale'
+    if (!selected || !show) return
+    const { position, rotation, scale } = selected.mesh
+    this.selectionBox.position.set(position.x, position.y, position.z + 0.5)
+    this.selectionBox.rotation.copy(rotation)
+    this.selectionBox.scale.copy(scale)
+    const radius = Math.hypot(scale.x, scale.y) / 2
+    this.rotateRing.position.set(position.x, position.y, position.z + 0.5)
+    this.rotateRing.scale.set(radius, radius, 1)
+    this.corners.forEach((corner, i) => {
+      const sx = i % 2 === 0 ? -0.5 : 0.5
+      const sy = i < 2 ? -0.5 : 0.5
+      const local = new THREE.Vector3(sx * scale.x, sy * scale.y, 0).applyEuler(rotation)
+      corner.position.set(position.x + local.x, position.y + local.y, position.z + 0.6)
+      corner.rotation.copy(rotation)
+      corner.scale.set(handleSize, handleSize, 1)
+    })
+  }
+
+  /** The box around every visible object, ignoring rotation, or null when nothing is visible. */
+  bounds(): { left: number; right: number; top: number; bottom: number } | null {
+    let box: { left: number; right: number; top: number; bottom: number } | null = null
+    for (const item of this.items.values()) {
+      if (!item.mesh.visible) continue
+      const { x, y } = item.mesh.position
+      const halfWidth = Math.abs(item.mesh.scale.x) / 2
+      const halfHeight = Math.abs(item.mesh.scale.y) / 2
+      const left = x - halfWidth
+      const right = x + halfWidth
+      const top = y + halfHeight
+      const bottom = y - halfHeight
+      box = box ? { left: Math.min(box.left, left), right: Math.max(box.right, right), top: Math.max(box.top, top), bottom: Math.min(box.bottom, bottom) } : { left, right, top, bottom }
     }
+    return box
   }
 
   /** The name of the topmost visible object under a normalized device coordinate, or null. */
