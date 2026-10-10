@@ -2,10 +2,11 @@ import { applyEdits, scrollToPos } from '../code/editor'
 import { findDependents, type Dependent } from '../model/dependents'
 import { appendStatement, blockText, formatNumber, insertDeclaration, removeProp, removeStatements, setProp, type TextEdit } from '../model/edits'
 import { isMember } from '../model/evaluate'
-import { memberRef } from '../model/groups'
-import { classes, VERB_ATTRS, VERB_PARAMS, type AttrValue, type Verb } from '../model/registry'
+import { memberRef, normalizeSelection } from '../model/groups'
+import { classes, GROUP, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
+import { memberBox } from '../model/sample'
 import { identifierEdits, nameProblem, replaceIdentifiers } from '../model/rename'
-import { definingAction, positionAt, valueAt, writtenValues } from '../model/sample'
+import { currentWritten, definingAction, shownValue, valueAt, withWritten, writtenValues } from '../model/sample'
 import type { Action, ActionInfo, ClassAction, Range, SceneModel, SceneObject } from '../model/types'
 import { useStore, type ActionRef, type Clip, type ClipAction, type ClipObject, type Pin, type SelectionState, type Tool } from '../state/store'
 
@@ -82,6 +83,8 @@ export function frameSeconds(fps: number): number {
 
 /** The dimension attributes the GUI writes for a class of object: width and height when it has them, else what it has. */
 export function resizeAttrs(className: string): string[] {
+  // A group resizes by scaling around its anchor (D124).
+  if (className === GROUP) return ['scale']
   const has = (a: string) => classes[className]?.attrs.some((s) => s.name === a)
   if (has('width') && has('height')) return ['width', 'height']
   return RESIZE_ATTRS.filter(has)
@@ -105,6 +108,7 @@ export function verbFor(attrs: string[]): Verb {
  */
 export function resizedValues(className: string, base: Record<string, number>, fx: number, fy: number): Record<string, number> {
   const uniform = Math.abs(fx - 1) >= Math.abs(fy - 1) ? fx : fy
+  if (className === GROUP) return { scale: (base['scale'] || 1) * uniform }
   if (className === 'Rect' || className === 'Circle') return { width: (base['width'] ?? 0) * fx, height: (base['height'] ?? 0) * fy }
   if (className === 'Text') return { fontSize: (base['fontSize'] ?? 0) * uniform }
   return {}
@@ -180,12 +184,28 @@ export function setAttrsAtMany(entries: { name: string; attrs: Record<string, nu
   if (!model) return false
   const edits: TextEdit[] = []
   for (const { name, attrs } of entries) {
-    const obj = model.objects.find((o) => o.name === name)
-    if (!obj) continue
-    const definers = Object.fromEntries(['x', 'y', ...Object.keys(attrs)].map((attr) => [attr, definingAction(obj, attr, time)]))
-    for (const [attr, value] of Object.entries(writtenValues(model, obj, time, attrs, definers))) {
+    const found = model.objects.find((o) => o.name === name)
+    if (!found) continue
+    let obj: SceneObject = found
+    let probed = model
+    const definers = Object.fromEntries(['x', 'y', ...Object.keys(attrs)].map((attr) => [attr, definingAction(found, attr, time)]))
+    // A group's own turn or scale pivots on a point its declaration keeps: the first the GUI writes fixes it at the center of the members' box, so a member moved later never moves it (D124).
+    const decl = found.decl
+    if (found.className === GROUP && decl && ['rotation', 'scale'].some((attr) => attr in attrs && !definers[attr])) {
+      const box = memberBox(model, found, time)
+      if (box) {
+        for (const [attr, value] of [['pivotX', Math.round(box.x)], ['pivotY', Math.round(box.y)]] as const) {
+          if (found.attrs[attr] !== undefined) continue
+          edits.push(setProp(source, decl, attr, value))
+          ;[probed, obj] = withWritten(probed, obj, null, attr, value)
+        }
+      }
+    }
+    for (const [attr, value] of Object.entries(writtenValues(probed, obj, time, attrs, definers))) {
+      // What is written already stays as it is; nothing to change is nothing to undo.
+      const current = currentWritten(probed, obj, definers[attr] ?? null, attr, time)
+      if (Math.abs(value - current) < 1e-6 || roundAttr(attr, value) === roundAttr(attr, current)) continue
       const edit = writeTo(source, obj, definers[attr] ?? null, attr, value)
-      // Nothing to change is nothing to undo.
       if (edit && source.slice(edit.from, edit.to) !== edit.insert) edits.push(edit)
     }
   }
@@ -201,15 +221,15 @@ export function setPositionAt(name: string, x: number, y: number, time: number):
   return setAttrsAt(name, { x, y }, time)
 }
 
-/** Arrow keys: move objects by whole pixels at the playhead (D95). */
+/** Arrow keys: move objects by whole pixels at the playhead (D95). A group's members move; the group itself is untouched (D124). */
 export function nudgeObjects(names: string[], dx: number, dy: number): void {
   const { model, time } = state()
   if (!model) return
-  const entries = names.flatMap((name) => {
+  const entries = [...new Set(names)].flatMap((name) => {
     const obj = model.objects.find((o) => o.name === name)
     if (!obj?.decl) return []
-    const x = valueAt(model, obj, 'x', time)
-    const y = valueAt(model, obj, 'y', time)
+    const x = shownValue(model, obj, 'x', time)
+    const y = shownValue(model, obj, 'y', time)
     return [{ name, attrs: { x: (typeof x === 'number' ? x : 0) + dx, y: (typeof y === 'number' ? y : 0) + dy } }]
   })
   setAttrsAtMany(entries, time)
@@ -256,10 +276,9 @@ export function setActionDestination(name: string, index: number, destination: R
  * pinned to the playhead (D27, D79, D103): with `start` it starts here and lasts a second, and
  * the playhead moves to its end so the result is seen; with `end` it ends here, starting a
  * second earlier, and the playhead stays. The verb follows the attributes: a move, a turn, a
- * resize, or `to`. With `relative` the action is a change from where the object is, starting at
- * zero, which is how a group moves (D123).
+ * resize, or `to`.
  */
-export function beginTimed(name: string, attrs: string[], pin: Pin = 'start', when = state().time, keep?: SelectionState, relative = false): number | null {
+export function beginTimed(name: string, attrs: string[], pin: Pin = 'start', when = state().time, duration = 1): number | null {
   const { model } = state()
   const obj = model?.objects.find((o) => o.name === name)
   if (!model || !obj || !obj.decl) return null
@@ -269,44 +288,30 @@ export function beginTimed(name: string, attrs: string[], pin: Pin = 'start', wh
   const block: Record<string, AttrValue> = {}
   for (const attr of present) {
     const value = valueAt(model, obj, attr, when)
-    block[attr] = relative ? 0 : roundAttr(attr, typeof value === 'number' ? value : 0)
+    block[attr] = roundAttr(attr, typeof value === 'number' ? value : 0)
   }
-  if (relative) block['relative'] = true
-  return appendTimed(name, verb, block, pin, when, keep)
+  return appendTimed(name, verb, block, pin, when, duration)
 }
 
-/**
- * Shift-drag on the rotate handle with a pivot or a group: each object orbits the center, its
- * position along the arc and its rotation turning with it, so the group turns as one (D118).
- */
-export function beginOrbit(name: string, center: { x: number; y: number }, pin: Pin = 'start', when = state().time, keep?: SelectionState): number | null {
-  const { model } = state()
-  const obj = model?.objects.find((o) => o.name === name)
-  if (!model || !obj?.decl) return null
-  // The center is measured from where the object is when the orbit begins, which is earlier than the playhead when the end is pinned.
-  const from = positionAt(model, obj, pinnedSpan(pin, when).at)
-  return appendTimed(name, 'orbit', { dx: Math.round(center.x - from.x), dy: Math.round(center.y - from.y), angle: 0 }, pin, when, keep)
-}
-
-/** Where an action pinned to a time sits (D103): with `start` it starts here and lasts a second; with `end` it ends here, starting a second earlier or at zero. */
-function pinnedSpan(pin: Pin, when: number): { at: number; duration: number } {
+/** Where an action pinned to a time sits (D103): with `start` it starts here and lasts `length` seconds, a second unless the gesture chose otherwise; with `end` it ends here, starting that long earlier or at zero. */
+function pinnedSpan(pin: Pin, when: number, length = 1): { at: number; duration: number } {
   const now = roundSeconds(when)
+  const wanted = Math.max(frameSeconds(state().fps), roundSeconds(length))
   const endHere = pin === 'end' && now >= frameSeconds(state().fps)
-  const at = endHere ? roundSeconds(Math.max(0, now - 1)) : now
-  return { at, duration: endHere ? roundSeconds(now - at) : 1 }
+  const at = endHere ? roundSeconds(Math.max(0, now - wanted)) : now
+  return { at, duration: endHere ? roundSeconds(now - at) : wanted }
 }
 
-/** Write a new action pinned to a time (D103) and select it, or keep `keep` selected with the new action added. Returns its end, or null. */
-function appendTimed(name: string, verb: Verb, block: Record<string, AttrValue>, pin: Pin, when: number, keep?: SelectionState): number | null {
+/** Write a new action pinned to a time (D103) and select it. Returns its end, or null. */
+function appendTimed(name: string, verb: Verb, block: Record<string, AttrValue>, pin: Pin, when: number, length = 1): number | null {
   const { source, model } = state()
   const obj = model?.objects.find((o) => o.name === name)
   if (!model || !obj) return null
-  const { at, duration } = pinnedSpan(pin, when)
+  const { at, duration } = pinnedSpan(pin, when, length)
+  Object.assign(block, pivotFor(model, obj, block, at))
   block['at'] = at
   block['duration'] = duration
-  const index = obj.actions.length
-  const selection = keep ? { selection: keep.selection, selectedActions: [...keep.selectedActions, { object: name, index }] } : actionSelected(name, index)
-  applyEdits([appendStatement(source, blockText(`${name}.${verb}`, block))], selection)
+  applyEdits([appendStatement(source, blockText(`${name}.${verb}`, block))], actionSelected(name, obj.actions.length))
   return at + duration
 }
 
@@ -316,22 +321,22 @@ export function beginMove(name: string): boolean {
   return end !== null
 }
 
-/** Update the target of the object's last own action, while a shift-drag continues. */
-export function setLastActionTarget(name: string, attrs: Record<string, number>): void {
+/** The index of the object's last own action, the one a Shift-drag is writing, or null. */
+export function lastActionIndex(name: string): number | null {
   const obj = findObject(name)
   const index = obj ? obj.actions.map((a, i) => (a.stmt && !a.classAction ? i : -1)).filter((i) => i >= 0).pop() : undefined
-  if (obj && index !== undefined) setActionValues(name, index, attrs)
+  return index ?? null
 }
 
-/** Write values into an action's block: the targets of the change. Only attributes and parameters the action has. */
+/** Write values into an action's block: the targets of the change. Only attributes the action has. */
 export function setActionValues(name: string, index: number, values: Record<string, number>): void {
   const { source } = state()
   const action = findObject(name)?.actions[index]
   if (!action?.stmt) return
   const stmt = action.stmt
   const edits = Object.entries(values)
-    .filter(([key]) => key in action.changes || VERB_PARAMS[action.verb].includes(key))
-    .map(([key, value]) => setProp(source, stmt, key, key === 'angle' ? Math.round(value * 10) / 10 : roundAttr(key, value)))
+    .filter(([key]) => key in action.changes)
+    .map(([key, value]) => setProp(source, stmt, key, roundAttr(key, value)))
   applyEdits(edits)
 }
 
@@ -343,13 +348,19 @@ export function setClassActionValues(id: number, values: Record<string, number>)
   applyEdits(Object.entries(values).map(([key, value]) => setProp(source, stmt, key, roundAttr(key, value))))
 }
 
-/** The values an action of a kind starts with: the object's current ones, so nothing jumps. An orbit turns a quarter around the frame center. */
+/**
+ * The point a group's turn or scale pivots on, written into the action: the center of the
+ * members' box when the action begins, so that nothing done later can move it (D124).
+ */
+function pivotFor(model: SceneModel, obj: SceneObject, block: Record<string, AttrValue>, at: number): Record<string, AttrValue> {
+  if (obj.className !== GROUP || !('rotation' in block || 'scale' in block)) return {}
+  const box = memberBox(model, obj, at)
+  return box ? { pivotX: Math.round(box.x), pivotY: Math.round(box.y) } : {}
+}
+
+/** The values an action of a kind starts with: the object's current ones, so nothing jumps. */
 function startingValues(model: SceneModel, obj: SceneObject, verb: Verb, time: number): Record<string, AttrValue> {
   const attrs: Record<string, AttrValue> = {}
-  if (verb === 'orbit') {
-    const pos = positionAt(model, obj, time)
-    return { dx: Math.round(-pos.x), dy: Math.round(-pos.y), angle: 90 }
-  }
   const allowed = VERB_ATTRS[verb]
   if (!allowed) return attrs
   const schema = classes[obj.className]
@@ -368,6 +379,7 @@ export function addAction(name: string, verb: Verb, time: number): void {
   const obj = model?.objects.find((o) => o.name === name)
   if (!model || !obj || !obj.decl) return
   const attrs = startingValues(model, obj, verb, time)
+  Object.assign(attrs, pivotFor(model, obj, attrs, roundSeconds(time)))
   attrs['at'] = roundSeconds(time)
   attrs['duration'] = 1
   applyEdits([appendStatement(source, blockText(`${name}.${verb}`, attrs))], actionSelected(name, obj.actions.length))
@@ -625,6 +637,14 @@ function confirmRemoval(title: string, dependents: Dependent[], run: () => void)
 export function deleteObjects(names: string[], confirmed = false): void {
   const { source, model } = state()
   if (!model) return
+  // A group has no body of its own: deleting it takes it apart and keeps its members (D124).
+  const groups = names.filter((n) => model.objects.some((o) => o.name === n && o.className === GROUP))
+  if (groups.length > 0) {
+    const rest = names.filter((n) => !groups.includes(n))
+    if (rest.length > 0) deleteObjects(rest, confirmed)
+    for (const g of groups) ungroup(g, confirmed)
+    return
+  }
   const objects = model.objects.filter((o) => names.includes(o.name) && o.decl)
   if (objects.length === 0) return
   // A class statement whose members all go would be left talking to no one: it goes too (D121).
@@ -640,7 +660,20 @@ export function deleteObjects(names: string[], confirmed = false): void {
       for (const action of obj.actions) if (action.stmt && !action.classAction) ranges.push(action.stmt.range)
     }
     for (const c of orphaned) ranges.push(c.stmt!.range)
-    applyEdits([...removeStatements(source, ranges), ...resolutionEdits(model, source, dependents)], objectsSelected([]))
+    // Members leave the groups that list them; a group left with no one goes too (D121, D124).
+    const lists: TextEdit[] = []
+    for (const group of model.objects) {
+      if (group.className !== GROUP || !group.decl || objects.includes(group)) continue
+      const list = memberNames(group)
+      const next = list.filter((n) => !objects.some((o) => o.name === n))
+      if (next.length === list.length) continue
+      if (next.length > 0) lists.push(setProp(source, group.decl, 'members', next.join(' ')))
+      else {
+        ranges.push(group.decl.range)
+        for (const action of group.actions) if (action.stmt && !action.classAction) ranges.push(action.stmt.range)
+      }
+    }
+    applyEdits([...removeStatements(source, ranges), ...resolutionEdits(model, source, dependents), ...lists], objectsSelected([]))
   }
   if (confirmed) run()
   else confirmRemoval(`Delete ${objects.length === 1 ? objects[0]!.name : `${objects.length} objects`}?`, dependents, run)
@@ -916,7 +949,14 @@ function applyRename(target: RenameTarget, newName: string): void {
   const obj = model.objects.find((o) => o.name === target.object)
   if (!obj) return
   if (!('index' in target)) {
-    applyEdits(identifierEdits(source, { [obj.name]: newName }), objectsSelected([newName]))
+    // Groups list members by name in a string, which the identifier edits do not reach (D124).
+    const edits = identifierEdits(source, { [obj.name]: newName })
+    for (const group of model.objects) {
+      if (group.className !== GROUP || !group.decl) continue
+      const list = memberNames(group)
+      if (list.includes(obj.name)) edits.push(setProp(source, group.decl, 'members', list.map((n) => (n === obj.name ? newName : n)).join(' ')))
+    }
+    applyEdits(edits, objectsSelected([newName]))
     return
   }
   const action = obj.actions[target.index]
@@ -928,7 +968,7 @@ function applyRename(target: RenameTarget, newName: string): void {
 /** Open the Classes dialog for objects (D88). */
 export function requestClasses(names: string[]): void {
   const { model } = state()
-  const valid = names.filter((n) => model?.objects.some((o) => o.name === n && o.decl))
+  const valid = names.filter((n) => model?.objects.some((o) => o.name === n && o.decl && o.className !== GROUP))
   if (valid.length > 0) useStore.getState().openClassesDialog(valid)
 }
 
@@ -951,6 +991,73 @@ export function applyClasses(names: string[], add: string[], remove: string[]): 
 
 export function removeFromClass(name: string, className: string): void {
   applyClasses([name], [], [className])
+}
+
+/** The names a group lists, as written. */
+function memberNames(group: SceneObject): string[] {
+  const written = group.attrs['members']
+  return typeof written === 'string' ? written.split(/\s+/).filter(Boolean) : []
+}
+
+/**
+ * Make several things one group: one declaration listing them, nothing written into the
+ * members (D124). The new group is selected. Returns its name, or null.
+ */
+export function createGroup(names: string[]): string | null {
+  const { model } = state()
+  if (!model) return null
+  // One set of things is one group: a member of a selected group is already in it, and a set that already is a group is that group (D124).
+  const members = normalizeSelection(model, names.filter((n) => model.objects.some((o) => o.name === n && o.decl)))
+  if (members.length === 1) {
+    const only = model.objects.find((o) => o.name === members[0])
+    if (only?.className !== GROUP) return null
+    useStore.getState().select([only.name])
+    return only.name
+  }
+  if (members.length === 0) return null
+  const name = uniqueName('group')
+  applyEdits([insertDeclaration(model.lastDeclEnd, blockText(`${name} = Group`, { members: members.join(' ') }))], objectsSelected([name]))
+  return name
+}
+
+/**
+ * Take a group apart: its members keep their own values, its declaration and its animations go,
+ * and any group listing it lists its members instead (D124). Asks first when it has animations
+ * or something refers to it.
+ */
+export function ungroup(name: string, confirmed = false): void {
+  const { source, model } = state()
+  const group = model?.objects.find((o) => o.name === name && o.className === GROUP)
+  if (!model || !group?.decl) return
+  const actions = group.actions.filter((a) => a.stmt && !a.classAction)
+  const names = [group.name, ...actions.map((a) => a.name).filter((n): n is string => !!n)]
+  const dependents = findDependents(model, names, { objects: [group.name], actions: actions.map((a) => ({ object: group.name, index: group.actions.indexOf(a) })) })
+  const members = model.groups.get(group.name) ?? []
+  const run = () => {
+    const current = state()
+    if (!current.model || current.model !== model) return ungroup(name, true)
+    const edits: TextEdit[] = []
+    for (const outer of model.objects) {
+      if (outer.className !== GROUP || outer === group || !outer.decl) continue
+      const list = memberNames(outer)
+      if (!list.includes(group.name)) continue
+      edits.push(setProp(source, outer.decl, 'members', [...new Set(list.flatMap((n) => (n === group.name ? members : [n])))].join(' ')))
+    }
+    const ranges: Range[] = [group.decl!.range, ...actions.map((a) => a.stmt!.range)]
+    applyEdits([...removeStatements(source, ranges), ...resolutionEdits(model, source, dependents), ...edits], objectsSelected(members.filter((m) => model.objects.some((o) => o.name === m))))
+  }
+  // What the group itself has moved, turned, or scaled goes with it, so its members would move back.
+  const posed = ['x', 'y', 'rotation', 'scale'].filter((attr) => group.attrs[attr] !== undefined)
+  if (confirmed || (actions.length === 0 && dependents.length === 0 && posed.length === 0)) run()
+  else
+    useStore.getState().openDialog({
+      title: `Ungroup ${name}?`,
+      message: 'Its members keep their own values; what the group itself has moved, turned, or scaled goes with it, as do its animations. Time references keep the time they resolve to now, links and overrides fall back to nothing.',
+      items: [...(posed.length > 0 ? [`${name}: ${posed.join(', ')}`] : []), ...actions.map((a) => `${a.name ? `${a.name} = ` : ''}${name}.${a.verb}`), ...dependents.map((d) => d.label)],
+      confirmLabel: 'Ungroup',
+      danger: true,
+      onConfirm: run,
+    })
 }
 
 /** Scroll the code pane to an object's declaration. */

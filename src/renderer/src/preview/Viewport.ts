@@ -48,8 +48,10 @@ export class Viewport {
     this.applyComposition()
   }
 
-  setComposition(width: number, height: number): void {
+  /** The frame's size and the color inside it, the project's background (D131). */
+  setComposition(width: number, height: number, background: string): void {
     this.composition = { width, height }
+    ;(this.frame.material as THREE.MeshBasicMaterial).color.set(background)
     this.applyComposition()
     this.fit()
   }

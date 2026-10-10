@@ -4,7 +4,7 @@ import { useStore } from '../state/store'
 import { renderMarkdown } from './markdown'
 
 const SHORTCUTS: [string, string][] = [
-  ['Space', 'Play or pause'],
+  ['Space', 'Play; pause, which returns to where playback started'],
   ['Arrows', 'Move the selected objects a pixel, the selected actions a frame; with nothing selected, step the playhead'],
   ['Home, End', 'Start, or the end of the content'],
   ['Click the selected object', 'Cycle the handles: Transform, Move, Rotate, Resize'],
@@ -12,10 +12,10 @@ const SHORTCUTS: [string, string][] = [
   ['Ctrl + click a clip', 'Select several actions; a drag then retimes them together'],
   ['Shift + wheel', 'Lengthen or shorten the selected actions by the wheel step, in the preview or the timeline'],
   ['Wheel in the timeline', 'Scroll time; Ctrl + wheel zooms, Alt + wheel scrolls the rows'],
+  ['Snap, Frames in the timeline', 'Clips and the playhead snap to whole seconds and to action starts and ends, the playhead also to every fifth frame; every time written lands on a frame'],
   ['Ctrl + X', 'Cut the selected actions or objects'],
   ['Alt + drag a corner', 'Keep the proportions'],
-  ['Edge / Center, Starts / Ends at playhead', 'What a resize keeps in place; whether a new animation starts or ends at the playhead'],
-  ['Double-click the pivot x, then drag it', 'Move the center a rotation turns around; Shift-drag the rotate handle then writes an orbit'],
+  ['Edge / Center, Starts / Ends at playhead, Chain', 'What a resize keeps in place; whether a new animation starts or ends at the playhead; whether the animations made while Shift is held follow one another'],
   ['Ctrl + A', 'Select every object'],
   ['Shift + drag an object or a handle', 'Make the drag an animation from the playhead: a move, a rotation, or a resize'],
   ['Drag an object with an action selected', "Set that action's destination"],

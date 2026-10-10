@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="512"
+     height="512"
+     viewBox="344 94 512 512">
+
+  <rect x="344" y="94" width="512" height="512" fill="#000"/>
+
+  <!-- Connecting paths -->
+  <g stroke="#fff" stroke-width="17" fill="none" stroke-linecap="round">
+    <path d="M 410 460 L 443.11 460 C 465.74 460 469.68 350 492.3 350 L 506.18 350"/>
+    <path d="M 693.82 350 L 706.35 350 C 728.98 350 732.91 239.85 755.54 239.85 L 790 239.85"/>
+  </g>
+
+  <!-- Outer cutouts / spacing -->
+  <circle cx="410" cy="460" r="53.5" fill="#000"/>
+  <circle cx="790" cy="239.85" r="53.5" fill="#000"/>
+
+  <g stroke="#000" stroke-width="35" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M 570.5 281.66 L 506.18 350 L 570.5 418.34"/>
+    <path d="M 629.5 281.66 L 693.82 350 L 629.5 418.34"/>
+  </g>
+
+  <!-- Visible icon shapes -->
+  <circle cx="410" cy="460" r="44.5" fill="#fff"/>
+  <circle cx="790" cy="239.85" r="44.5" fill="#fff"/>
+
+  <g stroke="#fff" stroke-width="17" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 570.5 281.66 L 506.18 350 L 570.5 418.34"/>
+    <path d="M 629.5 281.66 L 693.82 350 L 629.5 418.34"/>
+  </g>
+</svg>

@@ -1,4 +1,6 @@
 import { create } from 'zustand'
+import { groupCarries, normalizeSelection } from '../model/groups'
+import { GROUP } from '../model/registry'
 import type { SceneError, SceneModel } from '../model/types'
 import { snapToFrame } from './time'
 
@@ -8,6 +10,8 @@ export interface ProjectSettings {
   fps: number
   /** Seconds kept after the last action, so the final state stays for export and looping (D54). */
   hold: number
+  /** The color inside the frame, behind everything, in the preview and in exports without alpha (D131). */
+  background: string
 }
 
 /** What a click in the preview does: select, or place a new object of a class. */
@@ -114,6 +118,7 @@ const DEFAULTS_KEY = 'quick-animator.showDefaults'
 const SNAP_KEY = 'quick-animator.previewSnap'
 const WHEEL_STEP_KEY = 'quick-animator.wheelStep'
 const PIN_KEY = 'quick-animator.pin'
+const CHAIN_KEY = 'quick-animator.chain'
 const FRAME_SNAP_KEY = 'quick-animator.frameSnap'
 const ANCHOR_KEY = 'quick-animator.anchor'
 
@@ -184,6 +189,8 @@ interface State {
   /** Playhead position in seconds. Never negative, not limited at the top. */
   time: number
   playing: boolean
+  /** Where the playhead was when playback started, so that pausing returns there (D126). */
+  playStart: number | null
   /** Whether playback wraps at the content end. Off by default: it stops there. */
   loop: boolean
   /** Whether timeline drags snap to whole seconds and to other actions' starts and ends (D64). */
@@ -203,6 +210,8 @@ interface State {
   transformMode: TransformMode
   previewSnap: PreviewSnap
   pin: Pin
+  /** Whether the animations made while Shift is held follow one another instead of all starting at the playhead (D127). */
+  chain: boolean
   anchor: Anchor
   clipboard: Clip | null
   /** Objects and class groups whose rows are folded, per pane (D98). */
@@ -221,6 +230,8 @@ interface State {
   /** Show unset attributes as ghost lines in the code pane (D35). */
   showDefaults: boolean
   help: boolean
+  /** The export dialog is open (D132). */
+  exportOpen: boolean
 
   setTime: (time: number) => void
   setPlaying: (playing: boolean) => void
@@ -243,6 +254,7 @@ interface State {
   cycleTransformMode: () => void
   setPreviewSnap: (snap: Partial<PreviewSnap>) => void
   setPin: (pin: Pin) => void
+  setChain: (chain: boolean) => void
   setAnchor: (anchor: Anchor) => void
   setClipboard: (clip: Clip | null) => void
   toggleCollapsed: (pane: Pane, key: string) => void
@@ -257,6 +269,7 @@ interface State {
   closeDialog: () => void
   toggleDefaults: () => void
   setHelp: (open: boolean) => void
+  setExportOpen: (open: boolean) => void
 }
 
 function createAppStore() {
@@ -270,10 +283,16 @@ function createAppStore() {
       if (!applying) selectionSink?.(before, after)
     }
     const objectsOf = (refs: ActionRef[]): string[] => [...new Set(refs.map((r) => r.object))]
+    /** One set of things is one selection: members of a selected group drop out, and exactly a group's members become the group (D124). */
+    const normalized = (names: string[]): string[] => {
+      const model = get().model
+      return model ? normalizeSelection(model, names) : names
+    }
     return {
-      settings: { width: 1920, height: 1080, fps: 60, hold: 0 },
+      settings: { width: 1920, height: 1080, fps: 60, hold: 0, background: '#1c1c1c' },
       time: 0,
       playing: false,
+      playStart: null,
       loop: false,
       snap: true,
       frameSnap: loadChoice<'on' | 'off'>(FRAME_SNAP_KEY, ['on', 'off'], 'on') === 'on',
@@ -285,6 +304,7 @@ function createAppStore() {
       transformMode: 'all',
       previewSnap: loadPreviewSnap(),
       pin: loadChoice<Pin>(PIN_KEY, ['start', 'end'], 'start'),
+      chain: loadChoice<'on' | 'off'>(CHAIN_KEY, ['on', 'off'], 'off') === 'on',
       anchor: loadChoice<Anchor>(ANCHOR_KEY, ['edge', 'center'], 'edge'),
       clipboard: null,
       collapsed: { objects: {}, timeline: {} },
@@ -298,13 +318,16 @@ function createAppStore() {
       dialog: null,
       showDefaults: loadShowDefaults(),
       help: false,
+      exportOpen: false,
 
       setTime: (time) => set({ time: Math.max(0, time) }),
-      setPlaying: (playing) => set({ playing }),
+      setPlaying: (playing) => set((s) => (playing && !s.playing ? { playing, playStart: s.time } : { playing })),
       togglePlaying: () =>
         set((s) => {
-          if (!s.playing && s.contentEnd !== null && s.time >= s.contentEnd) return { playing: true, time: 0 }
-          return { playing: !s.playing }
+          // Pausing returns the playhead to where playback started (D126); playing from the end starts over (D59).
+          if (s.playing) return { playing: false, time: s.playStart ?? s.time }
+          const from = s.contentEnd !== null && s.time >= s.contentEnd ? 0 : s.time
+          return { playing: true, time: from, playStart: from }
         }),
       toggleLoop: () => set((s) => ({ loop: !s.loop })),
       toggleSnap: () => set((s) => ({ snap: !s.snap })),
@@ -327,7 +350,7 @@ function createAppStore() {
         const next = snapToFrame(time, settings.fps) + frames / settings.fps
         set({ playing: false, time: Math.max(0, snapToFrame(next, settings.fps)) })
       },
-      select: (selection) => changeSelection({ selection, selectedActions: [] }),
+      select: (selection) => changeSelection({ selection: normalized(selection), selectedActions: [] }),
       selectAction: (object, index) => changeSelection({ selection: [object], selectedActions: [{ object, index }] }),
       selectActions: (refs) => changeSelection({ selection: objectsOf(refs), selectedActions: refs }),
       toggleSelectedAction: (object, index) => {
@@ -337,8 +360,14 @@ function createAppStore() {
         changeSelection({ selection: objectsOf(refs), selectedActions: refs })
       },
       toggleSelected: (name) => {
-        const current = get().selection
-        changeSelection({ selection: current.includes(name) ? current.filter((n) => n !== name) : [...current, name], selectedActions: [] })
+        const { selection: current, model } = get()
+        // Ctrl-click on something the selected group carries picks that thing alone; otherwise it joins or leaves (D89, D124).
+        const group = current.length === 1 && model ? model.objects.find((o) => o.name === current[0] && o.className === GROUP) : undefined
+        if (group && model && name !== group.name && groupCarries(model, group.name).includes(name)) {
+          changeSelection({ selection: [name], selectedActions: [] })
+          return
+        }
+        changeSelection({ selection: normalized(current.includes(name) ? current.filter((n) => n !== name) : [...current, name]), selectedActions: [] })
       },
       setTransformMode: (transformMode) => set({ transformMode }),
       cycleTransformMode: () => set((s) => ({ transformMode: TRANSFORM_MODES[(TRANSFORM_MODES.indexOf(s.transformMode) + 1) % TRANSFORM_MODES.length]! })),
@@ -355,6 +384,10 @@ function createAppStore() {
       setPin: (pin) => {
         saveChoice(PIN_KEY, pin)
         set({ pin })
+      },
+      setChain: (chain) => {
+        saveChoice(CHAIN_KEY, chain ? 'on' : 'off')
+        set({ chain })
       },
       setAnchor: (anchor) => {
         saveChoice(ANCHOR_KEY, anchor)
@@ -387,6 +420,7 @@ function createAppStore() {
           return { showDefaults }
         }),
       setHelp: (help) => set({ help }),
+      setExportOpen: (exportOpen) => set({ exportOpen, contextMenu: null }),
     }
   })
   return store

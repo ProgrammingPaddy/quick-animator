@@ -3,7 +3,7 @@ import { showMenu } from '../components/ContextMenu'
 import { NumberField } from '../components/NumberField'
 import { ScrollBar } from '../components/ScrollBar'
 import { actionIdents, activeMembers, classActionIdents, classKey, classSpan, classStandIn, classTree, overrideOf, type ClassNode } from '../model/groups'
-import { VERB_COLORS, VERBS } from '../model/registry'
+import { attrSchema, GROUP, PIVOT_PARAMS, VERB_ATTRS, VERB_COLORS, VERBS } from '../model/registry'
 import { isVisibleAt, valueAt } from '../model/sample'
 import type { Action, ClassAction, SceneModel, SceneObject } from '../model/types'
 import { updateSettings } from '../project/controller'
@@ -42,6 +42,7 @@ import {
   setActionValues,
   setClassActionTiming,
   setClassActionValues,
+  ungroup,
 } from '../project/operations'
 import { isActionSelected, useStore, type ActionRef, type Tool } from '../state/store'
 import { formatTime, snapToFrame, timecode } from '../state/time'
@@ -94,7 +95,7 @@ function tickLabel(seconds: number, step: number, fps: number): string {
 }
 
 function clipLabel(action: Action): string {
-  const what = action.verb === 'to' ? Object.keys(action.changes).join(', ') || 'to' : action.verb
+  const what = action.verb === 'to' ? Object.keys(action.changes).filter((k) => !(PIVOT_PARAMS as readonly string[]).includes(k)).join(', ') || 'to' : action.verb
   return action.timing.relative ? `${what} (relative)` : what
 }
 
@@ -137,6 +138,29 @@ function snapTime(raw: number, model: SceneModel | null, exclude: Action | Class
     }
   }
   return Math.max(0, roundSeconds(toFrames(best)))
+}
+
+/**
+ * Where the playhead lands when the ruler is clicked or scrubbed (D128): with snapping on, on a
+ * whole second or an action's start or end within reach, else on the nearest fifth frame; with
+ * it off, on the nearest frame.
+ */
+function snapPlayhead(raw: number, model: SceneModel | null, pps: number, snap: boolean): number {
+  const { fps } = useStore.getState().settings
+  if (!snap) return Math.max(0, snapToFrame(raw, fps))
+  const threshold = SNAP_PX / pps
+  const candidates = [0, Math.floor(raw), Math.ceil(raw)]
+  if (model) for (const action of model.actions) if (!action.overridden) candidates.push(action.start, action.end)
+  let best: number | null = null
+  let bestDistance = threshold
+  for (const candidate of candidates) {
+    const distance = Math.abs(candidate - raw)
+    if (distance <= bestDistance) {
+      best = candidate
+      bestDistance = distance
+    }
+  }
+  return Math.max(0, best ?? Math.round((raw * fps) / 5) * (5 / fps))
 }
 
 /** The opacity of one object over the visible range, as a filled curve. Memoised: it ignores the playhead. */
@@ -303,10 +327,13 @@ export function TimelinePane() {
     return Math.max(0, v.scrollTime + x / v.pps)
   }
 
-  /** Only the ruler moves the playhead (D92). */
+  /** Only the ruler moves the playhead (D92), snapping to seconds, action edges, and fifth frames when snapping is on (D128). */
   const beginScrub = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
-    const scrub = (clientX: number) => setTime(snapToFrame(rawTimeAt(clientX), fps))
+    const scrub = (clientX: number) => {
+      const s = useStore.getState()
+      setTime(snapPlayhead(rawTimeAt(clientX), s.model, viewRef.current.pps, s.snap))
+    }
     scrub(e.clientX)
     capture(e.currentTarget, e.pointerId, (ev) => scrub(ev.clientX))
   }
@@ -537,6 +564,14 @@ export function TimelinePane() {
     const targets = s.selection.includes(obj.name) ? s.selection : [obj.name]
     if (!s.selection.includes(obj.name)) select([obj.name])
     const many = targets.length > 1
+    if (obj.className === GROUP && !many) {
+      showMenu(e, [
+        { label: 'Jump to code', run: () => jumpToObject(obj.name) },
+        { label: 'Rename…', run: () => requestRename({ object: obj.name }) },
+        { label: 'Ungroup', run: () => ungroup(obj.name) },
+      ])
+      return
+    }
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToObject(obj.name) },
       ...(many ? [] : [{ label: 'Rename…', run: () => requestRename({ object: obj.name }) }]),
@@ -602,9 +637,11 @@ export function TimelinePane() {
     if (!canEdit() || obj.codeDriven) return
     select([obj.name])
     const t = snappedAt(e.clientX)
+    // Only the kinds this thing can do: a group moves, turns, and scales, but has no size or opacity of its own.
+    const verbs = VERBS.filter((verb) => verb === 'to' || (VERB_ATTRS[verb] ?? []).some((a) => attrSchema(obj.className, a)))
     showMenu(
       e,
-      VERBS.map((verb) =>
+      verbs.map((verb) =>
         verb === 'fade'
           ? {
               label: 'Add',
@@ -721,7 +758,9 @@ export function TimelinePane() {
   const renderObjectRow = (obj: SceneObject, depth: number, twins?: string[], place?: string) => {
     const selected = selection.includes(obj.name)
     const { lanes, count } = assignLanes(obj.actions)
-    const rowHeight = 6 + count * LANE_H + OPACITY_H
+    // A group has no opacity of its own, so no lane (D124).
+    const hasOpacity = !!attrSchema(obj.className, 'opacity')
+    const rowHeight = 6 + count * LANE_H + (hasOpacity ? OPACITY_H : 0)
     const elsewhere = twins?.filter((c) => c !== place) ?? []
     return (
       <div key={`${place ?? ''}:${obj.name}`} className={`tl-row${selected ? ' selected' : ''}${reorder?.name === obj.name ? ' dragging' : ''}${elsewhere.length > 0 ? ' twin' : ''}`} style={{ height: rowHeight }} data-object={obj.name}>
@@ -736,6 +775,11 @@ export function TimelinePane() {
         >
           <span className="name">{obj.name}</span>
           <span className="dim">{obj.className}</span>
+          {obj.className === GROUP && (
+            <span className="dim members" title="Its members: the group's animations move, turn, and scale them around its anchor (D124).">
+              {(model?.groups.get(obj.name) ?? []).join(' · ')}
+            </span>
+          )}
           {obj.codeDriven && <span className="badge">code</span>}
           {elsewhere.length > 0 && (
             <span className="badge twin" title={`The same object, also listed under ${elsewhere.join(' and ')} (D107).`}>
@@ -747,7 +791,7 @@ export function TimelinePane() {
           {ticks.map((t) => (
             <div key={t} className="grid-line" style={{ left: xAt(t) }} />
           ))}
-          {model && width > 0 && (
+          {model && hasOpacity && width > 0 && (
             <div className="opacity-slot" style={{ top: 4 + count * LANE_H, height: OPACITY_H }} onDoubleClick={toggleExistence(obj)} title="Opacity. Double-click to appear or disappear here; drag the handles of a fade.">
               <OpacityLane model={model} obj={obj} scrollTime={view.scrollTime} pps={view.pps} width={width} height={OPACITY_H} />
               {editable &&
@@ -899,7 +943,7 @@ export function TimelinePane() {
             // Release focus so that space keeps toggling through the app shortcut, not the button.
             e.currentTarget.blur()
           }}
-          title="Play or pause (space)"
+          title="Play, or pause and return to where it started (space)"
           aria-label={playing ? 'Pause' : 'Play'}
         >
           {playing ? '❚❚' : '▶'}
@@ -937,7 +981,7 @@ export function TimelinePane() {
             toggleSnap()
             e.currentTarget.blur()
           }}
-          title={snap ? 'Drags snap to whole seconds and to other actions. Click for free placement.' : 'Drags place freely. Click to snap to whole seconds and to other actions.'}
+          title={snap ? 'Drags snap to whole seconds and to other actions; the ruler puts the playhead on those, on action starts and ends, or on every fifth frame. Click for free placement.' : 'Drags place freely and the ruler puts the playhead on any frame. Click to snap drags to whole seconds and other actions, and the playhead to those and every fifth frame.'}
           aria-label="Snap"
           aria-pressed={snap}
         >

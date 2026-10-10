@@ -12,7 +12,7 @@ import { useStore } from '../state/store'
  * objects, and `all` at a statement start, classes after `name = `, verbs after `object.` and
  * after `all('name').`, attributes and timing keys inside a block, named curves after `ease:`,
  * time references after `at:` and `until:`, and the classes in use after `class:` and inside
- * `all('`.
+ * `all('`, and the objects, groups, and classes after a group's `members:` (D124).
  */
 
 const TIMING_DOCS: Record<string, string> = {
@@ -46,7 +46,6 @@ const VERB_DOCS: Record<Verb, string> = {
   resize: 'Change width, height, radius, or font size over time.',
   fade: 'Change opacity over time. Opacity 0 means the object does not exist.',
   to: 'Change any attributes over time.',
-  orbit: 'Turn around a point dx, dy away from the object: the position follows the arc by `angle` degrees, on top of any other motion, and the rotation turns with it.',
 }
 
 /**
@@ -91,7 +90,6 @@ function verbSnippet(verb: Verb, className: string | undefined): Completion {
   const lines: string[] = []
   const allowed = VERB_ATTRS[verb]
   if (verb === 'to') lines.push(`  ${f.field('')}`)
-  else if (verb === 'orbit') lines.push(`  dx: ${f.field('100')},`, `  dy: ${f.field('0')},`, `  angle: ${f.field('90')},`)
   else if (allowed && className) {
     const schema = classes[className]
     const attrs = allowed.filter((a) => schema?.attrs.some((s) => s.name === a)).slice(0, verb === 'move' ? 2 : 1)
@@ -196,6 +194,12 @@ function classNameOptions(model: SceneModel | null): Completion[] {
   return [...(model?.classes.entries() ?? [])].filter(([name]) => !(name in classes)).map(([name, members]) => ({ label: name, type: 'constant', info: `${members.length} ${members.length === 1 ? 'member' : 'members'}: ${members.join(', ')}` }))
 }
 
+/** What a group's `members` can name: objects, groups, and the classes in use (D124). */
+function memberOptions(model: SceneModel | null): Completion[] {
+  const objects = (model?.objects ?? []).map((o) => ({ label: o.name, type: 'variable', detail: o.className }))
+  return [...objects, ...classNameOptions(model)]
+}
+
 /** What `all('` can name: the classes in use and every type (D80). */
 function selectorOptions(model: SceneModel | null): Completion[] {
   const types = Object.keys(classes).map((name) => ({ label: name, type: 'class', info: `Every ${name}.` }))
@@ -274,11 +278,11 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
       if (key === 'overrides') {
         return { from: word?.from ?? pos, options: classActionOptions(model), validFor: /^[\w$]*$/ }
       }
-      if (key === 'class' && call.kind === 'class') {
+      if ((key === 'class' || key === 'members') && call.kind === 'class') {
         // Inside the quotes only, so the closing quote the editor added stays in place.
         const inQuotes = /['"][\w$ -]*$/.test(before)
         const partial = /[\w$-]*$/.exec(before)![0]
-        return inQuotes ? { from: pos - partial.length, options: classNameOptions(model), validFor: /^[\w$-]*$/ } : null
+        return inQuotes ? { from: pos - partial.length, options: key === 'class' ? classNameOptions(model) : memberOptions(model), validFor: /^[\w$-]*$/ } : null
       }
       return null
     }

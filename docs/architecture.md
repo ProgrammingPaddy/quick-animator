@@ -10,7 +10,7 @@ How the app is built so that code stays the truth and every pane stays live. D-n
 - Code pane: CodeMirror 6 (D19).
 - State: a zustand store in the renderer. Nothing beyond React for the UI.
 - Parsing: a JavaScript parser with source positions (acorn), and minimal text edits for rewrites. The file is never reprinted.
-- Export: frames from the same renderer, encoded by a bundled ffmpeg (D25).
+- Export: frames from the same renderer, encoded by a bundled ffmpeg (D25, D132, D133).
 
 Dependencies and their reasons:
 
@@ -102,28 +102,41 @@ of the mode: eight resize handles on the corners and edges, a rotate handle abov
 handle under a world point, each object's drawn frame and axis-aligned box, and the objects a box
 touches. The preview turns a pointer-down into a drag of one kind, move, rotate, or resize, from
 the handle hit or the mode, and a flavor, plain, timed (Shift), or destination (a matching action
-selected). Resize works in the object's own frame: the far side stays put, corners keep the
+selected). A Shift gesture looks ahead to the proposed end before the drag (D103) and, in Chain
+mode, from the end of the last animation it made (D127). Resize works in the object's own frame: the far side stays put, corners keep the
 proportions, and the result is factors applied to the dimension attributes, so the same math
 serves Rect, Circle, and Text. Snapping rounds the value being written. A drag on empty space is a
 marquee.
 
-What a drag writes (D118, D122): the sampler builds the position as one thing, x and y together.
-Absolute moves and orbits build it in action order: an absolute move takes over from where the
-position was when it started, and an orbit turns the position built so far around a center `dx, dy`
-from the position at its start; relative moves add on top of all of that, in any order (D53). The
-position at each action's start is memoised per model. A drag
-writes to the latest action naming the attribute, or to the declaration, never to an orbit. To
-find the value it does not invert the stack: it probes the sampler on a copy of the model with the
-written value moved by one unit, exact because everything stacked on top is a shift or a turn that
-does not depend on the value, and solves x and y together. The Selected pane still names an orbit
-as what is changing a position or rotation.
+What a drag writes (D122): the sampler evaluates each attribute on its own: the latest absolute
+action that has started defines it, blending from where it was, and every relative change adds on
+top in any order (D53). A drag writes to the latest action naming the attribute, or to the
+declaration. To find the value it does not invert what is stacked on top: it probes the sampler on
+a copy of the model with the written value moved by one unit, exact because relative changes and
+the frames of groups shift or turn what is shown by amounts that do not depend on the value, and
+solves x and y together.
 
-The box around a group (D116, D123) is not refitted around the turned objects each frame, which
-would let its center drift against them. `groupPose` fits it once in the group's own frame, the
-objects sampled with their shared orbits' angles at zero, and carries it by the shared turn read
-from the orbits at the playhead, the same rigid motion that carries the objects. Plain turns add
-their accumulated angle to the box's axes until the selection changes. A group's Shift-move
-writes one relative move per object, so the group stays rigid under any turn.
+Groups (D124) are objects of class `Group` whose body is other objects. The evaluator resolves
+each group's `members` string into object and group names and records on every object the groups
+that list it. The sampler gives a group a motion at each time: its own rotation and scale around
+the pivot its declaration names, or else the members' box center at time zero, then its actions in
+order, each turn and scale composed around the point the action names as `pivotX, pivotY`, which
+the GUI writes as the center of the members' box when it makes the action, or else that center
+computed when the action begins, memoised per action, and its own `x, y` and its moves summed into
+a shift; `carry` applies that motion to a pose, and
+`worldPose` carries every object through the groups that list it, inner first. Text is measured
+once, by the renderer, and the measurement is shared with the sampler, so the members' box agrees
+with what is drawn. The renderer draws members through their world pose and frames a group as the
+box around its members carried through its motion, so the box turns with the group's animations
+and the x on its center marks the next turn's pivot. Shift-drags on a group write its actions,
+plain drags write its own values or whatever action defines them at the playhead, and the solver
+probes the world pose, turns and scalings before positions, so a group's own turn keeps the center
+of its box in place and a member dragged inside a turned group lands where it is dropped; plain
+drags on several objects that are not a group edit each of them. The store folds
+every selection the same way: a name carried by a selected group drops out and exactly a group's
+members become the group, so one set of objects is one selection wherever it was picked. A
+Shift-drag on an ad-hoc selection writes the group first, or finds the group the set already is,
+and goes on with it.
 
 ## Selection in the history (D90)
 
@@ -141,11 +154,12 @@ line. A preference switches between "all attributes" and "set attributes only". 
 
 ## Drags and real time
 
-Parse and evaluate are fast for normal scenes, but a drag must never wait on them. During a drag:
-
-- The model is patched directly for the dragged value, and the preview renders from the patched model every frame.
-- The literal in the code pane is patched as text every frame, so the number visibly changes while dragging, without a full re-evaluate.
-- On release, one editor transaction holds the whole drag, a full re-evaluate runs, and the result must equal the patched model. A mismatch is a bug and is logged.
+A drag step is one editor transaction: the literal changes, the scene is parsed and evaluated
+again, and every pane redraws from the new model. Measured in CP2 on a scene of 80 objects and
+240 actions, a step is 20 ms, of which parsing and evaluating is 3 ms; on the sample scene it is
+well under a frame. So the model is never patched around the evaluator (D130): the code stays the
+one truth at every step. If large scenes need more, the panes are the lever, redrawing only what
+a value changes.
 
 Typed code is re-evaluated on a short debounce. External file changes are re-evaluated on the
 watcher event. In both cases the playhead and the selection, by object name, are kept.
@@ -175,9 +189,9 @@ slow push-in, is an animation of the scene camera.
 ## Time (D41)
 
 - Time in code is seconds. The timeline shows seconds and frames and snaps to frames.
-- The timeline has no fixed length. The content end is the end of the last action plus the hold from `project.json`, dragged as a marker on the ruler (D54). Playback stops or loops there, and the export range defaults to it. The wheel zooms the time axis around the cursor; Shift and the wheel scroll. Drags snap to whole seconds and to other actions when snapping is on, and place exactly when it is off (D64). The view pages forward while playing.
+- The timeline has no fixed length. The content end is the end of the last action plus the hold from `project.json`, dragged as a marker on the ruler (D54). Playback stops or loops there, and the export range defaults to it. The wheel zooms the time axis around the cursor; Shift and the wheel scroll. Drags snap to whole seconds and to other actions when snapping is on, and place exactly when it is off (D64); the ruler then snaps the playhead the same way and to every fifth frame, and to any frame when snapping is off (D128). The view pages forward while playing.
 - A frame is a pure function of time (R67). Expressions receive the time and read other objects' values at that time. There is no per-frame mutable state.
-- Export samples the frame times exactly. Preview samples the display clock and may skip frames.
+- Export samples the frame times exactly: frame i is the scene at (first + i) / fps (D134). Preview samples the display clock and may skip frames.
 
 ## Undo
 
@@ -201,7 +215,7 @@ value for that frame and is reported once.
 
 ```
 my-animation/
-  project.json        resolution, fps, export defaults, scene order
+  project.json        width, height, fps, hold, background
   scenes/main.js      one scene per file
   lib/library.js      shared functions and saved components
   assets/             images, video, audio, fonts, imported shapes
@@ -220,11 +234,25 @@ controls. Dev mode adds what the app derived: the resolved absolute time of ever
 generated names of code-driven objects, evaluation time, and raw errors. Nothing in the file
 changes between the two modes.
 
-## Headless
+## Export (D132)
 
-`quick-animator render <project> [--scene main] [--out file]` launches the app without a visible
-window, loads the project, renders every frame through the same renderer, and encodes with
-ffmpeg. Progress on stdout, a non-zero exit on error, a one-page doc.
+The renderer side draws each frame through a second `SceneRenderer` on an offscreen canvas at
+project resolution, one world pixel per output pixel, with an orthographic camera framing the
+project exactly and no gizmo. Opaque formats draw the project's background behind the scene;
+formats with alpha draw on nothing, composite premultiplied so edges and fades keep their color,
+and hand back straight alpha. Each frame is read back as RGBA rows and sent to the main process,
+which pipes it into the bundled ffmpeg's stdin, one export at a time, waiting for ffmpeg to take
+each frame so frames never pile up. The main process knows the presets as ffmpeg arguments; the
+renderer knows them as labels, extensions, and whether they keep alpha. The export dialog and
+the headless command share `runExport`.
+
+## Headless (D133)
+
+`quick-animator render <project> [--out file] [--preset p] [--from s] [--to s]` is parsed by
+the main process before the window exists. It opens the same window hidden, which still renders,
+hands the renderer the job, relays progress and the result to the terminal, and exits with the
+result's code. `docs/render.md` is the one-page doc; `scripts/check-export.mjs` is the
+exactness check (D134).
 
 ## The animation language, fourth draft
 

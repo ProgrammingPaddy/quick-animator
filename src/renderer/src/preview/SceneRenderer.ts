@@ -1,6 +1,7 @@
-import { groupPose } from './groupPose'
 import * as THREE from 'three'
-import { isVisibleAt, parseColor, valueAt } from '../model/sample'
+import { groupMembers } from '../model/groups'
+import { GROUP } from '../model/registry'
+import { groupBox, isVisibleAt, parseColor, textMeasurer, valueAt, worldPose } from '../model/sample'
 import type { SceneModel, SceneObject } from '../model/types'
 import type { TransformMode } from '../state/store'
 
@@ -13,8 +14,8 @@ interface Item {
   textKey?: string
 }
 
-/** A grab point of the selection gizmo: a corner or edge that resizes, the handle that rotates, or the armed pivot (D86, D112). */
-export type Handle = { kind: 'resize'; sx: -1 | 0 | 1; sy: -1 | 0 | 1 } | { kind: 'rotate' } | { kind: 'pivot' }
+/** A grab point of the selection gizmo: a corner or edge that resizes, or the handle that rotates (D86). */
+export type Handle = { kind: 'resize'; sx: -1 | 0 | 1; sy: -1 | 0 | 1 } | { kind: 'rotate' }
 
 /** Where something is drawn right now: center, rotation in degrees, and drawn size in world pixels. */
 export interface Frame {
@@ -32,18 +33,54 @@ export interface Box {
   bottom: number
 }
 
-/** The center rotations turn around: where it is, and whether a double-click armed it for dragging (D112). */
-export interface Pivot {
-  x: number
-  y: number
-  armed: boolean
-}
 
 const unitPlane = new THREE.PlaneGeometry(1, 1)
 // Both unit shapes are one world pixel across, so an object's drawn size is its scale.
 const unitCircle = new THREE.CircleGeometry(0.5, 96)
 /** Canvas pixels per world pixel for text, so it stays crisp when zoomed in. */
 const TEXT_SCALE = 2
+
+interface TextMetrics {
+  fontSpec: string
+  width: number
+  height: number
+  ascent: number
+  pad: number
+}
+
+const metricsCache = new Map<string, TextMetrics>()
+let measuringContext: CanvasRenderingContext2D | null = null
+
+/** The canvas pixels a text takes at a font size, measured once per text. */
+function textMetrics(text: string, fontSize: number, font: string): TextMetrics {
+  const key = [text, fontSize, font].join('\u0000')
+  const cached = metricsCache.get(key)
+  if (cached) return cached
+  if (!measuringContext) measuringContext = document.createElement('canvas').getContext('2d')
+  const px = Math.max(1, fontSize) * TEXT_SCALE
+  const fontSpec = `${px}px "${font}", "Segoe UI", sans-serif`
+  let width = px * 0.55 * Math.max(1, text.length)
+  let ascent = px * 0.8
+  let descent = px * 0.2
+  if (measuringContext) {
+    measuringContext.font = fontSpec
+    const m = measuringContext.measureText(text || ' ')
+    width = m.width
+    ascent = m.actualBoundingBoxAscent || ascent
+    descent = m.actualBoundingBoxDescent || descent
+  }
+  const pad = px * 0.1
+  const metrics: TextMetrics = { fontSpec, width: Math.max(1, Math.ceil(width + pad * 2)), height: Math.max(1, Math.ceil(ascent + descent + pad * 2)), ascent, pad }
+  if (metricsCache.size > 2000) metricsCache.clear()
+  metricsCache.set(key, metrics)
+  return metrics
+}
+
+// The sampler frames groups with the same measurements the renderer draws with.
+textMeasurer.current = (text, fontSize, font) => {
+  const m = textMetrics(text, fontSize, font)
+  return { width: m.width / TEXT_SCALE, height: m.height / TEXT_SCALE }
+}
 const RESIZE_HANDLES: { sx: -1 | 0 | 1; sy: -1 | 0 | 1 }[] = [
   { sx: -1, sy: -1 },
   { sx: 1, sy: -1 },
@@ -63,7 +100,6 @@ const PIVOT_PX = 14
 /** The selection is drawn in white with a dark rim, so it shows on any color (D94). */
 const LIGHT = 0xffffff
 const DARK = 0x111111
-const ACCENT = 0x3b82f6
 /** Gizmo render order: after every object, which are all drawn in the transparent pass. */
 const ORDER = 1_000_000
 /** Screen pixels: the white line, and the dark rim added on each side. */
@@ -74,7 +110,6 @@ const RIM_PX = 1
 // opaque material would be drawn first and then painted over by any object (D94).
 const lightMaterial = new THREE.MeshBasicMaterial({ color: LIGHT, depthTest: false, transparent: true })
 const darkMaterial = new THREE.MeshBasicMaterial({ color: DARK, depthTest: false, transparent: true })
-const accentMaterial = new THREE.MeshBasicMaterial({ color: ACCENT, depthTest: false, transparent: true })
 const ringMaterial = new THREE.LineBasicMaterial({ color: LIGHT, depthTest: false, transparent: true })
 
 /** A rectangle outline of eight thin quads: four dark beneath, four white on top, in a group that carries position and rotation. */
@@ -153,7 +188,7 @@ class Marker {
   }
 }
 
-/** A thin x of two strokes, white with a dark rim, blue when armed: the pivot (D112). */
+/** A thin x of two strokes, white with a dark rim: the mark of a group's anchor (D124). */
 class Cross {
   readonly group = new THREE.Group()
   private readonly dark: THREE.Mesh[] = []
@@ -174,7 +209,7 @@ class Cross {
     this.group.visible = false
   }
 
-  set(x: number, y: number, length: number, pixel: number, armed: boolean): void {
+  set(x: number, y: number, length: number, pixel: number): void {
     this.group.visible = true
     this.group.position.set(x, y, 0.8)
     const line = LINE_PX * pixel
@@ -182,7 +217,6 @@ class Cross {
     for (let i = 0; i < 2; i++) {
       this.dark[i]!.scale.set(length + rim, rim, 1)
       this.light[i]!.scale.set(length, line, 1)
-      this.light[i]!.material = armed ? accentMaterial : lightMaterial
     }
   }
 
@@ -209,13 +243,14 @@ export class SceneRenderer {
   private readonly rotateRing: THREE.LineLoop
   private readonly resizeHandles: Marker[] = []
   private readonly rotateHandle = new Marker(unitCircle)
-  private readonly pivotCross = new Cross()
+  private readonly anchorCross = new Cross()
   private readonly stem: THREE.Mesh
   /** The handles shown right now, with their world positions, for picking. */
   private handles: { handle: Handle; x: number; y: number; radius: number }[] = []
-  /** Where the pivot is drawn, armed or not, for the double-click that arms it. */
-  private pivotAt: { x: number; y: number; radius: number } | null = null
   private readonly raycaster = new THREE.Raycaster()
+  /** What was last drawn, for the frames of groups. */
+  private model: SceneModel | null = null
+  private time = 0
 
   constructor() {
     this.rotateRing = new THREE.LineLoop(ringGeometry(), ringMaterial)
@@ -229,7 +264,7 @@ export class SceneRenderer {
     this.stem = new THREE.Mesh(unitPlane, lightMaterial)
     this.stem.renderOrder = ORDER + 1
     this.stem.visible = false
-    this.group.add(this.gizmoOutline.group, this.rotateRing, this.rotateHandle.group, this.pivotCross.group, this.stem)
+    this.group.add(this.gizmoOutline.group, this.rotateRing, this.rotateHandle.group, this.anchorCross.group, this.stem)
   }
 
   private outline(index: number): Outline {
@@ -243,13 +278,18 @@ export class SceneRenderer {
 
   /**
    * Draw the model at a time, outline every selected object, and show the handles of the mode on
-   * the gizmo frame: the object's own frame for one object, the box around all of them, turned by
-   * `groupRotation`, for several (D96, D116). `pixel` is the world size of one screen pixel.
+   * the gizmo frame: the object's own frame for one object, a group's own frame for a group, with
+   * its members outlined, or the upright box around an ad-hoc selection of several (D96, D116,
+   * D124). A thin x marks the center of a group's box, which its next turn or scale happens around.
+   * `pixel` is the world size of one screen pixel.
    */
-  update(model: SceneModel | null, time: number, selection: string[], mode: TransformMode = 'all', pixel = 1, pivot: Pivot | null = null, axes = 0): void {
+  update(model: SceneModel | null, time: number, selection: string[], mode: TransformMode = 'all', pixel = 1, axes = 0): void {
+    this.model = model
+    this.time = time
     const seen = new Set<string>()
     if (model) {
       model.objects.forEach((obj, index) => {
+        if (obj.className === GROUP) return
         seen.add(obj.name)
         this.apply(this.ensure(obj), obj, model, time, index)
       })
@@ -261,24 +301,25 @@ export class SceneRenderer {
       this.items.delete(name)
     }
 
-    const selected = selection.filter((n) => this.items.get(n)?.mesh.visible)
-    selected.forEach((name, i) => this.outline(i).set(this.frameOf(name)!, pixel))
-    for (let i = selected.length; i < this.outlines.length; i++) this.outlines[i]!.hide()
+    const group = selection.length === 1 && model ? (model.objects.find((o) => o.name === selection[0] && o.className === GROUP) ?? null) : null
+    const outlined = (group && model ? groupMembers(model, group.name) : selection).filter((n) => this.items.get(n)?.mesh.visible)
+    outlined.forEach((name, i) => this.outline(i).set(this.frameOf(name)!, pixel))
+    for (let i = outlined.length; i < this.outlines.length; i++) this.outlines[i]!.hide()
 
-    const frame = selected.length === 1 ? this.frameOf(selected[0]!) : selected.length > 1 && model ? this.groupFrame(selected, model, time, axes) : null
+    // A group's box is in the code; a plain turn of an ad-hoc selection leaves its box on the turned axes until the selection changes (D116).
+    const frame = group ? this.frameOf(group.name) : outlined.length === 1 ? this.frameOf(outlined[0]!) : outlined.length > 1 ? this.boxAround(outlined, axes) : null
     const showRing = !!frame && mode === 'rotate'
     const showResize = !!frame && (mode === 'resize' || mode === 'all')
     const showRotate = !!frame && mode === 'all'
-    const showPivot = !!frame && (mode === 'all' || mode === 'rotate')
+    const showAnchor = !!frame && !!group && (mode === 'all' || mode === 'rotate')
     this.rotateRing.visible = showRing
     this.stem.visible = showRotate
     if (!showRotate) this.rotateHandle.hide()
-    if (!showPivot) this.pivotCross.hide()
+    if (!showAnchor) this.anchorCross.hide()
     if (!showResize) for (const handle of this.resizeHandles) handle.hide()
-    if (selected.length > 1 && frame) this.gizmoOutline.set(frame, pixel)
+    if ((group || outlined.length > 1) && frame) this.gizmoOutline.set(frame, pixel)
     else this.gizmoOutline.hide()
     this.handles = []
-    this.pivotAt = null
     if (!frame) return
     const angle = (frame.rotation * Math.PI) / 180
     const cos = Math.cos(angle)
@@ -311,13 +352,7 @@ export class SceneRenderer {
       this.stem.scale.set(LINE_PX * pixel, ROTATE_OFFSET * pixel, 1)
       this.handles.push({ handle: { kind: 'rotate' }, x: p.x, y: p.y, radius: 13 * pixel })
     }
-    if (showPivot) {
-      const p = pivot ?? { x: frame.x, y: frame.y, armed: false }
-      this.pivotCross.set(p.x, p.y, (p.armed ? PIVOT_PX + 4 : PIVOT_PX) * pixel, pixel, p.armed)
-      this.pivotAt = { x: p.x, y: p.y, radius: 10 * pixel }
-      // Only an armed pivot is a handle; otherwise a drag from the center moves the object (D112).
-      if (p.armed) this.handles.push({ handle: { kind: 'pivot' }, x: p.x, y: p.y, radius: 12 * pixel })
-    }
+    if (showAnchor) this.anchorCross.set(frame.x, frame.y, PIVOT_PX * pixel, pixel)
   }
 
   /** The handle under a world position, if any. Handles win over the objects beneath them. */
@@ -334,26 +369,53 @@ export class SceneRenderer {
     return best
   }
 
-  /** True when a world position is on the pivot cross, armed or not. */
-  onPivot(world: { x: number; y: number }): boolean {
-    const p = this.pivotAt
-    return !!p && Math.hypot(world.x - p.x, world.y - p.y) <= p.radius
-  }
-
-  /** Where a visible object is drawn right now, or null. */
+  /** Where a visible object, or a group, is drawn right now, or null. */
   frameOf(name: string): Frame | null {
     const item = this.items.get(name)
-    if (!item || !item.mesh.visible) return null
-    const { position, rotation, scale } = item.mesh
-    return { x: position.x, y: position.y, rotation: (rotation.z * 180) / Math.PI, width: Math.abs(scale.x), height: Math.abs(scale.y) }
+    if (item) {
+      if (!item.mesh.visible) return null
+      const { position, rotation, scale } = item.mesh
+      return { x: position.x, y: position.y, rotation: (rotation.z * 180) / Math.PI, width: Math.abs(scale.x), height: Math.abs(scale.y) }
+    }
+    const group = this.model?.objects.find((o) => o.name === name && o.className === GROUP)
+    return group && this.model ? groupBox(this.model, group, this.time) : null
   }
 
-  /**
-   * The box around several visible objects: fitted in the group's own frame, on axes turned by
-   * `axes` degrees, and carried by the turns the group shares at this time (D116, D123).
-   */
-  groupFrame(names: string[], model: SceneModel, time: number, axes = 0): Frame | null {
-    return groupPose(model, names, time, (name) => this.frameOf(name), axes)
+  /** The box around several visible things on axes turned by `axes`, upright by default, for an ad-hoc selection (D116). */
+  boxAround(names: string[], axes = 0): Frame | null {
+    const ax = (axes * Math.PI) / 180
+    const axCos = Math.cos(ax)
+    const axSin = Math.sin(ax)
+    let minX = Infinity
+    let maxX = -Infinity
+    let minY = Infinity
+    let maxY = -Infinity
+    for (const name of names) {
+      const f = this.frameOf(name)
+      if (!f) continue
+      const a = (f.rotation * Math.PI) / 180
+      const c = Math.cos(a)
+      const d = Math.sin(a)
+      for (const [lx, ly] of [
+        [-f.width / 2, -f.height / 2],
+        [f.width / 2, -f.height / 2],
+        [-f.width / 2, f.height / 2],
+        [f.width / 2, f.height / 2],
+      ]) {
+        const wx = f.x + lx! * c - ly! * d
+        const wy = f.y + lx! * d + ly! * c
+        const x = wx * axCos + wy * axSin
+        const y = -wx * axSin + wy * axCos
+        minX = Math.min(minX, x)
+        maxX = Math.max(maxX, x)
+        minY = Math.min(minY, y)
+        maxY = Math.max(maxY, y)
+      }
+    }
+    if (!Number.isFinite(minX)) return null
+    const cu = (minX + maxX) / 2
+    const cv = (minY + maxY) / 2
+    return { x: cu * axCos - cv * axSin, y: cu * axSin + cv * axCos, rotation: axes, width: maxX - minX, height: maxY - minY }
   }
 
   /** The axis-aligned box around a visible object, rotation included, or null. */
@@ -433,8 +495,10 @@ export class SceneRenderer {
 
     mesh.visible = true
     mesh.renderOrder = index
-    mesh.position.set(num('x'), num('y'), num('z'))
-    mesh.rotation.z = (num('rotation') * Math.PI) / 180
+    // Drawn through the groups that carry it (D124).
+    const pose = worldPose(model, obj, time)
+    mesh.position.set(pose.x, pose.y, num('z'))
+    mesh.rotation.z = (pose.rotation * Math.PI) / 180
     material.opacity = Math.max(0, Math.min(1, num('opacity')))
 
     if (obj.className === 'Rect') {
@@ -449,8 +513,7 @@ export class SceneRenderer {
     } else if (obj.className === 'Text') {
       this.applyText(item, str('text'), num('fontSize'), str('font'), str('fill'))
     }
-    const scale = num('scale')
-    mesh.scale.set(item.width * scale, item.height * scale, 1)
+    mesh.scale.set(item.width * pose.scale, item.height * pose.scale, 1)
   }
 
   private applyText(item: Item, text: string, fontSize: number, font: string, fill: string): void {
@@ -460,15 +523,9 @@ export class SceneRenderer {
     const canvas = document.createElement('canvas')
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    const px = Math.max(1, fontSize) * TEXT_SCALE
-    const fontSpec = `${px}px "${font}", "Segoe UI", sans-serif`
-    ctx.font = fontSpec
-    const metrics = ctx.measureText(text || ' ')
-    const ascent = metrics.actualBoundingBoxAscent || px * 0.8
-    const descent = metrics.actualBoundingBoxDescent || px * 0.2
-    const pad = px * 0.1
-    canvas.width = Math.max(1, Math.ceil(metrics.width + pad * 2))
-    canvas.height = Math.max(1, Math.ceil(ascent + descent + pad * 2))
+    const { fontSpec, width, height, ascent, pad } = textMetrics(text, fontSize, font)
+    canvas.width = width
+    canvas.height = height
     ctx.font = fontSpec
     ctx.fillStyle = parseColor(fill) ? fill : '#ffffff'
     ctx.textBaseline = 'alphabetic'

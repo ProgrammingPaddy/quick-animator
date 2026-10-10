@@ -1,5 +1,6 @@
-/** The sample scene: the in-memory project when the app has no file access, and `examples/first`. */
-export const SAMPLE_SCENE = `// The cast: every object, one attribute per line.
+// The sample scene, kept here for the export check: node scripts/check-export.mjs
+
+// The cast: every object, one attribute per line.
 box = Rect({
   x: -400,
   y: 0,
@@ -43,7 +44,11 @@ bar2 = Rect({
   class: 'bars',
 })
 
-// The script, in time order. Without \`at\`, an action starts when the object's last one ends.
+pair = Group({
+  members: 'bar1 bar2',
+})
+
+// The script, in time order. Without `at`, an action starts when the object's last one ends.
 slide = box.move({
   x: 400,
   at: 0.5,
@@ -89,4 +94,9 @@ bar2.move({
   ease: 'back',
   overrides: rise,
 })
-`
+
+pair.rotate({
+  rotation: 90,
+  at: 3,
+  duration: 1,
+})

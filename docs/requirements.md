@@ -152,6 +152,7 @@ See `checkpoints.md` for what is scheduled and what is backlog.
 - **R131.** A typed code change reaches the preview within 100 ms.
 - **R132.** Playback holds project frame rate for typical scenes and skips frames rather than slowing down.
 - **R133.** The app starts in under three seconds and opens a project in under one.
+- **R134.** Several objects can be one group: an object with its own anchor, position, rotation, and scale whose animations carry the members as one, whose box and origin persist in the code, and which a selection of its members becomes again.
 
 ## 17. Acceptance: the five-click test
 

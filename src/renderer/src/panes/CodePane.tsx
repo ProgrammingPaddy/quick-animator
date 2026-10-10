@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { applyEdits, createEditor, getEditor, highlightRanges, markErrorLine, placeCursor, scrollToPos, setGhostClickHandler, setGhostLines, type GhostBlock, type HighlightSpec } from '../code/editor'
 import { DEFAULT_EASE_FRACTION } from '../model/easing'
 import { formatNumber, formatValue, setProp } from '../model/edits'
-import { classes, OBJECT_COLOR, VERB_COLORS } from '../model/registry'
+import { classes, GROUP, OBJECT_COLOR, PIVOT_PARAMS, VERB_COLORS } from '../model/registry'
+import { memberBox } from '../model/sample'
+import type { SceneModel, SceneObject } from '../model/types'
 import type { Action } from '../model/types'
 import { commitSource } from '../project/controller'
 import { useStore } from '../state/store'
@@ -14,12 +16,29 @@ interface Mark {
   kind: 'full' | 'bar' | 'error'
 }
 
-/** The timing an action runs with but does not say: its start, delay, length, easing, and relativity (D114); an orbit's unsaid parameters too. */
-function timingDefaults(action: Action): { key: string; value: string }[] {
+/** The attributes a declaration leaves unset, with the values they take (D35); a group's pivot shows the center of its members' box at time zero, which it uses until written (D124). */
+function declarationDefaults(obj: SceneObject, model: SceneModel): { key: string; value: string }[] {
+  const schema = classes[obj.className]
+  if (!schema || !obj.decl) return []
+  const present = new Set(obj.decl.props.map((p) => p.key))
+  // Derived attributes, such as a circle's width from its radius, stay out of the file unless set.
+  const out = schema.attrs.filter((a) => !present.has(a.name) && !a.derive).map((a) => ({ key: a.name, value: formatValue(a.default) }))
+  if (obj.className === GROUP) {
+    const box = memberBox(model, obj, 0)
+    if (box) for (const g of out) if (g.key === 'pivotX' || g.key === 'pivotY') g.value = formatNumber(Math.round(g.key === 'pivotX' ? box.x : box.y))
+  }
+  return out
+}
+
+/** The timing an action runs with but does not say: its start, delay, length, easing, and relativity (D114); for a group's turn or scale, the pivot it uses (D124). */
+function timingDefaults(action: Action, model: SceneModel | null): { key: string; value: string }[] {
   const present = new Set(action.stmt?.props.map((p) => p.key) ?? [])
   const duration = action.end - action.start
   const out: { key: string; value: string }[] = []
-  if (action.verb === 'orbit') for (const key of ['dx', 'dy', 'angle']) if (!present.has(key)) out.push({ key, value: '0' })
+  if (model && action.object.className === GROUP && ('rotation' in action.changes || 'scale' in action.changes) && !PIVOT_PARAMS.every((k) => present.has(k))) {
+    const box = memberBox(model, action.object, action.start)
+    if (box) for (const key of PIVOT_PARAMS) if (!present.has(key)) out.push({ key, value: formatNumber(Math.round(key === 'pivotX' ? box.x : box.y)) })
+  }
   if (!present.has('at')) out.push({ key: 'at', value: formatNumber(action.start - (action.timing.delay ?? 0)) })
   if (!present.has('delay')) out.push({ key: 'delay', value: '0' })
   if (!present.has('duration') && !present.has('until')) out.push({ key: 'duration', value: formatNumber(duration) })
@@ -118,17 +137,11 @@ export function CodePane() {
     if (showDefaults && model && model.source === source) {
       for (const obj of model.objects) {
         if (obj.decl) {
-          const schema = classes[obj.className]
-          if (schema) {
-            const present = new Set(obj.decl.props.map((p) => p.key))
-            // Derived attributes, such as a circle's width from its radius, stay out of the file unless set.
-            const missing = schema.attrs.filter((a) => !present.has(a.name) && !a.derive).map((a) => ({ key: a.name, value: formatValue(a.default) }))
-            blocks.push({ name: obj.name, closePos: obj.decl.propsClose, indent: obj.decl.indent, missing })
-          }
+          if (classes[obj.className]) blocks.push({ name: obj.name, closePos: obj.decl.propsClose, indent: obj.decl.indent, missing: declarationDefaults(obj, model) })
         }
         obj.actions.forEach((action, index) => {
           if (!action.stmt || action.classAction) return
-          const missing = timingDefaults(action)
+          const missing = timingDefaults(action, model)
           if (missing.length > 0) blocks.push({ name: obj.name, index, closePos: action.stmt.propsClose, indent: action.stmt.indent, missing })
         })
       }
@@ -145,15 +158,17 @@ export function CodePane() {
       if (index !== undefined) {
         // A timing line of an action: write the value it has had all along (D114).
         const action = obj.actions[index]
-        const ghost = action ? timingDefaults(action).find((g) => g.key === key) : undefined
+        const ghost = action ? timingDefaults(action, s.model).find((g) => g.key === key) : undefined
         if (!action?.stmt || !ghost) return
         edit = setProp(s.source, action.stmt, key, key === 'relative' ? false : Number(ghost.value))
         applyEdits([edit])
         s.selectAction(name, index)
       } else {
         const attr = classes[obj.className]?.attrs.find((a) => a.name === key)
-        if (!obj.decl || !attr) return
-        edit = setProp(s.source, obj.decl, key, attr.default)
+        if (!obj.decl || !attr || !s.model) return
+        // A group's pivot ghost shows the center it uses; writing it keeps that point.
+        const ghost = key === 'pivotX' || key === 'pivotY' ? declarationDefaults(obj, s.model).find((g) => g.key === key) : undefined
+        edit = setProp(s.source, obj.decl, key, ghost ? Number(ghost.value) : attr.default)
         applyEdits([edit])
         s.select([name])
       }

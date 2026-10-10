@@ -1,4 +1,4 @@
-import { CLASS_NAMES, TIMING_KEY_NAMES, VERB_ATTRS, VERB_NAMES, VERB_PARAMS, classes, type Verb } from './registry'
+import { CLASS_NAMES, GROUP, TIMING_KEY_NAMES, VERB_ATTRS, VERB_NAMES, VERB_PARAMS, classes, type Verb } from './registry'
 import { parseScene } from './parse'
 import { samplingContext, valueAt } from './sample'
 import type { Action, ActionInfo, AttrSource, ClassAction, SceneError, SceneModel, SceneObject, TimeRef, Timing } from './types'
@@ -67,7 +67,7 @@ export function evaluateScene(source: string): EvaluateResult {
   const actions: Action[] = []
   const classActions: ClassAction[] = []
   const warnings: SceneError[] = []
-  const model: SceneModel = { source, objects, actions, classActions, classes: new Map(), lastActionEnd: null, lastDeclEnd: parsed.lastDeclEnd, warnings }
+  const model: SceneModel = { source, objects, actions, classActions, classes: new Map(), groups: new Map(), lastActionEnd: null, lastDeclEnd: parsed.lastDeclEnd, warnings }
 
   const actionHandle = (own: Action[], behind: Action | ClassAction): Record<string | symbol, unknown> => ({
     [HANDLE]: behind,
@@ -94,7 +94,9 @@ export function evaluateScene(source: string): EvaluateResult {
         continue
       }
       if (VERB_PARAMS[verb].includes(key)) {
-        changes[key] = value as AttrSource
+        // Only a group pivots: for anything else the point is meaningless and is dropped with a note.
+        if (className === GROUP) changes[key] = value as AttrSource
+        else warnings.push({ message: `${owner}.${verb}: ${key} applies to a group's ${verb}` })
         continue
       }
       if (!classes[className]?.attrs.some((a) => a.name === key)) {
@@ -193,6 +195,7 @@ export function evaluateScene(source: string): EvaluateResult {
         decl: null,
         actions: [],
         classes: classNamesOf(attrs),
+        groups: [],
       }
       objects.push(obj)
       return objectHandle(obj)
@@ -259,6 +262,48 @@ export function evaluateScene(source: string): EvaluateResult {
       classAction.className,
       objects.filter((o) => isMember(o, classAction.className)).map((o) => o.name),
     )
+  }
+  // Groups list their members by name: objects, classes (every member), or other groups (D124).
+  for (const group of objects) {
+    if (group.className !== GROUP) continue
+    const written = group.attrs['members']
+    const names = typeof written === 'string' ? written.split(/\s+/).filter(Boolean) : []
+    const members: string[] = []
+    for (const name of names) {
+      if (name === group.name) {
+        warnings.push({ message: `${group.name} cannot be its own member` })
+        continue
+      }
+      const target = objects.find((o) => o.name === name)
+      if (target) members.push(target.name)
+      else if (model.classes.has(name)) members.push(...model.classes.get(name)!)
+      else if (CLASS_NAMES.has(name)) members.push(...objects.filter((o) => o.className === name && o !== group).map((o) => o.name))
+      else warnings.push({ message: `${group.name} has no member named "${name}"` })
+    }
+    const unique = [...new Set(members)]
+    model.groups.set(group.name, unique)
+    for (const name of unique) objects.find((o) => o.name === name)!.groups.push(group.name)
+  }
+  // A group inside itself, through any number of others, carries nothing: the loop is cut where it closes.
+  for (const group of objects) {
+    if (group.className !== GROUP) continue
+    const trail = [group.name]
+    const reaches = (name: string): boolean => {
+      for (const outer of objects.find((o) => o.name === name)!.groups) {
+        if (outer === group.name) return true
+        if (trail.includes(outer)) continue
+        trail.push(outer)
+        if (reaches(outer)) return true
+        trail.pop()
+      }
+      return false
+    }
+    if (reaches(group.name)) {
+      warnings.push({ message: `${group.name} contains itself through ${trail.slice(1).join(', ')}` })
+      const last = trail[trail.length - 1]!
+      model.groups.set(last, (model.groups.get(last) ?? []).filter((n) => n !== group.name))
+      group.groups = group.groups.filter((n) => n !== last)
+    }
   }
   const infosByObject = new Map<string, ActionInfo[]>()
   const infosByClass = new Map<string, ActionInfo[]>()

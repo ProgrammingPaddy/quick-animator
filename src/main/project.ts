@@ -3,10 +3,9 @@ import { promises as fs, watch, type FSWatcher } from 'node:fs'
 import { basename, join } from 'node:path'
 import type { ProjectData, ProjectFile, ProjectSettings } from '../shared/api'
 
-const DEFAULT_SETTINGS: ProjectSettings = { width: 1920, height: 1080, fps: 60, hold: 0 }
+const DEFAULT_SETTINGS: ProjectSettings = { width: 1920, height: 1080, fps: 60, hold: 0, background: '#1c1c1c' }
 
-const TEMPLATE_SCENE = `// Cast: every object, one attribute per line.
-
+const TEMPLATE_SCENE = `// The cast: every object, one attribute per line.
 box = Rect({
   x: 0,
   y: 0,
@@ -15,8 +14,7 @@ box = Rect({
   fill: '#4f8cff',
 })
 
-// Script: what happens, in time order.
-
+// The script, in time order.
 box.move({
   x: 320,
   at: 0.5,
@@ -122,7 +120,7 @@ function watchProject(path: string, win: BrowserWindow): void {
   }
 }
 
-export function registerProjectIpc(getWindow: () => BrowserWindow | null): void {
+export function registerProjectIpc(getWindow: () => BrowserWindow | null, options: { rememberLast?: boolean } = {}): void {
   ipcMain.handle('project:pick', async () => {
     const win = getWindow()
     // Start where the last project was, so the examples folder is a step away.
@@ -150,7 +148,8 @@ export function registerProjectIpc(getWindow: () => BrowserWindow | null): void 
     const data = await readProject(path)
     const win = getWindow()
     if (win) watchProject(path, win)
-    await writeSettings({ ...(await readSettings()), lastProject: path })
+    // A headless render must not become the project the window reopens.
+    if (options.rememberLast !== false) await writeSettings({ ...(await readSettings()), lastProject: path })
     return data
   })
 

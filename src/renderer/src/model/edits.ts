@@ -75,13 +75,39 @@ export function appendStatement(source: string, text: string): TextEdit {
   return { from: trimmed.length, to: source.length, insert: `${prefix}${text}\n` }
 }
 
-/** Remove whole statements together with the line breaks that follow them. */
+/** The start of the comment lines directly above a statement, with no blank line between, or the statement's own start (D129). */
+function attachedCommentStart(source: string, from: number): number {
+  const lineStartOf = (pos: number): number => {
+    let at = pos
+    while (at > 0 && source[at - 1] !== '\n') at--
+    return at
+  }
+  let start = lineStartOf(from)
+  // Only a statement that begins its line owns the lines above it.
+  if (source.slice(start, from).trim() !== '') return from
+  while (start > 0) {
+    const previousStart = lineStartOf(start - 1)
+    const line = source.slice(previousStart, start).trim()
+    if (line.startsWith('//')) start = previousStart
+    else if (line.endsWith('*/')) {
+      // A block comment belongs here when its opening also begins its line.
+      const open = source.lastIndexOf('/*', start - 1)
+      if (open < 0) break
+      const openLine = lineStartOf(open)
+      if (source.slice(openLine, open).trim() !== '') break
+      start = openLine
+    } else break
+  }
+  return start
+}
+
+/** Remove whole statements together with the comment lines directly above them and the line breaks that follow them (D129). */
 export function removeStatements(source: string, ranges: Range[]): TextEdit[] {
   return [...ranges]
     .sort((a, b) => b.from - a.from)
     .map((range) => {
       let to = range.to
       while (to < source.length && (source[to] === '\n' || source[to] === '\r')) to++
-      return { from: range.from, to, insert: '' }
+      return { from: attachedCommentStart(source, range.from), to, insert: '' }
     })
 }

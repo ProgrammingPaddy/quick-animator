@@ -3,8 +3,10 @@ import { editorRedo, editorUndo } from './code/editor'
 import { ClassesDialogLayer } from './components/ClassesDialog'
 import { ContextMenuLayer } from './components/ContextMenu'
 import { DialogLayer } from './components/Dialog'
+import { ExportDialogLayer } from './components/ExportDialog'
 import { HelpOverlay } from './components/HelpOverlay'
 import { Layout } from './Layout'
+import { runHeadless } from './export/headless'
 import { initProject } from './project/controller'
 import { copySelection, cutSelection, deleteActions, deleteObjects, duplicateObjects, nudgeActions, nudgeObjects, pasteClipboard, requestRename } from './project/operations'
 import { useClock } from './state/clock'
@@ -21,6 +23,8 @@ export function App() {
 
   useEffect(() => {
     initProject()
+    // Started with a render command, the window renders and the app exits (R111).
+    void runHeadless()
   }, [])
 
   useEffect(() => {
@@ -32,6 +36,8 @@ export function App() {
         if (store.classesDialog) return store.closeClassesDialog()
         if (store.help) return store.setHelp(false)
       }
+      // The export dialog handles its own keys.
+      if (store.exportOpen) return
       if (e.code === 'F1') {
         e.preventDefault()
         store.setHelp(!store.help)
@@ -40,6 +46,11 @@ export function App() {
       if (store.dialog || store.classesDialog || isTypingTarget(e.target)) return
       const { togglePlaying, stepFrames, setTime, setPlaying, contentEnd, time, selection, selectedActions, select, tool, setTool } = store
       const ctrl = e.ctrlKey || e.metaKey
+      if (ctrl && e.code === 'KeyE') {
+        e.preventDefault()
+        if (window.api) store.setExportOpen(true)
+        return
+      }
       if (ctrl && (e.code === 'KeyZ' || e.code === 'KeyY')) {
         e.preventDefault()
         if (e.code === 'KeyY' || e.shiftKey) editorRedo()
@@ -134,6 +145,7 @@ export function App() {
       <Layout />
       <ContextMenuLayer />
       <DialogLayer />
+      <ExportDialogLayer />
       <ClassesDialogLayer />
       <HelpOverlay />
     </>

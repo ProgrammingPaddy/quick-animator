@@ -1,17 +1,17 @@
 import { useMemo, type MouseEvent as ReactMouseEvent } from 'react'
 import { showMenu } from '../components/ContextMenu'
 import { actionIdents, classActionIdents, classGroups, classKey, classSpan, overrideOf, typeGroups, type ClassGroup } from '../model/groups'
-import { VERB_COLORS } from '../model/registry'
+import { GROUP, PIVOT_PARAMS, VERB_COLORS } from '../model/registry'
 import type { Action, SceneObject } from '../model/types'
-import { addObject, deleteAction, deleteClass, deleteClassAction, deleteObjects, duplicateObjects, jumpToAction, jumpToClass, jumpToObject, materializeClassAction, overrideClassAction, removeFromClass, requestClasses, requestRename, selectClass, selectClassAction } from '../project/operations'
+import { addObject, deleteAction, deleteClass, deleteClassAction, deleteObjects, duplicateObjects, jumpToAction, jumpToClass, jumpToObject, materializeClassAction, overrideClassAction, removeFromClass, requestClasses, requestRename, selectClass, selectClassAction, ungroup } from '../project/operations'
 import { isActionSelected, useStore, type Tool } from '../state/store'
 import { timecode } from '../state/time'
 
-const GLYPHS: Record<string, string> = { Rect: '▭', Circle: '○', Text: 'T' }
+const GLYPHS: Record<string, string> = { Rect: '▭', Circle: '○', Text: 'T', Group: '⊞' }
 const TOOLS: Exclude<Tool, 'select'>[] = ['Rect', 'Circle', 'Text']
 
 function actionLabel(action: Action): string {
-  const what = action.verb === 'to' ? Object.keys(action.changes).join(', ') || 'to' : action.verb
+  const what = action.verb === 'to' ? Object.keys(action.changes).filter((k) => !(PIVOT_PARAMS as readonly string[]).includes(k)).join(', ') || 'to' : action.verb
   return action.timing.relative ? `${what} (relative)` : what
 }
 
@@ -76,6 +76,14 @@ export function ObjectPane() {
     const targets = s.selection.includes(obj.name) ? s.selection : [obj.name]
     if (!s.selection.includes(obj.name)) select([obj.name])
     const many = targets.length > 1
+    if (obj.className === GROUP && !many) {
+      showMenu(e, [
+        { label: 'Jump to code', run: () => jumpToObject(obj.name) },
+        { label: 'Rename…', run: () => requestRename({ object: obj.name }) },
+        { label: 'Ungroup', run: () => ungroup(obj.name) },
+      ])
+      return
+    }
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToObject(obj.name) },
       ...(many ? [] : [{ label: 'Rename…', run: () => requestRename({ object: obj.name }) }]),
@@ -170,6 +178,7 @@ export function ObjectPane() {
           <span className="glyph">{GLYPHS[obj.className] ?? '?'}</span>
           <span className="name">{obj.name}</span>
           <span className="dim">{obj.className}</span>
+          {obj.className === GROUP && <span className="dim members">{(model?.groups.get(obj.name) ?? []).join(' · ')}</span>}
           {obj.codeDriven && <span className="badge">code</span>}
         </div>
         {obj.actions.length > 0 && !folded && (

@@ -86,6 +86,8 @@ export interface SceneObject {
   actions: Action[]
   /** The CSS-like classes this object belongs to (D80). */
   classes: string[]
+  /** The groups that list this object, in declaration order: their frames carry it, inner first (D124). */
+  groups: string[]
 }
 
 /** One statement on `all('class')`, which made one action per member (D80). */
@@ -131,6 +133,8 @@ export interface SceneModel {
   classActions: ClassAction[]
   /** Class name to member object names, in first-seen order. */
   classes: Map<string, string[]>
+  /** Group name to the names it lists, resolved: objects and groups, classes expanded (D124). */
+  groups: Map<string, string[]>
   /** End of the last action, or null when nothing animates. The hold is added elsewhere. */
   lastActionEnd: number | null
   /** End of the last object declaration statement, where new objects are inserted. */

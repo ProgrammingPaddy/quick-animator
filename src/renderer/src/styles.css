@@ -1814,6 +1814,10 @@ button.chevron:hover {
   margin-left: 4px;
 }
 
+.preview-toggle.on {
+  color: var(--accent);
+}
+
 .badge.twin {
   background: rgba(59, 130, 246, 0.2);
   color: #9ec5ff;
@@ -1831,4 +1835,96 @@ button.chevron:hover {
 
 .action-row.override .dot {
   box-shadow: 0 0 0 1px #fca5a5;
+}
+
+/* A group's row lists its members (D124). */
+.tl-row-header .members,
+.object-row .members {
+  font-size: 11px;
+  opacity: 0.7;
+  margin-left: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The app icon in the title bar. */
+.titlebar .app-icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+.export-dialog {
+  width: 540px;
+}
+
+.export-grid {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 10px 12px;
+  align-items: center;
+  margin: 6px 0 10px;
+}
+
+.export-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.export-presets button {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 5px;
+  background: var(--bg-pane);
+  border: 1px solid var(--border);
+}
+
+.export-presets button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.export-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.export-progress {
+  margin: 4px 0 8px;
+}
+
+.export-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-pane);
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.export-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.1s linear;
+}
+
+.export-result {
+  margin: 4px 0 8px;
+  color: var(--fg-dim);
+  word-break: break-all;
+}
+
+.export-result button.link {
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
 }

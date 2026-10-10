@@ -1,6 +1,7 @@
 import { editorRedo, editorUndo } from '../code/editor'
 import { newProject, pickProject } from '../project/controller'
 import { useStore } from '../state/store'
+import icon from '../../../../resources/icon.svg'
 
 /**
  * The top of the window, in place of the system title bar and the menu (D108): the app's own
@@ -10,6 +11,7 @@ import { useStore } from '../state/store'
 export function TitleBar() {
   const project = useStore((s) => s.project)
   const setHelp = useStore((s) => s.setHelp)
+  const setExportOpen = useStore((s) => s.setExportOpen)
   return (
     <div className="titlebar">
       <div className="titlebar-actions">
@@ -20,6 +22,9 @@ export function TitleBar() {
             </button>
             <button onClick={() => void newProject()} title="Create a project folder">
               New
+            </button>
+            <button onClick={() => setExportOpen(true)} title="Export a video of the project (Ctrl+E)">
+              Export
             </button>
           </>
         )}
@@ -34,6 +39,7 @@ export function TitleBar() {
         </button>
       </div>
       <div className="titlebar-title" title={project?.path}>
+        <img className="app-icon" src={icon} alt="" />
         <span className="app-name">Quick Animator</span>
         {project && <span className="separator">{'·'}</span>}
         {project && <span className="project-name">{project.name}</span>}

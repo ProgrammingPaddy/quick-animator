@@ -65,11 +65,27 @@ export const classes: Record<string, ClassSchema> = {
       { name: 'font', type: 'string', default: 'Segoe UI', doc: 'Font family.', animatable: false },
     ],
   },
+  Group: {
+    name: 'Group',
+    doc: "Several objects that move, turn, and scale as one. Members keep their own values; the group's own values and its animations act on top (D124).",
+    attrs: [
+      { name: 'members', type: 'string', default: '', doc: 'Member names separated by spaces: objects, classes (every member of the class), or other groups.', animatable: false },
+      { name: 'x', type: 'number', default: 0, doc: "How far the group's moves have shifted its members, in pixels to the right.", animatable: true },
+      { name: 'y', type: 'number', default: 0, doc: "How far the group's moves have shifted its members, in pixels up.", animatable: true },
+      { name: 'rotation', type: 'number', default: 0, doc: "Degrees the group has turned its members: this value around its pivot, then each turn around the center of their box when that turn began.", animatable: true },
+      { name: 'scale', type: 'number', default: 1, doc: "What the group has multiplied its members by: this value around its pivot, then each scaling around the center of their box when that scaling began.", animatable: true },
+      { name: 'pivotX', type: 'number', default: 0, doc: "What the group's own rotation and scale pivot on, in the members' space. The GUI writes the center of their box when it first turns or scales the group; unset, that center at time zero.", animatable: false },
+      { name: 'pivotY', type: 'number', default: 0, doc: 'The pivot, up.', animatable: false },
+    ],
+  },
 }
+
+/** The class whose body is other objects (D124). */
+export const GROUP = 'Group'
 
 export const CLASS_NAMES: ReadonlySet<string> = new Set(Object.keys(classes))
 
-export const VERBS = ['to', 'move', 'rotate', 'scale', 'resize', 'fade', 'orbit'] as const
+export const VERBS = ['to', 'move', 'rotate', 'scale', 'resize', 'fade'] as const
 export type Verb = (typeof VERBS)[number]
 export const VERB_NAMES: ReadonlySet<string> = new Set(VERBS)
 
@@ -81,23 +97,23 @@ export const VERB_ATTRS: Record<Verb, readonly string[] | null> = {
   scale: ['scale'],
   resize: ['width', 'height', 'radius', 'fontSize'],
   fade: ['opacity'],
-  orbit: [],
 }
 
+
 /**
- * Parameters a verb takes that are not attributes of the object. `orbit` turns the object around
- * a point `dx, dy` away from where it is when the orbit starts: the position follows the arc,
- * on top of whatever else moves it, and the rotation turns by the same angle (D118).
+ * Parameters a verb takes that are not attributes of the object. A group's turn or scale names
+ * the point it pivots on, `pivotX, pivotY`, in the space its members' own values live in; unset,
+ * it is the center of the members' box when the action begins (D124).
  */
 export const VERB_PARAMS: Record<Verb, readonly string[]> = {
-  to: [],
+  to: ['pivotX', 'pivotY'],
   move: [],
-  rotate: [],
-  scale: [],
+  rotate: ['pivotX', 'pivotY'],
+  scale: ['pivotX', 'pivotY'],
   resize: [],
   fade: [],
-  orbit: ['dx', 'dy', 'angle'],
 }
+export const PIVOT_PARAMS = ['pivotX', 'pivotY'] as const
 
 /** One color per kind of change, used wherever an action is shown. */
 export const VERB_COLORS: Record<Verb, string> = {
@@ -107,7 +123,6 @@ export const VERB_COLORS: Record<Verb, string> = {
   resize: '#f59e0b',
   fade: '#64748b',
   to: '#10b981',
-  orbit: '#ec4899',
 }
 
 /** The color for an object itself, as opposed to one of its actions. */

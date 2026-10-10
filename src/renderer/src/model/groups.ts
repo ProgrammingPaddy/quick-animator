@@ -1,4 +1,4 @@
-import { classes } from './registry'
+import { classes, GROUP } from './registry'
 import type { Action, ClassAction, SceneModel, SceneObject } from './types'
 
 const TYPE_ORDER = Object.keys(classes)
@@ -127,7 +127,7 @@ export function classStandIn(group: ClassGroup, index: number): SceneObject | nu
   // Members that agree on a base opacity share it; otherwise the lane starts from solid.
   const bases = new Set(group.members.map((m) => (typeof m.attrs['opacity'] === 'number' ? (m.attrs['opacity'] as number) : 1)))
   const opacity = bases.size === 1 ? [...bases][0]! : 1
-  return { id: -1 - index, name: `all('${group.className}')`, className: first.className, attrs: { opacity }, codeDriven: false, decl: null, actions, classes: [] }
+  return { id: -1 - index, name: `all('${group.className}')`, className: first.className, attrs: { opacity }, codeDriven: false, decl: null, actions, classes: [], groups: [] }
 }
 
 /** Among an object's actions, the one that overrides a class action, if any. */
@@ -145,4 +145,67 @@ export function actionIdents(action: Action): string[] {
   if (action.classAction) return classActionIdents(action.classAction)
   if (action.overrides) return classActionIdents(action.overrides)
   return action.name ? [action.name] : []
+}
+
+/** Every object a group carries, through member groups too, each once (D124). */
+export function groupMembers(model: SceneModel, name: string, seen = new Set<string>()): string[] {
+  seen.add(name)
+  const out: string[] = []
+  for (const member of model.groups.get(name) ?? []) {
+    if (seen.has(member)) continue
+    const obj = model.objects.find((o) => o.name === member)
+    if (!obj) continue
+    if (obj.className === GROUP) {
+      for (const inner of groupMembers(model, member, seen)) if (!out.includes(inner)) out.push(inner)
+    } else {
+      seen.add(member)
+      out.push(member)
+    }
+  }
+  return out
+}
+
+/** The group that exactly these objects make up, if one exists: by the names it lists, or by everything it carries. The latest declared wins (D124). */
+export function groupFor(model: SceneModel, names: string[]): string | null {
+  const wanted = new Set(names)
+  if (wanted.size === 0) return null
+  const same = (list: string[]) => list.length === wanted.size && list.every((n) => wanted.has(n))
+  let found: string | null = null
+  for (const obj of model.objects) {
+    if (obj.className !== GROUP || wanted.has(obj.name)) continue
+    if (same(model.groups.get(obj.name) ?? []) || same(groupMembers(model, obj.name))) found = obj.name
+  }
+  return found
+}
+
+/** Every name a group carries, directly or through member groups: objects and groups alike. */
+export function groupCarries(model: SceneModel, name: string, seen = new Set<string>()): string[] {
+  seen.add(name)
+  const out: string[] = []
+  for (const member of model.groups.get(name) ?? []) {
+    if (seen.has(member)) continue
+    seen.add(member)
+    out.push(member)
+    const obj = model.objects.find((o) => o.name === member)
+    if (obj?.className === GROUP) out.push(...groupCarries(model, member, seen))
+  }
+  return out
+}
+
+/**
+ * What a list of names selects (D124): a name carried by a selected group drops out, since the
+ * group already stands for it, and exactly a group's members become that group, so one set of
+ * objects is one selection wherever it was picked.
+ */
+export function normalizeSelection(model: SceneModel, names: string[]): string[] {
+  const unique = names.filter((n, i) => names.indexOf(n) === i)
+  const covered = new Set<string>()
+  for (const name of unique) {
+    const obj = model.objects.find((o) => o.name === name)
+    if (obj?.className === GROUP) for (const inner of groupCarries(model, name)) covered.add(inner)
+  }
+  const kept = unique.filter((n) => !covered.has(n))
+  if (kept.length < 2) return kept
+  const group = groupFor(model, kept)
+  return group ? [group] : kept
 }
