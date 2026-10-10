@@ -3,7 +3,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, promises as fs } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { path as bundledFfmpeg } from '@ffmpeg-installer/ffmpeg'
-import { PRESETS, type ExportOptions, type ExportPreset, type ExportResult, type RenderJob } from '../shared/api'
+import { crfFor, DEFAULT_QUALITY, PRESETS, type ExportOptions, type ExportPreset, type ExportResult, type RenderJob } from '../shared/api'
 
 /**
  * Export (D25, R110): the renderer draws frames through its own scene renderer and sends them
@@ -24,13 +24,14 @@ const TO_YUV = ['-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2:0:0:black,scale=out_color_
 /** The ffmpeg invocation for a preset: raw RGBA frames on stdin, the file as output. The container is named outright, so the output's extension never decides it. */
 function ffmpegArgs(options: ExportOptions): string[] {
   const input = ['-hide_banner', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', `${options.width}x${options.height}`, '-r', String(options.fps), '-i', 'pipe:0']
+  const crf = String(crfFor(options.preset, options.quality) ?? 0)
   switch (options.preset) {
     case 'h264':
-      return [...input, ...TO_YUV, '-c:v', 'libx264', '-preset', 'medium', '-crf', '17', '-pix_fmt', 'yuv420p', ...BT709, '-movflags', '+faststart', '-f', 'mp4', '-y', options.path]
+      return [...input, ...TO_YUV, '-c:v', 'libx264', '-preset', 'medium', '-crf', crf, '-pix_fmt', 'yuv420p', ...BT709, '-movflags', '+faststart', '-f', 'mp4', '-y', options.path]
     case 'h265':
-      return [...input, ...TO_YUV, '-c:v', 'libx265', '-preset', 'medium', '-crf', '20', '-pix_fmt', 'yuv420p', '-tag:v', 'hvc1', ...BT709, '-movflags', '+faststart', '-f', 'mp4', '-y', options.path]
+      return [...input, ...TO_YUV, '-c:v', 'libx265', '-preset', 'medium', '-crf', crf, '-pix_fmt', 'yuv420p', '-tag:v', 'hvc1', ...BT709, '-movflags', '+faststart', '-f', 'mp4', '-y', options.path]
     case 'webm':
-      return [...input, ...TO_YUV, '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '28', '-row-mt', '1', '-pix_fmt', 'yuv420p', ...BT709, '-f', 'webm', '-y', options.path]
+      return [...input, ...TO_YUV, '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', crf, '-row-mt', '1', '-pix_fmt', 'yuv420p', ...BT709, '-f', 'webm', '-y', options.path]
     case 'prores':
       return [...input, '-c:v', 'prores_ks', '-profile:v', '4', '-pix_fmt', 'yuva444p10le', '-vendor', 'apl0', '-f', 'mov', '-y', options.path]
     case 'png':
@@ -138,14 +139,14 @@ export function registerExportIpc(getWindow: () => BrowserWindow | null): void {
 
 /**
  * The headless command (R111, D25): `quick-animator render <project> [--out file] [--preset p]
- * [--from s] [--to s]`. Parsed from the arguments after the executable; null when the app was
+ * [--quality n] [--from s] [--to s]`. Parsed from the arguments after the executable; null when the app was
  * started normally, an error message when the command is malformed.
  */
 export function parseRenderCommand(argv: string[]): RenderJob | { error: string } | null {
   const args = argv.slice(app.isPackaged ? 1 : 2)
   if (args[0] !== 'render') return null
-  const usage = 'usage: quick-animator render <project> [--out file] [--preset h264|h265|webm|prores|png] [--from seconds] [--to seconds]'
-  const job: RenderJob = { project: '', preset: 'h264', out: '', from: null, to: null }
+  const usage = 'usage: quick-animator render <project> [--out file] [--preset h264|h265|webm|prores|png] [--quality 1-100] [--from seconds] [--to seconds]'
+  const job: RenderJob = { project: '', preset: 'h264', quality: DEFAULT_QUALITY, out: '', from: null, to: null }
   for (let i = 1; i < args.length; i++) {
     const arg = args[i]!
     const value = (): string | null => (i + 1 < args.length ? args[++i]! : null)
@@ -157,6 +158,10 @@ export function parseRenderCommand(argv: string[]): RenderJob | { error: string 
       const v = value()
       if (!v || !(v in PRESETS)) return { error: `--preset must be one of ${Object.keys(PRESETS).join(', ')}\n${usage}` }
       job.preset = v as ExportPreset
+    } else if (arg === '--quality' || arg === '-q') {
+      const v = Number(value())
+      if (!Number.isInteger(v) || v < 1 || v > 100) return { error: `--quality needs a whole number from 1 to 100\n${usage}` }
+      job.quality = v
     } else if (arg === '--from' || arg === '--to') {
       const v = Number(value())
       if (!Number.isFinite(v) || v < 0) return { error: `${arg} needs seconds, 0 or more\n${usage}` }

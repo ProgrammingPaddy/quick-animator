@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { PRESETS, type ExportPreset } from '../../../shared/api'
+import { crfFor, DEFAULT_QUALITY, PRESETS, type ExportPreset } from '../../../shared/api'
 import { frameSpan, runExport, type ExportProgress } from '../export/run'
 import { useStore } from '../state/store'
 import { formatTime } from '../state/time'
 import { NumberField } from './NumberField'
 
 const PRESET_KEY = 'quick-animator.exportPreset'
+const QUALITY_KEY = 'quick-animator.exportQuality'
 const PRESET_NAMES = Object.keys(PRESETS) as ExportPreset[]
 
 function loadPreset(): ExportPreset {
@@ -14,6 +15,15 @@ function loadPreset(): ExportPreset {
     return raw && (PRESET_NAMES as string[]).includes(raw) ? (raw as ExportPreset) : 'h264'
   } catch {
     return 'h264'
+  }
+}
+
+function loadQuality(): number {
+  try {
+    const raw = Number(localStorage.getItem(QUALITY_KEY))
+    return Number.isInteger(raw) && raw >= 1 && raw <= 100 ? raw : DEFAULT_QUALITY
+  } catch {
+    return DEFAULT_QUALITY
   }
 }
 
@@ -33,6 +43,7 @@ function ExportDialog() {
   const project = useStore((s) => s.project)
   const error = useStore((s) => s.error)
   const [preset, setPreset] = useState<ExportPreset>(loadPreset)
+  const [quality, setQuality] = useState(loadQuality)
   const [from, setFrom] = useState(0)
   const [to, setTo] = useState(contentEnd ?? 0)
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
@@ -55,6 +66,15 @@ function ExportDialog() {
       // Preference only.
     }
   }
+  const chooseQuality = (q: number) => {
+    const clamped = Math.min(100, Math.max(1, Math.round(q)))
+    setQuality(clamped)
+    try {
+      localStorage.setItem(QUALITY_KEY, String(clamped))
+    } catch {
+      // Preference only.
+    }
+  }
   const close = () => {
     if (running) return
     setOpen(false)
@@ -67,7 +87,7 @@ function ExportDialog() {
     cancelRef.current = false
     setStatus({ kind: 'running', frame: 0, total: span.count })
     const started = performance.now()
-    const result = await runExport(model, settings, { from, to }, preset, path, (p) => setStatus({ kind: 'running', ...p }), () => cancelRef.current)
+    const result = await runExport(model, settings, { from, to }, preset, quality, path, (p) => setStatus({ kind: 'running', ...p }), () => cancelRef.current)
     setStatus(result.ok ? { kind: 'done', path, seconds: (performance.now() - started) / 1000 } : { kind: 'failed', message: result.message ?? 'Export failed' })
   }
 
@@ -100,6 +120,15 @@ function ExportDialog() {
               </button>
             ))}
           </div>
+          {PRESETS[preset].quality && (
+            <>
+              <span className="dim">Quality</span>
+              <div className="export-range">
+                <NumberField label="Quality, 1 to 100: 75 is the default, 100 the best at a sensible size, 1 the smallest file" value={quality} unit="" min={1} onChange={chooseQuality} />
+                <span className="dim">of 100, CRF {crfFor(preset, quality)}</span>
+              </div>
+            </>
+          )}
           <span className="dim">Range</span>
           <div className="export-range">
             <NumberField label="Start, in seconds" value={from} unit="s" min={0} onChange={(v) => setFrom(Math.max(0, v))} />

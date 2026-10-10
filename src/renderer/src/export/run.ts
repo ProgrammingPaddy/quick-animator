@@ -24,14 +24,14 @@ export function frameSpan(range: ExportRange, fps: number): { first: number; cou
  * the main process, which encodes it (D25). The model is the one given: edits made meanwhile do
  * not reach the file. Resolves with ffmpeg's verdict, or the failure, and never throws.
  */
-export async function runExport(model: SceneModel, settings: ProjectSettings, range: ExportRange, preset: ExportPreset, path: string, onProgress: (p: ExportProgress) => void, cancelled: () => boolean): Promise<ExportResult> {
+export async function runExport(model: SceneModel, settings: ProjectSettings, range: ExportRange, preset: ExportPreset, quality: number, path: string, onProgress: (p: ExportProgress) => void, cancelled: () => boolean): Promise<ExportResult> {
   const api = window.api?.export
   if (!api) return { ok: false, message: 'Export needs the desktop app' }
   const { first, count } = frameSpan(range, settings.fps)
   let renderer: FrameRenderer | null = null
   try {
     renderer = new FrameRenderer(settings.width, settings.height, settings.background, PRESETS[preset].alpha)
-    await api.start({ preset, path, width: settings.width, height: settings.height, fps: settings.fps, frames: count })
+    await api.start({ preset, quality, path, width: settings.width, height: settings.height, fps: settings.fps, frames: count })
     for (let i = 0; i < count; i++) {
       if (cancelled()) {
         await api.cancel()

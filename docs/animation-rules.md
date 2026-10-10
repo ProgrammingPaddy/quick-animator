@@ -256,7 +256,8 @@ edit it.
 `quick-animator render <project>` writes the project as an H.264 mp4 next to it, from the
 terminal and without a window; while the app runs from source, `npm run render -- <project>`.
 `--preset` picks `h264`, `h265`, `webm`, `prores` (4444, with alpha), or `png` (a sequence,
-with alpha); `--out` names the file; `--from` and `--to` take a part, in seconds. The frames are
+with alpha); `--quality` 1 to 100 for the compressed formats, default 75; `--out` names the file;
+`--from` and `--to` take a part, in seconds. The frames are
 the ones the app shows, at the project's size and rate, from 0 to the last action's end plus
 `hold`. Progress prints on stdout, errors on stderr with exit code 1. See `docs/render.md`.
 

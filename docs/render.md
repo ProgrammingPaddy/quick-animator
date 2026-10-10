@@ -4,7 +4,7 @@ Renders a project to a video file without opening the window, through the same r
 preview uses, so the file matches what the app shows frame for frame.
 
 ```
-quick-animator render <project> [--out file] [--preset h264|h265|webm|prores|png] [--from seconds] [--to seconds]
+quick-animator render <project> [--out file] [--preset h264|h265|webm|prores|png] [--quality 1-100] [--from seconds] [--to seconds]
 ```
 
 While the app runs from source, the same command is:
@@ -21,6 +21,7 @@ that file, and so does the length: from zero to the end of the last action plus 
 |--------|---------|---------|
 | `--out file` | Where to write. For `png`, a folder that gets `frame_00000.png`, `frame_00001.png`, … | next to the project: `<name>.mp4`, `<name>.mov`, `<name>.webm`, or `<name>-frames/` |
 | `--preset` | `h264` mp4 (plays everywhere), `h265` mp4 (smaller), `webm` VP9, `prores` ProRes 4444 mov with alpha, `png` sequence with alpha | `h264` |
+| `--quality` | 1 to 100 for `h264`, `h265`, and `webm`: 100 is the best at a sensible size, 1 the smallest file. It sets the encoder's constant rate factor: H.264 36 down to 10, H.265 40 down to 13, VP9 50 down to 20 | 75, which is CRF 17, 20, and 28 |
 | `--from`, `--to` | Seconds; render only this part | the whole content |
 
 Progress goes to stdout as `frame/total (percent)`, then `wrote <path>`. Errors go to stderr: a

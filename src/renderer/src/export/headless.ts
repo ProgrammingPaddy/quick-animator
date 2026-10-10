@@ -30,7 +30,7 @@ export async function runHeadless(): Promise<void> {
     const from = job.from ?? 0
     const to = job.to ?? s.contentEnd ?? 0
     if (to < from) return finish({ ok: false, message: `--to ${to} comes before --from ${from}` })
-    finish(await runExport(s.model, s.settings, { from, to }, job.preset, job.out, (p) => api.render.progress(p.frame, p.total), () => false))
+    finish(await runExport(s.model, s.settings, { from, to }, job.preset, job.quality, job.out, (p) => api.render.progress(p.frame, p.total), () => false))
   } catch (err) {
     finish({ ok: false, message: err instanceof Error ? err.message : String(err) })
   }

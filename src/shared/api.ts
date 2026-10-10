@@ -45,17 +45,40 @@ export interface ProjectApi {
 
 export type ExportPreset = 'h264' | 'h265' | 'webm' | 'prores' | 'png'
 
-/** The export formats (R110): what each is called, its file extension, none for a folder of frames, and whether it keeps alpha. */
-export const PRESETS: Record<ExportPreset, { label: string; extension: string; alpha: boolean }> = {
-  h264: { label: 'H.264 mp4', extension: 'mp4', alpha: false },
-  h265: { label: 'H.265 mp4', extension: 'mp4', alpha: false },
-  webm: { label: 'VP9 webm', extension: 'webm', alpha: false },
-  prores: { label: 'ProRes 4444 mov, alpha', extension: 'mov', alpha: true },
-  png: { label: 'PNG sequence, alpha', extension: '', alpha: true },
+/** The export formats (R110): what each is called, its file extension, none for a folder of frames, whether it keeps alpha, and whether it has a quality to set. */
+export const PRESETS: Record<ExportPreset, { label: string; extension: string; alpha: boolean; quality: boolean }> = {
+  h264: { label: 'H.264 mp4', extension: 'mp4', alpha: false, quality: true },
+  h265: { label: 'H.265 mp4', extension: 'mp4', alpha: false, quality: true },
+  webm: { label: 'VP9 webm', extension: 'webm', alpha: false, quality: true },
+  prores: { label: 'ProRes 4444 mov, alpha', extension: 'mov', alpha: true, quality: false },
+  png: { label: 'PNG sequence, alpha', extension: '', alpha: true, quality: false },
+}
+
+export const DEFAULT_QUALITY = 75
+
+/**
+ * The encoder's constant rate factor for a quality from 1 to 100 (D132): 75 gives each format
+ * its default, 100 the best it offers at a sensible size, 1 the smallest file; null for the
+ * formats with nothing to set.
+ */
+export function crfFor(preset: ExportPreset, quality: number): number | null {
+  const q = Math.min(100, Math.max(1, Math.round(quality)))
+  switch (preset) {
+    case 'h264':
+      return Math.round(36 - q * 0.26)
+    case 'h265':
+      return Math.round(40 - q * 0.27)
+    case 'webm':
+      return Math.round(50 - q * 0.3)
+    default:
+      return null
+  }
 }
 
 export interface ExportOptions {
   preset: ExportPreset
+  /** 1 to 100, for the formats that take one. */
+  quality: number
   /** The file to write, or for a PNG sequence the folder. */
   path: string
   width: number
@@ -85,6 +108,7 @@ export interface ExportApi {
 export interface RenderJob {
   project: string
   preset: ExportPreset
+  quality: number
   out: string
   from: number | null
   to: number | null
