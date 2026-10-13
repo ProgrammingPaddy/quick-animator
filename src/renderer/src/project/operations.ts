@@ -1,6 +1,6 @@
 import { applyEdits, beginGesture, endGesture, scrollToPos } from '../code/editor'
 import { findDependents, type Dependent } from '../model/dependents'
-import { appendStatement, blockText, formatNumber, insertDeclaration, removeProp, removeStatements, setProp, type TextEdit } from '../model/edits'
+import { appendStatement, blockText, formatNumber, insertDeclaration, removeProp, removeStatements, setProp, setPropText, type TextEdit } from '../model/edits'
 import { isMember } from '../model/evaluate'
 import { memberRef, normalizeSelection } from '../model/groups'
 import { classes, GROUP, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
@@ -630,6 +630,81 @@ export function placeObject(name: string, at: number, edge: 'all' | 'start' = 'a
     edits.push(setProp(source, stmt, 'at', roundSeconds(Math.max(0, start + shift - (action.timing.delay ?? 0)))))
   })
   applyEdits(edits.filter((e): e is TextEdit => !!e))
+}
+
+/** What a link can point at (D170): an action, a class action, or when an object begins or is removed. */
+export type LinkTarget = { action: ActionRef } | { classAction: number } | { object: string }
+export type LinkPart = 'start' | 'end' | 'progress'
+
+/**
+ * The name a target can be referred to by. An action or class action without one gets named in
+ * the code first, `boxMove`, then `boxMove2`, so the reference has something to hold on to.
+ */
+function linkName(model: SceneModel, target: LinkTarget, edits: TextEdit[]): string | null {
+  if ('object' in target) return model.objects.some((o) => o.name === target.object) ? target.object : null
+  const classAction = 'classAction' in target ? model.classActions[target.classAction] : null
+  const action = 'action' in target ? model.objects.find((o) => o.name === target.action.object)?.actions[target.action.index] : null
+  const stmt = classAction ? classAction.stmt : action && !action.classAction ? action.stmt : null
+  const existing = classAction ? classAction.name : action?.name
+  if (!stmt) return null
+  if (existing) return existing
+  const verb = classAction ? classAction.verb : action!.verb
+  const owner = classAction ? classAction.className : action!.object.name
+  const base = `${owner}${verb.charAt(0).toUpperCase()}${verb.slice(1)}`.replace(/[^A-Za-z0-9_$]/g, '')
+  const taken = takenNames(model)
+  let name = base
+  for (let n = 2; taken.has(name) || nameProblem(name, taken); n++) name = `${base}${n}`
+  edits.push({ from: stmt.range.from, to: stmt.range.from, insert: `${name} = ` })
+  return name
+}
+
+function refText(name: string, part: LinkPart, fraction: number): string {
+  return part === 'progress' ? `${name}.progress(${fraction})` : `${name}.${part}`
+}
+
+/** Link an action's start to another's timing, or to when an object begins or is removed (D170): `at: slide.end`, naming the target first when it has no name. */
+export function linkStart(ref: ActionRef, target: LinkTarget, part: LinkPart, fraction = 0.5): void {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === ref.object)
+  const action = obj?.actions[ref.index]
+  if (!model || !obj || !action?.stmt || action.classAction) return
+  if ('action' in target && target.action.object === ref.object && target.action.index === ref.index) return
+  const edits: TextEdit[] = []
+  const name = linkName(model, target, edits)
+  if (!name) return
+  edits.push(setPropText(source, action.stmt, 'at', refText(name, part, fraction)))
+  applyEdits(edits)
+}
+
+/** Put the start the link gave in place of the link, as a number (D170). */
+export function unlinkStart(ref: ActionRef): void {
+  const { source, model } = state()
+  const action = model?.objects.find((o) => o.name === ref.object)?.actions[ref.index]
+  if (!model || !action?.stmt || action.classAction) return
+  applyEdits([setProp(source, action.stmt, 'at', roundSeconds(action.start - (action.timing.delay ?? 0)))])
+}
+
+/** Link when an object begins or is removed to an action's timing or another object's life (D170). */
+export function linkLifetime(objectName: string, key: 'at' | 'until', target: LinkTarget, part: LinkPart, fraction = 0.5): void {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === objectName)
+  if (!model || !obj?.decl || obj.className === GROUP) return
+  if ('object' in target && target.object === objectName) return
+  const edits: TextEdit[] = []
+  const name = linkName(model, target, edits)
+  if (!name) return
+  edits.push(setPropText(source, obj.decl, key, refText(name, part, fraction)))
+  applyEdits(edits)
+}
+
+/** Put the time the link gave in place of the link, as a number; an end that was open stays open (D170). */
+export function unlinkLifetime(objectName: string, key: 'at' | 'until'): void {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === objectName)
+  if (!model || !obj?.decl) return
+  const value = key === 'at' ? obj.at : obj.until
+  const edit = value === null || (key === 'at' && value <= 0) ? removeProp(source, obj.decl, key) : setProp(source, obj.decl, key, roundSeconds(value))
+  if (edit) applyEdits([edit])
 }
 
 /** Arrow keys with the timeline in use: the selected objects move by whole frames in time, as one step (D141). */

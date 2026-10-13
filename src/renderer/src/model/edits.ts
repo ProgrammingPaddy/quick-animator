@@ -23,7 +23,11 @@ export function formatValue(value: AttrValue): string {
 
 /** Set one attribute in a block: replace its literal, or add a line when it is not there. */
 export function setProp(source: string, block: BlockInfo, key: string, value: AttrValue): TextEdit {
-  const text = formatValue(value)
+  return setPropText(source, block, key, formatValue(value))
+}
+
+/** Set a property to code as written, such as a time reference `slide.end` (D170). */
+export function setPropText(source: string, block: BlockInfo, key: string, text: string): TextEdit {
   const prop = block.props.find((p) => p.key === key)
   if (prop) return { from: prop.valueRange.from, to: prop.valueRange.to, insert: text }
   const multiline = source.slice(block.propsOpen, block.propsClose).includes('\n')

@@ -2182,6 +2182,39 @@ button.chevron:hover {
   cursor: grabbing;
 }
 
+/* Link marks: what a thing refers to, and that something refers to it (D169). */
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  color: #93c5fd;
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.link.value {
+  color: #c4b5fd;
+}
+
+.link.target {
+  color: #fde68a;
+}
+
+.link-icon {
+  flex: none;
+}
+
+.clip .label .link {
+  margin-left: 5px;
+}
+
+.action-row .link,
+.object-row .link {
+  margin-left: 4px;
+}
+
 /* The arrow in a clip's corner collapses it (D153). */
 .oclip-fold {
   flex: none;

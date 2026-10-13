@@ -45,17 +45,13 @@ function keepInside(el: HTMLElement, flip = false): void {
 }
 
 /**
- * The one context menu of the app. Any click elsewhere, a wheel, or Escape closes it. An item
- * with children opens them beside it on hover; clicking the item itself runs its own action
- * when it has one (D109). Menus never run off the window.
+ * One level of the menu: the items, each with its flyout of children beside it on hover, any
+ * number of levels deep (D109, D170). A flyout stays open for a moment after the pointer leaves,
+ * so the pointer can cross to it.
  */
-export function ContextMenuLayer() {
-  const menu = useStore((s) => s.contextMenu)
-  const closeMenu = useStore((s) => s.closeMenu)
+function MenuLevel({ items, run, sub, x, y }: { items: MenuItem[]; run: (item: MenuItem) => void; sub: boolean; x?: number; y?: number }) {
   const [open, setOpen] = useState<number | null>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
-  const subRef = useRef<HTMLDivElement>(null)
-  /** A flyout stays open for a moment after the pointer leaves, so it can cross to the flyout. */
+  const ref = useRef<HTMLDivElement>(null)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const enter = (i: number | null) => {
     if (closeTimer.current) clearTimeout(closeTimer.current)
@@ -66,9 +62,34 @@ export function ContextMenuLayer() {
     if (closeTimer.current) clearTimeout(closeTimer.current)
     closeTimer.current = setTimeout(() => setOpen((o) => (o === i ? null : o)), 300)
   }
+  useLayoutEffect(() => {
+    if (ref.current) keepInside(ref.current, sub)
+  }, [sub, items])
+  return (
+    <div className={`context-menu${sub ? ' submenu' : ''}`} ref={ref} style={sub ? undefined : { left: x, top: y }} role="menu">
+      {items.map((item, i) => (
+        <div key={`${item.label} ${item.keyword ?? ''}`} className="menu-item-wrap" onMouseEnter={() => enter(item.children ? i : null)} onMouseLeave={() => leave(i)}>
+          <button role="menuitem" className={`${item.danger ? 'danger' : ''}${item.children ? ' has-children' : ''}`} onClick={() => run(item)} aria-haspopup={item.children ? 'menu' : undefined} aria-expanded={item.children ? open === i : undefined}>
+            <Label item={item} />
+            {item.children && <span className="caret">{'▸'}</span>}
+          </button>
+          {item.children && open === i && <MenuLevel items={item.children} run={run} sub />}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * The one context menu of the app. Any click elsewhere, a wheel, or Escape closes it. An item
+ * with children opens them beside it on hover; clicking the item itself runs its own action
+ * when it has one (D109). Menus never run off the window.
+ */
+export function ContextMenuLayer() {
+  const menu = useStore((s) => s.contextMenu)
+  const closeMenu = useStore((s) => s.closeMenu)
 
   useEffect(() => {
-    setOpen(null)
     if (!menu) return
     const onPointerDown = (e: PointerEvent) => {
       if (e.target instanceof Element && e.target.closest('.context-menu')) return
@@ -85,39 +106,11 @@ export function ContextMenuLayer() {
     }
   }, [menu, closeMenu])
 
-  useLayoutEffect(() => {
-    if (menuRef.current) keepInside(menuRef.current)
-  }, [menu])
-
-  useLayoutEffect(() => {
-    if (subRef.current) keepInside(subRef.current, true)
-  }, [open])
-
   if (!menu) return null
   const run = (item: MenuItem) => {
     if (!item.run) return
     closeMenu()
     item.run()
   }
-  return (
-    <div className="context-menu" ref={menuRef} style={{ left: menu.x, top: menu.y }} role="menu">
-      {menu.items.map((item, i) => (
-        <div key={`${item.label} ${item.keyword ?? ''}`} className="menu-item-wrap" onMouseEnter={() => enter(item.children ? i : null)} onMouseLeave={() => leave(i)}>
-          <button role="menuitem" className={`${item.danger ? 'danger' : ''}${item.children ? ' has-children' : ''}`} onClick={() => run(item)} aria-haspopup={item.children ? 'menu' : undefined} aria-expanded={item.children ? open === i : undefined}>
-            <Label item={item} />
-            {item.children && <span className="caret">{'▸'}</span>}
-          </button>
-          {item.children && open === i && (
-            <div className="context-menu submenu" ref={subRef} role="menu">
-              {item.children.map((child) => (
-                <button key={`${child.label} ${child.keyword ?? ''}`} role="menuitem" className={child.danger ? 'danger' : ''} onClick={() => run(child)}>
-                  <Label item={child} />
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  )
+  return <MenuLevel key={`${menu.x},${menu.y}`} items={menu.items} run={run} sub={false} x={menu.x} y={menu.y} />
 }

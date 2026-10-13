@@ -1,5 +1,7 @@
 import { useMemo, type MouseEvent as ReactMouseEvent } from 'react'
 import { showMenu } from '../components/ContextMenu'
+import { LinkIcon } from '../components/LinkIcon'
+import { actionLinks, dependentsByTarget, objectLinks, targetKey } from '../model/links'
 import { actionIdents, classActionIdents, classGroups, classKey, classSpan, overrideOf, typeGroups, type ClassGroup } from '../model/groups'
 import { GROUP, PIVOT_PARAMS, VERB_COLORS } from '../model/registry'
 import type { Action, SceneObject } from '../model/types'
@@ -37,6 +39,22 @@ export function ObjectPane() {
   const fps = useStore((s) => s.settings.fps)
   const selection = useStore((s) => s.selection)
   const anchored = useStore((s) => s.anchored)
+  const dependents = useMemo(() => (model ? dependentsByTarget(model) : new Map<string, string[]>()), [model])
+  /** Link marks, icons only, saying what in their tooltips (D169). */
+  const marks = (links: { key: string; text: string; kind: string }[], referredBy: string[] | undefined) => (
+    <>
+      {links.map((l) => (
+        <span key={l.key} className={`link ${l.kind}`} title={l.kind === 'value' ? `${l.key} follows ${l.text}` : `${l.key === 'at' ? 'Starts at' : l.key === 'until' ? 'Ends at' : l.key + ' is'} ${l.text}`}>
+          <LinkIcon />
+        </span>
+      ))}
+      {referredBy && referredBy.length > 0 && (
+        <span className="link target" title={`Referred to by:\n${referredBy.join('\n')}`}>
+          <LinkIcon />
+        </span>
+      )}
+    </>
+  )
   const selectedActions = useStore((s) => s.selectedActions)
   const collapsed = useStore((s) => s.collapsed.objects)
   const select = useStore((s) => s.select)
@@ -180,6 +198,7 @@ export function ObjectPane() {
           <span className="name">{obj.name}</span>
           <span className="dim">{obj.className}</span>
           {obj.className === GROUP && <span className="dim members">{(model?.groups.get(obj.name) ?? []).join(' · ')}</span>}
+          {marks(objectLinks(obj), dependents.get(targetKey({ object: obj })))}
           {obj.codeDriven && <span className="badge">code</span>}
           {anchored.includes(obj.name) && (
             <span className="badge anchor" title="Anchored: a push never moves it (D136)">
@@ -211,6 +230,7 @@ export function ObjectPane() {
                   <Idents words={actionIdents(action)} />
                   <span className="name">{actionLabel(action)}</span>
                   <span className="dim mono">{timecode(action.start, fps)}</span>
+                  {marks(actionLinks(action), dependents.get(targetKey({ action })))}
                   {action.codeDriven && <span className="badge">code</span>}
                   {action.overridden && <span className="badge off">off</span>}
                 </li>

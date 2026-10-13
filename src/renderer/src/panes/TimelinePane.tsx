@@ -1,10 +1,12 @@
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { showMenu } from '../components/ContextMenu'
+import { LinkIcon } from '../components/LinkIcon'
 import { NumberField } from '../components/NumberField'
 import { ScrollBar } from '../components/ScrollBar'
 import { beginGesture, endGesture } from '../code/editor'
 import { actionIdents, activeMembers, classActionIdents, classKey, classSpan, classStandIn, classTree, groupMembers, overrideOf, type ClassNode } from '../model/groups'
 import { attrSchema, GROUP, PIVOT_PARAMS, VERB_ATTRS, VERB_COLORS, VERBS } from '../model/registry'
+import { actionLinks, classActionLinks, dependentsByTarget, objectLinks, targetKey, type LinkInfo } from '../model/links'
 import { containers, isVisibleAt, valueAt } from '../model/sample'
 import type { Action, ClassAction, SceneModel, SceneObject } from '../model/types'
 import {
@@ -26,6 +28,8 @@ import {
   jumpToAction,
   jumpToClass,
   jumpToObject,
+  linkLifetime,
+  linkStart,
   materializeClassAction,
   moveDeclaration,
   overrideClassAction,
@@ -42,13 +46,17 @@ import {
   setClassActionTiming,
   setClassActionValues,
   ungroup,
+  unlinkLifetime,
+  unlinkStart,
   setAttrsAt,
   setAttrsAtMany,
   placeObject,
   setLifetime,
   type LifetimeOrigin,
+  type LinkPart,
+  type LinkTarget,
 } from '../project/operations'
-import { isActionSelected, OBJECT_KINDS, useStore, type ActionRef } from '../state/store'
+import { isActionSelected, OBJECT_KINDS, useStore, type ActionRef, type MenuItem } from '../state/store'
 import { formatTime, snapToFrame, timecode } from '../state/time'
 
 /** Zoom limits in pixels per second. At the top, single frames at 60 fps sit about 65 px apart. */
@@ -795,9 +803,12 @@ export function TimelinePane() {
       ])
       return
     }
+    const atLink = action ? actionLinks(action).find((l) => l.key === 'at') : undefined
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToAction(obj.name, index) },
       { label: action?.name ? 'Rename' : 'Name', run: () => requestRename({ object: obj.name, index }) },
+      { label: 'Link start to', children: linkTargets({ object: obj.name, index }, null, (target, part) => linkStart({ object: obj.name, index }, target, part)) },
+      ...(atLink ? [{ label: 'Unlink start', keyword: atLink.text, run: () => unlinkStart({ object: obj.name, index }) }] : []),
       { label: 'Delete action', run: () => deleteAction(obj.name, index), danger: true },
     ])
   }
@@ -859,6 +870,11 @@ export function TimelinePane() {
             { label: 'Begin at', keyword: timecode(t, fps), run: () => placeObject(obj.name, t, 'start') },
             { label: 'End at', keyword: timecode(t, fps), run: () => setLifetime(obj.name, { until: t }) },
             ...(obj.until !== null ? [{ label: 'Keep to the end', run: () => setLifetime(obj.name, { until: null }) }] : []),
+            { label: 'Link begin to', children: linkTargets(null, obj.name, (target, part) => linkLifetime(obj.name, 'at', target, part)) },
+            { label: 'Link end to', children: linkTargets(null, obj.name, (target, part) => linkLifetime(obj.name, 'until', target, part)) },
+            ...objectLinks(obj)
+              .filter((l) => l.kind === 'time')
+              .map((l) => ({ label: l.key === 'at' ? 'Unlink begin' : 'Unlink end', keyword: l.text, run: () => unlinkLifetime(obj.name, l.key === 'at' ? 'at' : 'until') })),
           ]),
       { label: 'Duplicate', run: () => duplicateObjects([obj.name]) },
       isGroup ? { label: 'Ungroup', run: () => ungroup(obj.name), danger: true } : { label: 'Delete object', run: () => deleteObjects([obj.name]), danger: true },
@@ -940,6 +956,59 @@ export function TimelinePane() {
     return set
   }, [model, selectedActions])
   const tree = useMemo(() => (model ? classTree(model) : null), [model])
+  /** Who refers to each action's or object's timing, for the mark on the thing referred to (D169). */
+  const dependents = useMemo(() => (model ? dependentsByTarget(model) : new Map<string, string[]>()), [model])
+
+  /** The marks of a thing's links: what it refers to, with the text as written, and who refers to it (D169). */
+  const renderLinks = (links: LinkInfo[], referredBy: string[] | undefined, short = false) => (
+    <>
+      {links.map((l) => (
+        <span key={l.key} className={`link ${l.kind}`} title={`${l.kind === 'value' ? `${l.key} follows ${l.text}` : `${l.key === 'at' ? 'Starts at' : l.key === 'until' ? 'Ends at' : l.key + ' is'} ${l.text}`}: it moves with that. Right-click to change or unlink.`}>
+          <LinkIcon />
+          {!short && (l.kind === 'value' ? `${l.key} = ${l.text.length > 28 ? `${l.text.slice(0, 27)}…` : l.text}` : `${l.key === 'at' ? '' : `${l.key} `}${l.text}`)}
+        </span>
+      ))}
+      {referredBy && referredBy.length > 0 && (
+        <span className="link target" title={`Referred to by:\n${referredBy.join('\n')}`}>
+          <LinkIcon />
+          {!short && referredBy.length > 1 ? referredBy.length : ''}
+        </span>
+      )}
+    </>
+  )
+
+  /** Every timing a link can point at (D170): the class actions and the other actions with their start, halfway, and end, then the objects with when they begin and are removed. */
+  const linkTargets = (exclude: ActionRef | null, forObject: string | null, pick: (target: LinkTarget, part: LinkPart) => void): MenuItem[] => {
+    if (!model) return []
+    const parts = (target: LinkTarget): MenuItem[] => [
+      { label: 'its start', run: () => pick(target, 'start') },
+      { label: 'halfway', run: () => pick(target, 'progress') },
+      { label: 'its end', run: () => pick(target, 'end') },
+    ]
+    const items: MenuItem[] = []
+    for (const classAction of model.classActions) {
+      if (!classAction.stmt) continue
+      items.push({ label: `${classAction.name ? `${classAction.name}: ` : ''}all('${classAction.className}').${classAction.verb}`, children: parts({ classAction: classAction.id }) })
+    }
+    for (const o of model.objects) {
+      o.actions.forEach((a, i) => {
+        if (!a.stmt || a.classAction || a.overridden || (exclude && exclude.object === o.name && exclude.index === i)) return
+        items.push({ label: `${a.name ? `${a.name}: ` : ''}${o.name}.${a.verb}`, keyword: timecode(a.start, fps), children: parts({ action: { object: o.name, index: i } }) })
+      })
+    }
+    for (const o of model.objects) {
+      if (o.className === GROUP || !o.decl || o.name === forObject) continue
+      items.push({
+        label: o.name,
+        keyword: o.className,
+        children: [
+          { label: 'when it begins', run: () => pick({ object: o.name }, 'start') },
+          { label: 'when it is removed', run: () => pick({ object: o.name }, 'end') },
+        ],
+      })
+    }
+    return items
+  }
   const standIns = useMemo(() => {
     const out = new Map<string, SceneObject | null>()
     const walk = (node: ClassNode) => {
@@ -1006,6 +1075,7 @@ export function TimelinePane() {
             {carried && <span className="ident group">{owner.name}</span>}
             <Idents words={actionIdents(action)} />
             {clipLabel(action)}
+            {!carried && renderLinks(actionLinks(action), dependents.get(targetKey({ action })))}
           </span>
         )}
         {!locked && !thin && <div className="clip-edge right" onPointerDown={beginClipDrag(owner, index, 'end')} />}
@@ -1039,6 +1109,7 @@ export function TimelinePane() {
           <span className="label">
             <Idents words={classActionIdents(classAction)} />
             {classAction.verb}
+            {renderLinks(classActionLinks(classAction), dependents.get(targetKey({ classAction })))}
           </span>
         )}
         {!locked && !thin && <div className="clip-edge right" onPointerDown={beginClassClipDrag(classAction, 'end')} />}
@@ -1184,6 +1255,7 @@ export function TimelinePane() {
           {isGroup && <span className="kind members">{(model.groups.get(obj.name) ?? []).join(' · ')}</span>}
           {!isGroup && obj.classes.length > 0 && <span className="kind classes">{obj.classes.join(' · ')}</span>}
           {openEnded && <span className="kind">→ end</span>}
+          {renderLinks(objectLinks(obj), dependents.get(targetKey({ object: obj })))}
           {obj.codeDriven && <span className="kind">code</span>}
           {anchored.includes(obj.name) && (
             <span className="kind anchored" title="Anchored: a push never moves it">

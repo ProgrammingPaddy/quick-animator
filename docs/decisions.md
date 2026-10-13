@@ -259,6 +259,12 @@ gestures could be judged by hand. Each one is still open to veto.
 - **D167. A push begins at contact.** When an animation's drag pushes another object, the pushed object's move begins at the moment the dragged one reaches it, not with the animation: its start is the time the dragged object's eased progress has carried it that far, its ramps are what remain of the dragged animation's from there, and it ends with it, so the two move as one from the touch. Something already touching when the animation begins moves with it from the start, as before.
 - **D168. Wording and the clip menu.** Enable passthrough and Disable passthrough in place of Let drags pass through and Block drags again. The preview's object menu no longer offers End at, which the timeline's clip does. An animation's menu no longer offers Cut; Ctrl+X still cuts.
 
+## Proposed for links, 2026-10-13, built on the owner's sketch, awaiting the owner
+
+- **D169. Links are marks, not lines.** Connectors (R23) and links (R65) show as a small chain mark on the thing itself, with the words beside it where there is room: on an animation's clip, what its start or end refers to as written, `slide.end` or `slide.progress(0.5)`; on an object's clip, when it begins or is removed if those are references, and each attribute written as a link, `x = box.x + 20`. The thing referred to wears a yellow mark, with a count when several refer to it, and names them on hover. The object pane shows the same marks without the words. No lines are drawn.
+- **D170. Linking from the right-click.** An animation's menu has Link start to, listing the class actions, the other animations with their start, halfway, and end, and the objects with when they begin and are removed; choosing one writes the reference, `at: slide.end` or `at: box.progress(0.5)`, naming the target in the code first when it has no name, `boxMove`, then `boxMove2`. Unlink start writes the number the link gave. An object's clip has Link begin to and Link end to, and Unlink begin and Unlink end, the same way. Because a reference moves with its target, moving the target ripples; nothing else is needed for that.
+- **D171. Progress on animations.** `slide.progress(0.5)` works on any animation and class action, declared above or below (D148); objects have `start` and `end` only. A `progress` on an object's life, a fraction of the way from `at` to `until`, is proposed and not built.
+
 ## Open
 
 - Scale and resize written from the timeline or the preview always become `to`; they need handling of their own (owner, 2026-10-12).

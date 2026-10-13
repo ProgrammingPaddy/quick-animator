@@ -260,8 +260,11 @@ its own, and its members keep theirs.
 ## Links
 
 An attribute can follow another object's attribute with a function: `x: () => box.x + 20`. It is
-evaluated at every frame with the other object's animated value. **Coming:** `link` actions with
-a start and an end.
+evaluated at every frame with the other object's animated value. The GUI shows every link, a time
+reference or a value link, as a small chain mark on the clip and the row, with the words beside it
+on the clip, and marks what is referred to. Right-click an animation for Link start to, or an
+object's clip for Link begin to and Link end to, which write the reference and name the target if
+it has no name. **Coming:** `link` actions with a start and an end.
 
 ## What the GUI can edit
 

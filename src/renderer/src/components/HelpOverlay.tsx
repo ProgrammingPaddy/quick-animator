@@ -22,6 +22,7 @@ const SHORTCUTS: [string, string][] = [
   ['Edge / Center, Starts / Ends at playhead, Chain', 'What a resize keeps in place; whether a new animation starts or ends at the playhead; whether the animations made while Shift is held follow one another'],
   ['Ctrl + A', 'Select every object'],
   ['Shift + drag an object or a handle', 'Make the drag an animation from the playhead: a move, a rotation, or a resize'],
+  ['Links', 'A chain mark on a clip or a row says what its timing refers to, such as slide.end, and a yellow one that something refers to it; hover for the words. Right-click an animation for Link start to, or an object clip for Link begin to and Link end to'],
   ['Click a clip in the timeline', 'Select the animation and put the playhead at its start; a plain drag in the preview then sets its start state'],
   ['Shift with an animation selected', 'Jump to its end; a drag sets its end state and makes nothing new; a drag of another kind makes an animation over the same span'],
   ['Drag an object with an action selected', "Set that action's destination"],

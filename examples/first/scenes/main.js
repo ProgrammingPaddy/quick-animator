@@ -1,23 +1,33 @@
 orb = Circle({
-  x: -342,
-  y: 29,
+  x: -238,
+  y: 134,
   radius: 60,
   fill: '#f59e0b',
   until: 5.6179,
   rotation: -0.1,
-  width: 268,
-  height: 235,
+  width: 364,
+  height: 364,
 })
 
-box = Rect({
-  x: -608,
-  y: 190,
+text4 = Text({
+  x: 120,
+  y: 245,
+  text: 'Text',
+  fontSize: 48,
+  fill: '#ffffff',
+  at: 5.5167,
+  until: 7.5167,
+  rotation: -358.7,
+})
+
+rect1 = Rect({
+  x: -251,
+  y: 174,
   width: 240,
   height: 140,
   fill: '#4f8cff',
-  until: 9.1667,
-  opacity: 1,
-  at: 2.5833,
+  at: 5.5167,
+  until: 7.7334,
   class: 'test',
 })
 
@@ -29,17 +39,6 @@ text1 = Text({
   fill: '#ffffff',
   until: 2.4167,
   opacity: 0,
-})
-
-rect1 = Rect({
-  x: -251,
-  y: 174,
-  width: 240,
-  height: 140,
-  fill: '#4f8cff',
-  at: 3.7833,
-  until: 6,
-  class: 'test',
 })
 
 text2 = Text({
@@ -62,20 +61,20 @@ text3 = Text({
   opacity: 0,
 })
 
+box = Rect({
+  x: -608,
+  y: 190,
+  width: 240,
+  height: 140,
+  fill: '#4f8cff',
+  until: 10.4834,
+  opacity: 1,
+  class: 'test',
+})
+
 stuff = Group({
   members: 'box orb',
   opacity: 0.88,
-})
-
-text4 = Text({
-  x: 120,
-  y: 245,
-  text: 'Text',
-  fontSize: 48,
-  fill: '#ffffff',
-  at: 5,
-  until: 7,
-  rotation: -358.7,
 })
 
 orb.move({
@@ -88,14 +87,14 @@ orb.move({
 box.move({
   x: 177,
   y: -181,
-  at: 3.05,
+  at: 4.3667,
   duration: 0.6167,
 })
 
 box.move({
   x: 247,
   y: -19,
-  at: 4.1833,
+  at: 5.5,
   duration: 0.3667,
 })
 
@@ -155,14 +154,14 @@ text1.fade({
 
 box.fade({
   opacity: 1,
-  at: 3.3166,
-  duration: 0.3501,
+  at: 4.6333,
+  duration: 0.4167,
 })
 
 stuff.move({
   x: -100,
   y: -77,
-  at: 0,
+  at: 0.15,
   duration: 1,
 })
 
@@ -238,35 +237,35 @@ orb.move({
 box.move({
   x: 441,
   y: 83,
-  at: 7.3349,
+  at: 8.6516,
   duration: 1,
 })
 
 rect1.move({
   x: -308,
   y: 106,
-  at: 3.7833,
+  at: 5.5167,
   duration: 1,
 })
 
 box.move({
   x: 718,
   y: 83,
-  at: 7.3349,
+  at: 8.6516,
   duration: 1,
 })
 
 box.move({
   x: -465,
   y: 43,
-  at: 6.3333,
+  at: 7.65,
   duration: 1,
 })
 
 rect1.move({
   x: -479,
   y: 173,
-  at: 5,
+  at: 6.7334,
   duration: 1,
 })
 
