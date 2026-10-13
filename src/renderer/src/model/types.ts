@@ -15,9 +15,13 @@ export type AttrSource = AttrValue | AttrFn
  */
 export interface TimeRef {
   readonly __timeRef: true
-  kind: 'start' | 'end' | 'progress'
+  kind: 'start' | 'end' | 'progress' | 'objectStart' | 'objectEnd' | 'forward'
   actions: Action[]
   fraction?: number
+  /** For `objectStart` and `objectEnd`: when the object begins or is removed (D138). */
+  object?: SceneObject
+  /** For `forward`: a name declared further down and which of its times, looked up once the script has run (D148). */
+  forward?: { name: string; part: 'start' | 'end' | 'progress' }
 }
 
 /** One `key: value` line inside a block, with where it lives in the source. */
@@ -88,6 +92,10 @@ export interface SceneObject {
   classes: string[]
   /** The groups that list this object, in declaration order: their frames carry it, inner first (D124). */
   groups: string[]
+  /** When the object begins, in seconds: before it, it does not exist (D138). */
+  at: number
+  /** When it is removed, or null when it lasts to the end of the content. */
+  until: number | null
 }
 
 /** One statement on `all('class')`, which made one action per member (D80). */
@@ -137,6 +145,10 @@ export interface SceneModel {
   groups: Map<string, string[]>
   /** End of the last action, or null when nothing animates. The hold is added elsewhere. */
   lastActionEnd: number | null
+  /** The latest `until` any object names, or null when none does (D138). */
+  lastUntil: number | null
+  /** Where the content ends: the later of the last action's end and the latest `until`, or null while nothing is timed (D54, D143). */
+  contentEnd: number | null
   /** End of the last object declaration statement, where new objects are inserted. */
   lastDeclEnd: number | null
   warnings: SceneError[]

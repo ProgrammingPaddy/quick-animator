@@ -475,7 +475,7 @@ export function shownValue(model: SceneModel, obj: SceneObject, attr: string, ti
 export function definingAction(obj: SceneObject, attr: string, time: number): Action | null {
   let found: Action | null = null
   for (const action of obj.actions) {
-    if (action.overridden || !(attr in action.changes) || action.start > time) continue
+    if (action.overridden || !(attr in action.changes) || action.start >= time) continue
     if (!found || byStart(found, action) < 0) found = action
   }
   return found
@@ -554,11 +554,33 @@ export function writtenValues(model: SceneModel, obj: SceneObject, time: number,
   return out
 }
 
-/** An object exists wherever its opacity is above zero (decision D52). A group has no opacity of its own and always exists. */
+/**
+ * Whether an object is within its lifetime at a time (D138). A group, with no life of its own,
+ * always is. One removed at the content end stays on through the hold, which shows the final
+ * frame (D155).
+ */
+export function existsAt(model: SceneModel, obj: SceneObject, time: number): boolean {
+  if (obj.className === GROUP) return true
+  if (time < obj.at) return false
+  return obj.until === null || time < obj.until || (model.contentEnd !== null && obj.until >= model.contentEnd)
+}
+
+/** The opacity an object shows with: its own, times that of every group carrying it (D150). */
+export function opacityAt(model: SceneModel, obj: SceneObject, time: number): number {
+  const own = valueAt(model, obj, 'opacity', time)
+  let opacity = typeof own === 'number' ? Math.max(0, Math.min(1, own)) : 1
+  for (const g of containers(model, obj)) {
+    const v = valueAt(model, g, 'opacity', time)
+    if (typeof v === 'number') opacity *= Math.max(0, Math.min(1, v))
+  }
+  return opacity
+}
+
+/** An object exists within its lifetime wherever it shows with an opacity above zero (D52, D138, D150). */
 export function isVisibleAt(model: SceneModel, obj: SceneObject, time: number): boolean {
   if (!attrSchema(obj.className, 'opacity')) return true
-  const opacity = valueAt(model, obj, 'opacity', time)
-  return typeof opacity === 'number' && opacity > 0.0005
+  if (!existsAt(model, obj, time)) return false
+  return opacityAt(model, obj, time) > 0.0005
 }
 
 function interpolate(from: AttrValue, to: AttrValue, p: number, type: AttrType): AttrValue {

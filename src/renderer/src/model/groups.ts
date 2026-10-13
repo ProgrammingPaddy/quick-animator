@@ -1,7 +1,8 @@
 import { classes, GROUP } from './registry'
 import type { Action, ClassAction, SceneModel, SceneObject } from './types'
 
-const TYPE_ORDER = Object.keys(classes)
+/** Types in the registry's order, with groups last, beneath the objects they hold (D151). */
+const TYPE_ORDER = [...Object.keys(classes).filter((c) => c !== GROUP), GROUP]
 
 /** Objects in the registry's order of their class, then in declaration order (D84). */
 export function sortByType(objects: SceneObject[]): SceneObject[] {
@@ -127,7 +128,7 @@ export function classStandIn(group: ClassGroup, index: number): SceneObject | nu
   // Members that agree on a base opacity share it; otherwise the lane starts from solid.
   const bases = new Set(group.members.map((m) => (typeof m.attrs['opacity'] === 'number' ? (m.attrs['opacity'] as number) : 1)))
   const opacity = bases.size === 1 ? [...bases][0]! : 1
-  return { id: -1 - index, name: `all('${group.className}')`, className: first.className, attrs: { opacity }, codeDriven: false, decl: null, actions, classes: [], groups: [] }
+  return { id: -1 - index, name: `all('${group.className}')`, className: first.className, attrs: { opacity }, codeDriven: false, decl: null, actions, classes: [], groups: [], at: 0, until: null }
 }
 
 /** Among an object's actions, the one that overrides a class action, if any. */

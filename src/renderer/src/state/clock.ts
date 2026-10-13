@@ -18,12 +18,13 @@ export function useClock(): void {
       // performance.now() taken when the effect ran, which would move the playhead backwards.
       if (last !== null) {
         const dt = Math.max(0, now - last) / 1000
-        const { time, contentEnd, loop } = useStore.getState()
+        const { time, playbackEnd, loop } = useStore.getState()
         let next = time + dt
-        if (contentEnd !== null && contentEnd > 0 && next >= contentEnd) {
-          if (loop) next %= contentEnd
+        // Playback runs through the hold, so the final frame stays as long as the project says (D54).
+        if (playbackEnd !== null && playbackEnd > 0 && next >= playbackEnd) {
+          if (loop) next %= playbackEnd
           else {
-            useStore.setState({ time: contentEnd, playing: false })
+            useStore.setState({ time: playbackEnd, playing: false })
             return
           }
         }

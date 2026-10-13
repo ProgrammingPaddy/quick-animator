@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { groupMembers } from '../model/groups'
 import { GROUP } from '../model/registry'
-import { groupBox, isVisibleAt, parseColor, textMeasurer, valueAt, worldPose } from '../model/sample'
+import { existsAt, groupBox, opacityAt, parseColor, textMeasurer, valueAt, worldPose } from '../model/sample'
 import type { SceneModel, SceneObject } from '../model/types'
 import type { TransformMode } from '../state/store'
 
@@ -97,6 +97,8 @@ const CORNER_PX = 9
 const EDGE_PX = 7
 const ROTATE_PX = 11
 const PIVOT_PX = 14
+/** The diamond on an anchored object (D161). */
+const ANCHOR_PX = 8
 /** The selection is drawn in white with a dark rim, so it shows on any color (D94). */
 const LIGHT = 0xffffff
 const DARK = 0x111111
@@ -225,6 +227,49 @@ class Cross {
   }
 }
 
+const guideMaterial = new THREE.MeshBasicMaterial({ color: 0x3b82f6, depthTest: false, transparent: true })
+
+/** Thin lines across the view where a dragged box has snapped to an edge or a center (D135). */
+class Guides {
+  readonly group = new THREE.Group()
+  private readonly meshes: THREE.Mesh[] = []
+
+  set(lines: GuideLine[], view: { left: number; right: number; top: number; bottom: number }, pixel: number): void {
+    while (this.meshes.length < lines.length) {
+      const mesh = new THREE.Mesh(unitPlane, guideMaterial)
+      mesh.renderOrder = ORDER + 6
+      this.group.add(mesh)
+      this.meshes.push(mesh)
+    }
+    this.meshes.forEach((mesh, i) => {
+      const line = lines[i]
+      mesh.visible = !!line
+      if (!line) return
+      if (line.x !== undefined) {
+        mesh.position.set(line.x, (view.top + view.bottom) / 2, 0.9)
+        mesh.scale.set(LINE_PX * pixel, view.top - view.bottom, 1)
+      } else {
+        mesh.position.set((view.left + view.right) / 2, line.y ?? 0, 0.9)
+        mesh.scale.set(view.right - view.left, LINE_PX * pixel, 1)
+      }
+    })
+  }
+
+  count(): number {
+    return this.meshes.filter((m) => m.visible).length
+  }
+
+  hide(): void {
+    for (const mesh of this.meshes) mesh.visible = false
+  }
+}
+
+/** A vertical line at x, or a horizontal one at y, in world coordinates. */
+export interface GuideLine {
+  x?: number
+  y?: number
+}
+
 function ringGeometry(): THREE.BufferGeometry {
   const points: THREE.Vector3[] = []
   for (let i = 0; i < 96; i++) {
@@ -244,7 +289,10 @@ export class SceneRenderer {
   private readonly resizeHandles: Marker[] = []
   private readonly rotateHandle = new Marker(unitCircle)
   private readonly anchorCross = new Cross()
+  /** One diamond per anchored object on screen (D161). */
+  private readonly anchorMarks: Marker[] = []
   private readonly stem: THREE.Mesh
+  private readonly guides = new Guides()
   /** The handles shown right now, with their world positions, for picking. */
   private handles: { handle: Handle; x: number; y: number; radius: number }[] = []
   private readonly raycaster = new THREE.Raycaster()
@@ -264,7 +312,7 @@ export class SceneRenderer {
     this.stem = new THREE.Mesh(unitPlane, lightMaterial)
     this.stem.renderOrder = ORDER + 1
     this.stem.visible = false
-    this.group.add(this.gizmoOutline.group, this.rotateRing, this.rotateHandle.group, this.anchorCross.group, this.stem)
+    this.group.add(this.gizmoOutline.group, this.rotateRing, this.rotateHandle.group, this.anchorCross.group, this.stem, this.guides.group)
   }
 
   private outline(index: number): Outline {
@@ -283,7 +331,7 @@ export class SceneRenderer {
    * D124). A thin x marks the center of a group's box, which its next turn or scale happens around.
    * `pixel` is the world size of one screen pixel.
    */
-  update(model: SceneModel | null, time: number, selection: string[], mode: TransformMode = 'all', pixel = 1, axes = 0): void {
+  update(model: SceneModel | null, time: number, selection: string[], mode: TransformMode = 'all', pixel = 1, axes = 0, keepAliveFrom?: number, anchored: string[] = []): void {
     this.model = model
     this.time = time
     const seen = new Set<string>()
@@ -291,7 +339,7 @@ export class SceneRenderer {
       model.objects.forEach((obj, index) => {
         if (obj.className === GROUP) return
         seen.add(obj.name)
-        this.apply(this.ensure(obj), obj, model, time, index)
+        this.apply(this.ensure(obj), obj, model, time, index, keepAliveFrom)
       })
     }
     for (const [name, item] of this.items) {
@@ -300,6 +348,19 @@ export class SceneRenderer {
       disposeItem(item)
       this.items.delete(name)
     }
+
+    // An anchored object wears a small diamond at its center, so what a push cannot move is seen (D161).
+    const pinned = anchored.filter((n) => this.items.get(n)?.mesh.visible)
+    while (this.anchorMarks.length < pinned.length) {
+      const mark = new Marker(unitPlane)
+      this.group.add(mark.group)
+      this.anchorMarks.push(mark)
+    }
+    this.anchorMarks.forEach((mark, i) => {
+      const f = i < pinned.length ? this.frameOf(pinned[i]!) : null
+      if (f) mark.set(f.x, f.y, Math.PI / 4, ANCHOR_PX * pixel, pixel)
+      else mark.hide()
+    })
 
     const group = selection.length === 1 && model ? (model.objects.find((o) => o.name === selection[0] && o.className === GROUP) ?? null) : null
     const outlined = (group && model ? groupMembers(model, group.name) : selection).filter((n) => this.items.get(n)?.mesh.visible)
@@ -367,6 +428,19 @@ export class SceneRenderer {
       }
     }
     return best
+  }
+
+  /** Show the lines a drag has snapped to, across the view (D135). They stay until cleared. */
+  setGuides(lines: GuideLine[], view: { left: number; right: number; top: number; bottom: number }, pixel: number): void {
+    this.guides.set(lines, view, pixel)
+  }
+
+  clearGuides(): void {
+    this.guides.hide()
+  }
+
+  guideCount(): number {
+    return this.guides.count()
   }
 
   /** Where a visible object, or a group, is drawn right now, or null. */
@@ -479,10 +553,13 @@ export class SceneRenderer {
     return item
   }
 
-  private apply(item: Item, obj: SceneObject, model: SceneModel, time: number, index: number): void {
+  private apply(item: Item, obj: SceneObject, model: SceneModel, time: number, index: number, keepAliveFrom?: number): void {
     const mesh = item.mesh
-    // An object with zero opacity does not exist right now: nothing else about it is sampled.
-    if (!isVisibleAt(model, obj, time)) {
+    // Outside its life, or at zero opacity, an object is not drawn and nothing else about it is sampled. While a Shift
+    // gesture looks ahead, whatever was alive where it began stays drawn, so it can be dragged into an animation (D138).
+    const alive = existsAt(model, obj, time) || (keepAliveFrom !== undefined && existsAt(model, obj, keepAliveFrom))
+    const opacity = alive ? opacityAt(model, obj, time) : 0
+    if (opacity <= 0.0005) {
       mesh.visible = false
       return
     }
@@ -499,7 +576,7 @@ export class SceneRenderer {
     const pose = worldPose(model, obj, time)
     mesh.position.set(pose.x, pose.y, num('z'))
     mesh.rotation.z = (pose.rotation * Math.PI) / 180
-    material.opacity = Math.max(0, Math.min(1, num('opacity')))
+    material.opacity = opacity
 
     if (obj.className === 'Rect') {
       item.width = num('width')

@@ -13,8 +13,9 @@ my-animation/
   lib/              shared code (coming)
 ```
 
-Omitted keys take these values. The scene lasts from 0 to the end of its last action plus
-`hold`, seconds kept after the last action so the final state stays for export and looping.
+Omitted keys take these values. The content lasts from 0 to the end of its last action or
+lifetime; `hold`, seconds kept after that, holds the final frame on screen in playback and export:
+an object removed at the content end stays on through the hold.
 `background` is the color inside the frame, behind everything; exports with alpha leave it out.
 
 ## The scene file
@@ -59,9 +60,11 @@ Every object has these attributes, with these defaults:
 | `x`, `y`, `z` | 0 | center position; for text, the center of the text's box |
 | `rotation` | 0 | degrees, counterclockwise |
 | `scale` | 1 | size multiplier |
-| `opacity` | 1 | 0 means the object does not exist; 1 is solid |
+| `opacity` | 1 | 0 is invisible, 1 solid; see Lifetime and visibility |
 | `fill` | `'#ffffff'` | color, as `'#rrggbb'` |
 | `class` | `''` | class names separated by spaces, see Classes |
+| `at` | 0 | when the object begins, in seconds or a time reference; before it the object does not exist |
+| `until` | the end | when the object is removed; omitted, it lasts to the end of the content |
 
 | Class | Own attributes and defaults |
 |-------|-----------------------------|
@@ -72,11 +75,26 @@ Every object has these attributes, with these defaults:
 
 An omitted attribute takes its default. An unknown attribute is reported and ignored.
 
-## Visibility is opacity
+## Lifetime and visibility
 
-There is one visibility system. An object exists wherever its opacity is above zero, and nowhere
-else: at opacity 0 it is not drawn, not clickable, and costs nothing. To make an object appear
-later, give it `opacity: 0` in the cast and fade it in; to remove it, fade it to 0.
+An object exists from `at` until `until`, both in seconds or time references, and nowhere else:
+outside its life it is not drawn, not solid, and costs nothing. `at` is 0 when omitted and
+`until` the end of the content. Within its life, opacity is how it looks: an object exists while
+invisible at opacity 0, and a fade is a fade. An action outside the object's life does nothing
+and is reported. `box.start` and `box.end` are time references to when the object begins and when
+it is removed; without `until`, `box.end` is when its last action ends. An `until` at the very end
+of the content is the same as none: the object stays on through the hold.
+
+```js
+title = Text({
+  text: 'Hello',
+  at: 1,
+  until: 4,
+})
+```
+
+To make an object appear or vanish within its life, change its opacity: give it `opacity: 0` in
+the cast and fade it in, or fade it to 0.
 
 ```js
 dot = Circle({
@@ -110,7 +128,7 @@ An instant appearance is the same fade over one frame, such as `duration: 0.017`
 
 Timing keys, allowed in every action block:
 
-- `at`: the start, in seconds or a time reference. Omitted: right after the object's previous action, or 0 if there is none.
+- `at`: the start, in seconds or a time reference. Omitted: right after the object's previous action, or when the object begins if there is none.
 - `delay`: seconds added to the start, whatever `at` is.
 - `duration`: seconds. Omitted: 1.
 - `until`: an end time or time reference, instead of `duration`.
@@ -138,7 +156,9 @@ it.
 ## Time references
 
 Assign an action to a name to refer to its timing: `slide.start`, `slide.end`,
-`slide.progress(0.5)` for halfway. A reference must be declared above the line that uses it. A
+`slide.progress(0.5)` for halfway. A reference may name an object or action declared further
+down the file; the times are worked out once the whole file has run. Anything else about a name,
+calling it or reading a value from it, needs the declaration above. A
 named class action is one too: `rise.start` is when its first member starts, `rise.end` when the
 last finishes, `rise.progress(0.5)` halfway through.
 
@@ -233,8 +253,9 @@ pair.move({
 `move`, `rotate`, `scale`, and `to` work on a group as on any object and compose the same way: a
 turn and a move at the same time make one motion, the box moving while the members turn around
 its center. An object listed by several groups is carried by each in turn, in the order the
-groups are declared, and a group listed by another is carried by it. A group has no opacity,
-fill, or class of its own; its members keep theirs.
+groups are declared, and a group listed by another is carried by it. A group's `opacity`
+multiplies every member's, so `fade` on a group fades them as one; it has no fill or class of
+its own, and its members keep theirs.
 
 ## Links
 
@@ -249,7 +270,12 @@ Anything else, such as loops, helper functions, or computed values, runs and sho
 "code" and is not editable from the GUI. The app never reformats your lines; it replaces one
 literal, adds one line, or removes one statement together with the comment lines directly above
 it; a comment set apart by a blank line stays. While the file has an error, the GUI does not
-edit it.
+edit it. Edge snapping and collision are editing aids for drags in the preview; nothing of them is
+in the file. An animation written or retimed from the GUI widens its object's life to hold it,
+`at` earlier or `until` later, never the other way; a new object from the GUI begins at the
+playhead and lasts as long as the app's preferences say. Deleting an object's last fade from the
+GUI also removes the `opacity` written in its declaration, so it is back at 1. The Add object tool
+and the Add menus write a declaration with the kind's starting attributes, at the playhead.
 
 ## Rendering
 
@@ -258,7 +284,7 @@ terminal and without a window; while the app runs from source, `npm run render -
 `--preset` picks `h264`, `h265`, `webm`, `prores` (4444, with alpha), or `png` (a sequence,
 with alpha); `--quality` 1 to 100 for the compressed formats, default 75; `--out` names the file;
 `--from` and `--to` take a part, in seconds. The frames are
-the ones the app shows, at the project's size and rate, from 0 to the last action's end plus
+the ones the app shows, at the project's size and rate, from 0 to the end of the content plus
 `hold`. Progress prints on stdout, errors on stderr with exit code 1. See `docs/render.md`.
 
 ## Complete example

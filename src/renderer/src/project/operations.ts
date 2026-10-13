@@ -1,4 +1,4 @@
-import { applyEdits, scrollToPos } from '../code/editor'
+import { applyEdits, beginGesture, endGesture, scrollToPos } from '../code/editor'
 import { findDependents, type Dependent } from '../model/dependents'
 import { appendStatement, blockText, formatNumber, insertDeclaration, removeProp, removeStatements, setProp, type TextEdit } from '../model/edits'
 import { isMember } from '../model/evaluate'
@@ -8,7 +8,7 @@ import { memberBox } from '../model/sample'
 import { identifierEdits, nameProblem, replaceIdentifiers } from '../model/rename'
 import { currentWritten, definingAction, shownValue, valueAt, withWritten, writtenValues } from '../model/sample'
 import type { Action, ActionInfo, ClassAction, Range, SceneModel, SceneObject } from '../model/types'
-import { useStore, type ActionRef, type Clip, type ClipAction, type ClipObject, type Pin, type SelectionState, type Tool } from '../state/store'
+import { useStore, type ActionRef, type Clip, type ClipAction, type ClipObject, type Pin, type SelectionState, type ObjectKind } from '../state/store'
 
 /**
  * Every GUI gesture that changes the scene ends here as a minimal text edit (decision D24). The
@@ -115,7 +115,7 @@ export function resizedValues(className: string, base: Record<string, number>, f
 }
 
 /** Place a new object at a world position. Returns its name. */
-export function addObject(className: Exclude<Tool, 'select'>, x: number, y: number): string | null {
+export function addObject(className: ObjectKind, x: number, y: number, at = state().time): string | null {
   const { model } = state()
   if (!model) return null
   const name = uniqueName(className.toLowerCase())
@@ -123,6 +123,10 @@ export function addObject(className: Exclude<Tool, 'select'>, x: number, y: numb
   if (className === 'Rect') Object.assign(attrs, { width: 240, height: 140, fill: '#4f8cff' })
   if (className === 'Circle') Object.assign(attrs, { radius: 60, fill: '#f59e0b' })
   if (className === 'Text') Object.assign(attrs, { text: 'Text', fontSize: 48, fill: '#ffffff' })
+  // A new object begins where the playhead is and lasts as long as the preferences say (D138, D145).
+  if (at > 0) attrs['at'] = roundSeconds(at)
+  const length = useStore.getState().prefs.objectLength
+  if (length !== null) attrs['until'] = roundSeconds(at + length)
   applyEdits([insertDeclaration(model.lastDeclEnd, blockText(`${name} = ${className}`, attrs))], objectsSelected([name]))
   return name
 }
@@ -302,7 +306,30 @@ function pinnedSpan(pin: Pin, when: number, length = 1): { at: number; duration:
   return { at, duration: endHere ? roundSeconds(now - at) : wanted }
 }
 
-/** Write a new action pinned to a time (D103) and select it. Returns its end, or null. */
+/**
+ * The edits that widen an object's life to hold an animation from `start` to `end` (D146): `at`
+ * moves earlier and `until` later, measured from `origin` when a drag began, so a drag back inside
+ * lets the life return to what it was. A written time reference is left alone, as is an `until`
+ * that is omitted, and a group has no life to widen.
+ */
+export function coverEdits(source: string, obj: SceneObject, start: number, end: number, origin?: { at: number; until: number | null }): TextEdit[] {
+  if (!obj.decl || obj.className === GROUP) return []
+  const base = origin ?? { at: obj.at, until: obj.until }
+  const literal = (key: string): boolean => {
+    const prop = obj.decl!.props.find((p) => p.key === key)
+    return !prop || prop.kind === 'literal'
+  }
+  const edits: (TextEdit | null)[] = []
+  const at = roundSeconds(Math.min(base.at, Math.max(0, start)))
+  if (literal('at') && at !== roundSeconds(obj.at)) edits.push(at <= 0 ? removeProp(source, obj.decl, 'at') : setProp(source, obj.decl, 'at', at))
+  if (base.until !== null && obj.until !== null && literal('until')) {
+    const until = roundSeconds(Math.max(base.until, end))
+    if (until !== roundSeconds(obj.until)) edits.push(setProp(source, obj.decl, 'until', until))
+  }
+  return edits.filter((e): e is TextEdit => !!e)
+}
+
+/** Write a new action pinned to a time (D103) and select it; the object's life widens to hold it (D146). Returns its end, or null. */
 function appendTimed(name: string, verb: Verb, block: Record<string, AttrValue>, pin: Pin, when: number, length = 1): number | null {
   const { source, model } = state()
   const obj = model?.objects.find((o) => o.name === name)
@@ -311,8 +338,28 @@ function appendTimed(name: string, verb: Verb, block: Record<string, AttrValue>,
   Object.assign(block, pivotFor(model, obj, block, at))
   block['at'] = at
   block['duration'] = duration
-  applyEdits([appendStatement(source, blockText(`${name}.${verb}`, block))], actionSelected(name, obj.actions.length))
+  applyEdits([appendStatement(source, blockText(`${name}.${verb}`, block)), ...coverEdits(source, obj, at, at + duration)], actionSelected(name, obj.actions.length))
   return at + duration
+}
+
+/**
+ * The move written for something a drag pushed while making or editing an animation (D136): the
+ * same span as the drag's own, starting from where the thing is then, its destination set as the
+ * push goes on. Not selected, so the drag's own animation stays the one selected. Returns its index.
+ */
+export function appendPushedMove(name: string, at: number, duration: number): number | null {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj || !obj.decl) return null
+  const block: Record<string, AttrValue> = {}
+  for (const attr of ['x', 'y']) {
+    const value = valueAt(model, obj, attr, at)
+    block[attr] = roundAttr(attr, typeof value === 'number' ? value : 0)
+  }
+  block['at'] = roundSeconds(at)
+  block['duration'] = roundSeconds(duration)
+  applyEdits([appendStatement(source, blockText(`${name}.move`, block))])
+  return obj.actions.length
 }
 
 export function beginMove(name: string): boolean {
@@ -382,7 +429,7 @@ export function addAction(name: string, verb: Verb, time: number): void {
   Object.assign(attrs, pivotFor(model, obj, attrs, roundSeconds(time)))
   attrs['at'] = roundSeconds(time)
   attrs['duration'] = 1
-  applyEdits([appendStatement(source, blockText(`${name}.${verb}`, attrs))], actionSelected(name, obj.actions.length))
+  applyEdits([appendStatement(source, blockText(`${name}.${verb}`, attrs)), ...coverEdits(source, obj, roundSeconds(time), roundSeconds(time) + 1)], actionSelected(name, obj.actions.length))
 }
 
 /** Add an action for every member of a class at a time, written once as `all('name').verb` (D80). */
@@ -455,13 +502,21 @@ export function disappearClassHere(className: string, time: number, instant = fa
 }
 
 /** Move or resize a clip. `at` is the start without delay; `duration` the length. */
-export function setActionTiming(name: string, index: number, timing: { at?: number; duration?: number }): void {
+export function setActionTiming(name: string, index: number, timing: { at?: number; duration?: number; easeIn?: number; easeOut?: number }): void {
   const { source } = state()
-  const action = findObject(name)?.actions[index]
-  if (!action?.stmt || action.classAction) return
+  const obj = findObject(name)
+  const action = obj?.actions[index]
+  if (!obj || !action?.stmt || action.classAction) return
   const edits: TextEdit[] = []
   if (timing.at !== undefined) edits.push(setProp(source, action.stmt, 'at', roundSeconds(timing.at)))
   if (timing.duration !== undefined) edits.push(setProp(source, action.stmt, 'duration', roundSeconds(timing.duration)))
+  if (timing.easeIn !== undefined) edits.push(setProp(source, action.stmt, 'easeIn', roundSeconds(timing.easeIn)))
+  if (timing.easeOut !== undefined) edits.push(setProp(source, action.stmt, 'easeOut', roundSeconds(timing.easeOut)))
+  // The object's life widens to hold the animation where it now is (D146).
+  const delay = action.timing.delay ?? 0
+  const start = timing.at !== undefined ? timing.at + delay : action.start
+  const end = start + (timing.duration ?? action.end - action.start)
+  edits.push(...coverEdits(source, obj, start, end))
   applyEdits(edits)
 }
 
@@ -481,7 +536,9 @@ export function setClassActionTiming(id: number, timing: { at?: number; duration
  * every duration, `trimStart` moves the starts and keeps the ends. A class member retimes its
  * class statement, once. Durations never drop under one frame. Written time references are left
  * alone. With `from`, a snapshot of starts and ends taken when a drag began, the change is
- * measured from there, so a drag can keep sending its total.
+ * measured from there, so a drag can keep sending its total. The snapshot may also hold each
+ * object's life when the drag began, under `name:life` with `until` as `end` (Infinity when
+ * omitted): the life widens to hold the retimed actions, measured from there (D146).
  */
 export function retimeActions(refs: ActionRef[], change: { shift?: number; grow?: number; trimStart?: number }, from?: Record<string, { start: number; end: number }>): void {
   const { source, model, fps } = state()
@@ -489,6 +546,13 @@ export function retimeActions(refs: ActionRef[], change: { shift?: number; grow?
   const minimum = frameSeconds(fps)
   const edits: TextEdit[] = []
   const done = new Set<ActionInfo>()
+  /** The span each object's own retimed actions now take, for widening its life. */
+  const spans = new Map<SceneObject, { start: number; end: number }>()
+  const span = (action: Action, start: number, end: number): void => {
+    if (action.classAction) return
+    const prior = spans.get(action.object)
+    spans.set(action.object, prior ? { start: Math.min(prior.start, start), end: Math.max(prior.end, end) } : { start, end })
+  }
   for (const ref of refs) {
     const action = model.objects.find((o) => o.name === ref.object)?.actions[ref.index]
     const stmt = action?.classAction ? action.classAction.stmt : action?.stmt
@@ -506,14 +570,78 @@ export function retimeActions(refs: ActionRef[], change: { shift?: number; grow?
       const newDuration = Math.max(minimum, duration - change.trimStart)
       if (!untilProp) edits.push(setProp(source, stmt, 'duration', roundSeconds(newDuration)))
       if (!atLocked) edits.push(setProp(source, stmt, 'at', roundSeconds(Math.max(0, origin.end - newDuration - delay))))
+      if (!atLocked && !untilProp) span(action, Math.max(0, origin.end - newDuration), origin.end)
       continue
     }
     const move = change.shift ?? 0
     if ((move !== 0 || from) && !atLocked) edits.push(setProp(source, stmt, 'at', roundSeconds(Math.max(0, origin.start + move - delay))))
     const grow = change.grow ?? 0
     if ((grow !== 0 || (from && change.grow !== undefined)) && !untilProp) edits.push(setProp(source, stmt, 'duration', roundSeconds(Math.max(minimum, duration + grow))))
+    const newStart = atLocked ? origin.start : Math.max(0, origin.start + move)
+    span(action, newStart, newStart + (untilProp ? duration : Math.max(minimum, duration + grow)))
+  }
+  for (const [obj, s] of spans) {
+    const life = from?.[`${obj.name}:life`]
+    edits.push(...coverEdits(source, obj, s.start, s.end, life ? { at: life.start, until: Number.isFinite(life.end) ? life.end : null } : undefined))
   }
   applyEdits(edits)
+}
+
+/** An object's lifetime as written, `at` and `until` on its declaration (D138): 0 or null means the line goes. */
+export function setLifetime(name: string, life: { at?: number | null; until?: number | null }): void {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl || obj.className === GROUP) return
+  const edits: (TextEdit | null)[] = []
+  if (life.at !== undefined) edits.push(life.at === null || life.at <= 0 ? removeProp(source, obj.decl, 'at') : setProp(source, obj.decl, 'at', roundSeconds(life.at)))
+  if (life.until !== undefined) edits.push(life.until === null ? removeProp(source, obj.decl, 'until') : setProp(source, obj.decl, 'until', roundSeconds(life.until)))
+  applyEdits(edits.filter((e): e is TextEdit => !!e))
+}
+
+/** A snapshot of an object's timing when a drag begins, so the drag can keep sending its total (D139). */
+export interface LifetimeOrigin {
+  at: number
+  until: number | null
+  actions: Record<string, { start: number; end: number }>
+}
+
+/**
+ * Move an object in time (D139): its start, its end when set, and its own actions with a written
+ * `at` shift together, in one step; actions that start when the object does, or at a reference,
+ * follow on their own, and class actions stay with their class. With `edge: 'start'` the end stays
+ * where it is: the start edge is dragged and the actions keep their place against it.
+ */
+export function placeObject(name: string, at: number, edge: 'all' | 'start' = 'all', from?: LifetimeOrigin): void {
+  const { source, model, fps } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl || obj.className === GROUP) return
+  const origin: LifetimeOrigin = from ?? { at: obj.at, until: obj.until, actions: {} }
+  const target = Math.max(0, roundSeconds(at))
+  const shift = target - origin.at
+  const until = origin.until === null ? null : edge === 'all' ? origin.until + shift : Math.max(target + frameSeconds(fps), origin.until)
+  const edits: (TextEdit | null)[] = [target <= 0 ? removeProp(source, obj.decl, 'at') : setProp(source, obj.decl, 'at', target)]
+  if (until !== origin.until || from) edits.push(until === null ? removeProp(source, obj.decl, 'until') : setProp(source, obj.decl, 'until', roundSeconds(until)))
+  obj.actions.forEach((action, index) => {
+    const stmt = action.stmt
+    if (!stmt || action.classAction || action.overridden || action.codeDriven) return
+    const atProp = stmt.props.find((p) => p.key === 'at')
+    if (!atProp || atProp.kind !== 'literal') return
+    const start = origin.actions[`${name}:${index}`]?.start ?? action.start
+    edits.push(setProp(source, stmt, 'at', roundSeconds(Math.max(0, start + shift - (action.timing.delay ?? 0)))))
+  })
+  applyEdits(edits.filter((e): e is TextEdit => !!e))
+}
+
+/** Arrow keys with the timeline in use: the selected objects move by whole frames in time, as one step (D141). */
+export function nudgeObjectsInTime(names: string[], frames: number): void {
+  const { model, fps } = state()
+  if (!model) return
+  beginGesture()
+  for (const name of names) {
+    const obj = model.objects.find((o) => o.name === name)
+    if (obj?.decl && obj.className !== GROUP) placeObject(name, obj.at + frames / fps)
+  }
+  endGesture()
 }
 
 /** Arrow keys: move the selected actions by whole frames (D95). */
@@ -710,10 +838,23 @@ export function deleteActions(refs: ActionRef[], confirmed = false): void {
   if (stmts.size === 0) return
   const dependents = names.length > 0 ? findDependents(model, names, { objects: [], actions: removed }) : []
   const keep = [...new Set(refs.map((r) => r.object))]
+  // Deleting an object's last fade puts its written opacity back to the default, so nothing stays invisible or half shown by accident (D154).
+  const resets: TextEdit[] = []
+  for (const name of new Set(removed.map((r) => r.object))) {
+    const obj = model.objects.find((o) => o.name === name)
+    const prop = obj?.decl?.props.find((p) => p.key === 'opacity')
+    if (!obj?.decl || !prop || prop.kind !== 'literal') continue
+    const gone = new Set(removed.filter((r) => r.object === name).map((r) => r.index))
+    const wasFade = obj.actions.some((a, i) => gone.has(i) && 'opacity' in a.changes)
+    const fadesLeft = obj.actions.some((a, i) => !gone.has(i) && !a.overridden && 'opacity' in a.changes)
+    if (!wasFade || fadesLeft) continue
+    const reset = removeProp(source, obj.decl, 'opacity')
+    if (reset) resets.push(reset)
+  }
   const run = () => {
     const current = state()
     if (!current.model || current.model !== model) return deleteActions(refs, true)
-    applyEdits([...removeStatements(source, [...stmts].map((s) => s.range)), ...resolutionEdits(model, source, dependents)], objectsSelected(keep))
+    applyEdits([...removeStatements(source, [...stmts].map((s) => s.range)), ...resolutionEdits(model, source, dependents), ...resets], objectsSelected(keep))
   }
   if (confirmed) run()
   else confirmRemoval(labels.length === 1 ? `Delete ${labels[0]}?` : `Delete ${labels.length} actions?`, dependents, run)

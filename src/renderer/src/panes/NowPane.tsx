@@ -28,13 +28,15 @@ export function NowPane() {
       <div className="now-head">
         <span className="name">{obj.name}</span>
         <span className="dim">{obj.className}</span>
-        <span className={`dim ${visible ? '' : 'hidden-now'}`}>{visible ? 'visible' : 'not visible: opacity is 0'}</span>
+        <span className={`dim ${visible ? '' : 'hidden-now'}`}>
+          {visible ? 'visible' : time < obj.at ? `does not exist until ${obj.at} s` : obj.until !== null && time >= obj.until ? `does not exist after ${obj.until} s` : 'not visible: opacity is 0'}
+        </span>
       </div>
       <table>
         <tbody>
           {schema.attrs.map((attr) => {
-            // A group's unset pivot is the center of its members' box at time zero (D124).
-            const value = obj.className === GROUP && (attr.name === 'pivotX' || attr.name === 'pivotY') && !(attr.name in obj.attrs) ? basePivot(model, obj)[attr.name === 'pivotX' ? 'x' : 'y'] : valueAt(model, obj, attr.name, time)
+            // A group's unset pivot is the center of its members' box at time zero (D124); an object's lifetime shows as resolved (D138).
+            const value = obj.className === GROUP && (attr.name === 'pivotX' || attr.name === 'pivotY') && !(attr.name in obj.attrs) ? basePivot(model, obj)[attr.name === 'pivotX' ? 'x' : 'y'] : attr.name === 'at' ? obj.at : attr.name === 'until' ? (obj.until ?? 'end') : valueAt(model, obj, attr.name, time)
             const action = definingAction(obj, attr.name, time)
             const status = action
               ? `${action.name ? `${action.name} ` : ''}${action.verb}${action.timing.relative ? ' (relative)' : ''}${action.end > time ? ', in progress' : ', done'}`
@@ -48,7 +50,7 @@ export function NowPane() {
                 <td className="k">{attr.name}</td>
                 <td className="v mono">
                   {attr.type === 'color' && typeof value === 'string' && <span className="swatch" style={{ background: value }} />}
-                  {formatValue(value)}
+                  {attr.name === 'until' && obj.until === null ? 'end' : formatValue(value)}
                 </td>
                 <td className="s dim">{status}</td>
               </tr>

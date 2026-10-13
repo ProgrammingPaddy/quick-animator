@@ -3,7 +3,7 @@ import { defaultKeymap, history, indentLess, indentSelection, invertedEffects, r
 import { javascript } from '@codemirror/lang-javascript'
 import { bracketMatching, foldGutter, foldKeymap, indentOnInput, indentUnit, syntaxHighlighting } from '@codemirror/language'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
-import { EditorState, RangeSet, RangeSetBuilder, StateEffect, StateField, type Extension } from '@codemirror/state'
+import { Annotation, EditorState, RangeSet, RangeSetBuilder, StateEffect, StateField, Transaction, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, GutterMarker, WidgetType, drawSelection, gutterLineClass, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from '@codemirror/view'
 import type { TextEdit } from '../model/edits'
 import type { Range } from '../model/types'
@@ -45,9 +45,11 @@ const selectionHistory = invertedEffects.of((tr) => {
   for (const effect of tr.effects) if (effect.is(selectionEffect)) inverted.push(selectionEffect.of({ before: effect.value.after, after: effect.value.before }))
   return inverted
 })
-const setErrorLine = StateEffect.define<number | null>()
+/** The lines with problems: the error's, in red, and the warnings', in amber (D149). */
+const setProblemLines = StateEffect.define<{ errors: number[]; warnings: number[] }>()
 const setGhosts = StateEffect.define<GhostBlock[]>()
 const errorLine = Decoration.line({ class: 'cm-error-line' })
+const warningLine = Decoration.line({ class: 'cm-warning-line' })
 
 function linesIn(state: EditorState, range: Range): number[] {
   const from = Math.max(0, Math.min(range.from, state.doc.length))
@@ -83,28 +85,44 @@ const highlightField = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 })
 
+/** Each problem line once, errors first, within the document. */
+function problemLines(state: EditorState, value: { errors: number[]; warnings: number[] }): { line: number; kind: 'error' | 'warning' }[] {
+  const seen = new Set<number>()
+  const out: { line: number; kind: 'error' | 'warning' }[] = []
+  for (const kind of ['error', 'warning'] as const) {
+    for (const line of kind === 'error' ? value.errors : value.warnings) {
+      if (line < 1 || line > state.doc.lines || seen.has(line)) continue
+      seen.add(line)
+      out.push({ line, kind })
+    }
+  }
+  return out.sort((a, b) => a.line - b.line)
+}
+
 const errorField = StateField.define<DecorationSet>({
   create: () => Decoration.none,
   update(decorations, tr) {
     let next = decorations.map(tr.changes)
     for (const effect of tr.effects) {
-      if (!effect.is(setErrorLine)) continue
-      if (effect.value === null || effect.value < 1 || effect.value > tr.state.doc.lines) next = Decoration.none
-      else {
-        const line = tr.state.doc.line(effect.value)
-        const builder = new RangeSetBuilder<Decoration>()
-        builder.add(line.from, line.from, errorLine)
-        next = builder.finish()
+      if (!effect.is(setProblemLines)) continue
+      const builder = new RangeSetBuilder<Decoration>()
+      for (const { line, kind } of problemLines(tr.state, effect.value)) {
+        const from = tr.state.doc.line(line).from
+        builder.add(from, from, kind === 'error' ? errorLine : warningLine)
       }
+      next = builder.finish()
     }
     return next
   },
   provide: (field) => EditorView.decorations.from(field),
 })
 
-/** A red mark in the gutter on the error line. */
+/** A red mark in the gutter on the error line, an amber one on a warning's. */
 const errorGutterMarker = new (class extends GutterMarker {
   elementClass = 'cm-error-gutter'
+})()
+const warningGutterMarker = new (class extends GutterMarker {
+  elementClass = 'cm-warning-gutter'
 })()
 
 const errorGutterField = StateField.define<RangeSet<GutterMarker>>({
@@ -112,9 +130,11 @@ const errorGutterField = StateField.define<RangeSet<GutterMarker>>({
   update(markers, tr) {
     let next = markers.map(tr.changes)
     for (const effect of tr.effects) {
-      if (!effect.is(setErrorLine)) continue
-      if (effect.value === null || effect.value < 1 || effect.value > tr.state.doc.lines) next = RangeSet.empty
-      else next = RangeSet.of(errorGutterMarker.range(tr.state.doc.line(effect.value).from))
+      if (!effect.is(setProblemLines)) continue
+      next = RangeSet.of(
+        problemLines(tr.state, effect.value).map(({ line, kind }) => (kind === 'error' ? errorGutterMarker : warningGutterMarker).range(tr.state.doc.line(line).from)),
+        true,
+      )
     }
     return next
   },
@@ -211,7 +231,10 @@ function extensions(): Extension[] {
     highlightActiveLineGutter(),
     foldGutter(),
     drawSelection(),
-    history(),
+    history({
+      // Every edit of one gesture joins one undo step, whatever it touches, so a drag that pushes other things undoes as one (D22, D136).
+      joinToEvent: (tr, adjacent) => adjacent || (tr.annotation(gestureAnnotation) !== undefined && tr.annotation(gestureAnnotation) === lastGesture),
+    }),
     selectionHistory,
     indentUnit.of('  '),
     indentOnInput(),
@@ -299,6 +322,23 @@ export function setEditorDoc(text: string): void {
   }
 }
 
+/** Which gesture a transaction belongs to, so the history joins a gesture's edits (D22). */
+const gestureAnnotation = Annotation.define<number>()
+let gestureCount = 0
+let openGesture: number | null = null
+let lastGesture: number | null = null
+let gestureTime = 0
+
+/** Start a gesture: every edit until `endGesture` joins one undo step, whatever it touches. */
+export function beginGesture(): void {
+  openGesture = ++gestureCount
+  gestureTime = Date.now()
+}
+
+export function endGesture(): void {
+  openGesture = null
+}
+
 /**
  * Apply GUI edits as one editor transaction, so the change callback and the history see them.
  * With `select`, the selection changes in the same step, so undo restores both together.
@@ -306,7 +346,10 @@ export function setEditorDoc(text: string): void {
 export function applyEdits(edits: TextEdit[], select?: SelectionState): void {
   if (!view || edits.length === 0) return
   const effects = select && getSelection ? [selectionEffect.of({ before: getSelection(), after: select })] : []
-  view.dispatch({ changes: edits.map((e) => ({ from: e.from, to: e.to, insert: e.insert })), effects })
+  // A gesture's edits carry its number and one time, so the history's pause between groups never splits a long drag.
+  const annotations = openGesture !== null ? [gestureAnnotation.of(openGesture), Transaction.time.of(gestureTime)] : []
+  view.dispatch({ changes: edits.map((e) => ({ from: e.from, to: e.to, insert: e.insert })), effects, annotations })
+  lastGesture = openGesture
 }
 
 /** Record a selection change from the panes as a step of the history (D90). */
@@ -319,8 +362,9 @@ export function highlightRanges(spec: HighlightSpec): void {
   view?.dispatch({ effects: setHighlights.of(spec) })
 }
 
-export function markErrorLine(line: number | null): void {
-  view?.dispatch({ effects: setErrorLine.of(line) })
+/** Mark the error's line and the warnings' lines (D149). */
+export function markProblemLines(errors: number[], warnings: number[]): void {
+  view?.dispatch({ effects: setProblemLines.of({ errors, warnings }) })
 }
 
 export function setGhostLines(blocks: GhostBlock[]): void {
@@ -343,7 +387,8 @@ export function placeCursor(from: number, to = from): void {
   const length = view.state.doc.length
   const anchor = Math.max(0, Math.min(from, length))
   const head = Math.max(0, Math.min(to, length))
-  view.dispatch({ selection: { anchor, head }, effects: EditorView.scrollIntoView(anchor, { y: 'center' }) })
+  // Placing the cursor is not an edit, and must not split the undo step of a gesture that selected something.
+  view.dispatch({ selection: { anchor, head }, effects: EditorView.scrollIntoView(anchor, { y: 'center' }), annotations: Transaction.addToHistory.of(false) })
   view.focus()
 }
 

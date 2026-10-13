@@ -2,7 +2,7 @@ import type { FileChange, ProjectData } from '../../../shared/api'
 import { createEditor, recordSelection, resetEditorDoc, setEditorDoc } from '../code/editor'
 import { evaluateScene } from '../model/evaluate'
 import type { SceneModel } from '../model/types'
-import { applySelection, currentSelection, setSelectionSink, useStore, type ProjectSettings } from '../state/store'
+import { applySelection, currentSelection, loadAnchored, loadSoft, setSelectionSink, useStore, type ProjectSettings } from '../state/store'
 import { SAMPLE_SCENE } from './sample'
 
 /** Where a new version of the scene text came from. */
@@ -15,9 +15,16 @@ let lastWritten: string | null = null
 let unsubscribeWatch: (() => void) | null = null
 
 /** Where the content ends: the last action plus the hold, or the hold alone, or nothing. */
-export function contentEndFor(model: SceneModel | null, settings: ProjectSettings): number | null {
-  if (!model || model.lastActionEnd === null) return settings.hold > 0 ? settings.hold : null
-  return model.lastActionEnd + settings.hold
+export function contentEndFor(model: SceneModel | null): number | null {
+  // The last action's end, or the last `until` an object names, whichever is later (D138). The hold is not part of it (D143).
+  return model?.contentEnd ?? null
+}
+
+/** Where playback and export stop: the content end plus the hold that keeps the final frame (D54). */
+export function playbackEndFor(model: SceneModel | null, settings: ProjectSettings): number | null {
+  const end = contentEndFor(model)
+  if (end === null) return settings.hold > 0 ? settings.hold : null
+  return end + settings.hold
 }
 
 /**
@@ -28,7 +35,7 @@ export function commitSource(source: string, origin: SourceOrigin): void {
   const { model, error } = evaluateScene(source)
   useStore.setState((s) => {
     const next = model ?? s.model
-    return { source, model: next, error, contentEnd: contentEndFor(next, s.settings) }
+    return { source, model: next, error, contentEnd: contentEndFor(next), playbackEnd: playbackEndFor(next, s.settings) }
   })
   if (origin === 'load') {
     cancelSave()
@@ -62,7 +69,7 @@ function scheduleSave(source: string): void {
 export function updateSettings(partial: Partial<ProjectSettings>): void {
   const s = useStore.getState()
   const settings = { ...s.settings, ...partial }
-  useStore.setState({ settings, contentEnd: contentEndFor(s.model, settings) })
+  useStore.setState({ settings, contentEnd: contentEndFor(s.model), playbackEnd: playbackEndFor(s.model, settings) })
   const project = s.project
   if (!project || project.inMemory || !window.api) return
   if (settingsTimer) clearTimeout(settingsTimer)
@@ -84,6 +91,8 @@ export function applyProject(data: ProjectData): void {
     playing: false,
     tool: 'select',
     contextMenu: null,
+    soft: loadSoft(data.path),
+    anchored: loadAnchored(data.path),
   })
   commitSource(scene?.source ?? '', 'load')
 }

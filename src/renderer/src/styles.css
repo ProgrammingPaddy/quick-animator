@@ -8,6 +8,7 @@
   --accent: #3b82f6;
   --accent-soft: rgba(59, 130, 246, 0.18);
   --playhead: #ef5a3c;
+  --warning: #f59e0b;
   --error: #ef4444;
   --fg: #d8d8d8;
   --fg-dim: #8c8c8c;
@@ -1556,7 +1557,7 @@ button.chevron:hover {
 }
 
 .opacity-handle.start {
-  cursor: ew-resize;
+  cursor: move;
 }
 
 .opacity-handle.end {
@@ -1571,13 +1572,64 @@ button.chevron:hover {
 
 .code-warning {
   flex: none;
+  width: 100%;
   padding: 6px 10px;
   border-top: 1px solid var(--border);
   background: rgba(245, 158, 11, 0.1);
   color: #f3c77b;
   font-family: var(--font-mono);
   font-size: 12px;
+  text-align: left;
   user-select: text;
+}
+
+.code-warning:hover:not(:disabled) {
+  background: rgba(245, 158, 11, 0.18);
+}
+
+.code-warning:disabled {
+  cursor: default;
+}
+
+.code .cm-warning-line {
+  background: rgba(245, 158, 11, 0.14);
+}
+
+.code .cm-gutterElement.cm-warning-gutter {
+  box-shadow: inset 3px 0 0 var(--warning);
+  color: var(--warning);
+}
+
+.overview-mark.warning {
+  right: 0;
+  width: 12px;
+  opacity: 1;
+}
+
+/* Preferences (D145) */
+.prefs-dialog {
+  width: 420px;
+}
+
+.prefs-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 14px;
+  align-items: center;
+  margin: 10px 0 4px;
+}
+
+.prefs-grid .row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.prefs-grid label.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
 }
 
 /* Fifth review: marquee, snap, handles, overrides, reorder, classes dialog */
@@ -1927,4 +1979,257 @@ button.chevron:hover {
   font: inherit;
   cursor: pointer;
   text-decoration: underline;
+}
+
+.view-switch {
+  display: inline-flex;
+  gap: 2px;
+  margin-right: 6px;
+}
+
+.tl-row.lane .tl-row-header {
+  background: var(--bg-pane);
+}
+
+.oclip {
+  position: absolute;
+  top: 4px;
+  border-radius: 5px;
+  background: rgba(59, 130, 246, 0.14);
+  border: 1px solid rgba(59, 130, 246, 0.55);
+  color: #ffffff;
+  font-size: 11px;
+  /* Whatever an animation does past the object's life is cut off here (D144). */
+  overflow: hidden;
+}
+
+.oclip.group {
+  background: rgba(168, 85, 247, 0.12);
+  border-color: rgba(168, 85, 247, 0.5);
+}
+
+.oclip.locked {
+  border-style: dashed;
+  opacity: 0.7;
+}
+
+.oclip.selected {
+  border-color: #ffffff;
+  box-shadow: inset 0 0 0 1px #ffffff;
+}
+
+.oclip-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 16px;
+  padding: 0 8px;
+  border-radius: 4px 4px 0 0;
+  background: rgba(59, 130, 246, 0.4);
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: grab;
+}
+
+.oclip.group .oclip-title {
+  background: rgba(168, 85, 247, 0.4);
+}
+
+.oclip.locked .oclip-title {
+  cursor: default;
+}
+
+.oclip-title .name {
+  font-weight: 600;
+}
+
+.oclip-title .kind {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.oclip-body {
+  position: relative;
+}
+
+.oclip-opacity {
+  position: relative;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.oclip-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: ew-resize;
+  z-index: 2;
+}
+
+.oclip-edge.left {
+  left: 0;
+}
+
+.oclip-edge.right {
+  right: 0;
+}
+
+.oclip-edge:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+/* An animation of a group carrying the object, shown inside the member's clip (D144). */
+.clip.carried {
+  background-image: repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.22) 0 5px, transparent 5px 10px);
+  outline: 1px dashed rgba(255, 255, 255, 0.55);
+  outline-offset: -1px;
+}
+
+.clip .ident.group {
+  background: rgba(168, 85, 247, 0.55);
+}
+
+/* A collapsed clip shows each animation as a thin line (D153). */
+.clip.thin {
+  height: 3px;
+  min-width: 2px;
+  border-radius: 1px;
+  padding: 0;
+  cursor: default;
+}
+
+.clip.thin.selected {
+  box-shadow: 0 0 0 1px #ffffff;
+}
+
+.oclip.collapsed .oclip-title {
+  border-radius: 4px;
+}
+
+.oclip.collapsed .oclip-body {
+  pointer-events: none;
+}
+
+/* The lanes of the objects view, Objects and Groups: clips stack inside by drawing order (D152). */
+.tl-row-header.lane-header {
+  align-items: flex-start;
+  justify-content: space-between;
+  padding-top: 8px;
+  color: var(--fg-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tl-row-header.lane-header .fold-all {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -2px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 10px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.tl-row-header.lane-header .fold-all:hover {
+  background: var(--bg-raised);
+  color: var(--fg);
+}
+
+/* A class as a clip in the Classes lane (D164), and what an object's title says about its classes and its anchor. */
+.oclip.class {
+  background: rgba(20, 184, 166, 0.12);
+  border-color: rgba(20, 184, 166, 0.5);
+}
+
+.oclip.class .oclip-title {
+  background: rgba(20, 184, 166, 0.38);
+  cursor: default;
+}
+
+.oclip-title .classes {
+  color: rgba(94, 234, 212, 0.9);
+}
+
+.oclip-title .anchored {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(245, 158, 11, 0.35);
+  color: #fde68a;
+}
+
+.badge.anchor {
+  background: rgba(245, 158, 11, 0.25);
+  color: #fde68a;
+}
+
+/* Clips settle into their levels; the one being dragged follows the pointer, above the rest (D165). */
+.oclip {
+  transition: top 120ms ease;
+}
+
+.oclip.dragging {
+  z-index: 6;
+  transition: none;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.55);
+}
+
+.oclip.dragging .oclip-title {
+  cursor: grabbing;
+}
+
+/* The arrow in a clip's corner collapses it (D153). */
+.oclip-fold {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-left: -5px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 9px;
+  line-height: 14px;
+  cursor: pointer;
+}
+
+.oclip-fold:hover {
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+}
+
+.absent {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.09) 0 6px, transparent 6px 12px);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.absent-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: ew-resize;
+  pointer-events: auto;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.absent-edge.right {
+  right: 0;
+}
+
+.absent-edge.left {
+  left: 0;
+}
+
+.absent-edge:hover {
+  background: rgba(255, 255, 255, 0.4);
 }

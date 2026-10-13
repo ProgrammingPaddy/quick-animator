@@ -4,11 +4,12 @@ import { ClassesDialogLayer } from './components/ClassesDialog'
 import { ContextMenuLayer } from './components/ContextMenu'
 import { DialogLayer } from './components/Dialog'
 import { ExportDialogLayer } from './components/ExportDialog'
+import { PreferencesDialogLayer } from './components/PreferencesDialog'
 import { HelpOverlay } from './components/HelpOverlay'
 import { Layout } from './Layout'
 import { runHeadless } from './export/headless'
 import { initProject } from './project/controller'
-import { copySelection, cutSelection, deleteActions, deleteObjects, duplicateObjects, nudgeActions, nudgeObjects, pasteClipboard, requestRename } from './project/operations'
+import { copySelection, cutSelection, deleteActions, deleteObjects, duplicateObjects, nudgeActions, nudgeObjects, nudgeObjectsInTime, pasteClipboard, requestRename } from './project/operations'
 import { useClock } from './state/clock'
 import { useStore } from './state/store'
 
@@ -25,6 +26,17 @@ export function App() {
     initProject()
     // Started with a render command, the window renders and the app exits (R111).
     void runHeadless()
+  }, [])
+
+  useEffect(() => {
+    // The pane the pointer last went down in decides what the arrow keys move (D141).
+    const onPointerDown = (e: PointerEvent) => {
+      const pane = e.target instanceof Element ? e.target.closest('.preview, .timeline, .objects, .code-pane, .now-values') : null
+      const name = !pane ? null : pane.classList.contains('preview') ? 'preview' : pane.classList.contains('timeline') ? 'timeline' : pane.classList.contains('objects') ? 'objects' : pane.classList.contains('code-pane') ? 'code' : 'now'
+      useStore.getState().setActivePane(name)
+    }
+    window.addEventListener('pointerdown', onPointerDown, true)
+    return () => window.removeEventListener('pointerdown', onPointerDown, true)
   }, [])
 
   useEffect(() => {
@@ -49,6 +61,11 @@ export function App() {
       if (ctrl && e.code === 'KeyE') {
         e.preventDefault()
         if (window.api) store.setExportOpen(true)
+        return
+      }
+      if (ctrl && e.code === 'Comma') {
+        e.preventDefault()
+        store.setPrefsOpen(true)
         return
       }
       if (ctrl && (e.code === 'KeyZ' || e.code === 'KeyY')) {
@@ -86,8 +103,11 @@ export function App() {
         e.preventDefault()
         if (selectedActions.length > 0) {
           if (arrow[0] !== 0) nudgeActions(selectedActions, arrow[0]!)
-        } else if (selection.length > 0) nudgeObjects(selection, arrow[0]!, arrow[1]!)
-        else if (arrow[0] !== 0) stepFrames(arrow[0]! * (e.shiftKey ? 10 : 1))
+        } else if (selection.length > 0) {
+          // In the preview the arrows move the objects in space; anywhere else, left and right move them in time (D141).
+          if (store.activePane === 'preview') nudgeObjects(selection, arrow[0]!, arrow[1]!)
+          else if (arrow[0] !== 0) nudgeObjectsInTime(selection, arrow[0]! * (e.shiftKey ? 10 : 1))
+        } else if (arrow[0] !== 0) stepFrames(arrow[0]! * (e.shiftKey ? 10 : 1))
         return
       }
       switch (e.code) {
@@ -146,6 +166,7 @@ export function App() {
       <ContextMenuLayer />
       <DialogLayer />
       <ExportDialogLayer />
+      <PreferencesDialogLayer />
       <ClassesDialogLayer />
       <HelpOverlay />
     </>

@@ -33,6 +33,8 @@ const common: AttrSchema[] = [
   { name: 'opacity', type: 'number', default: 1, doc: '0 is invisible and costs nothing, 1 is solid. This is the one visibility control (D52).', animatable: true },
   { name: 'fill', type: 'color', default: '#ffffff', doc: 'Fill color, as #rrggbb.', animatable: true },
   { name: 'class', type: 'string', default: '', doc: "Class names separated by spaces, like CSS classes. An action on all('name') applies to every member (D80).", animatable: false },
+  { name: 'at', type: 'number', default: 0, doc: 'When the object begins, in seconds or a time reference such as other.end. Before it, the object does not exist (D138).', animatable: false },
+  { name: 'until', type: 'number', default: 0, doc: 'When the object is removed, in seconds or a time reference. Unset, it lasts to the end of the content.', animatable: false },
 ]
 
 export const classes: Record<string, ClassSchema> = {
@@ -70,6 +72,7 @@ export const classes: Record<string, ClassSchema> = {
     doc: "Several objects that move, turn, and scale as one. Members keep their own values; the group's own values and its animations act on top (D124).",
     attrs: [
       { name: 'members', type: 'string', default: '', doc: 'Member names separated by spaces: objects, classes (every member of the class), or other groups.', animatable: false },
+      { name: 'opacity', type: 'number', default: 1, doc: "Multiplies every member's opacity, so the group fades as one (D150).", animatable: true },
       { name: 'x', type: 'number', default: 0, doc: "How far the group's moves have shifted its members, in pixels to the right.", animatable: true },
       { name: 'y', type: 'number', default: 0, doc: "How far the group's moves have shifted its members, in pixels up.", animatable: true },
       { name: 'rotation', type: 'number', default: 0, doc: "Degrees the group has turned its members: this value around its pivot, then each turn around the center of their box when that turn began.", animatable: true },

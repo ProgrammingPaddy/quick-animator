@@ -61,7 +61,9 @@ The app runs the file inside a scope that already holds every class (`Rect`, `Ci
 and so on): a `with` block over a Proxy, so a bare `smoke = Circle({ ... })` assigns through the
 scope and names the object, no `const` needed (D48). `const` and `let` are accepted; the app
 blanks the keyword before running so the name still passes through the scope. Each evaluation
-starts with a fresh registry, and running the file fills it with objects and actions. The library
+starts with a fresh registry, and running the file fills it with objects and actions. A name the
+file uses before declaring it gets a stand-in whose `start`, `end`, and `progress` are looked up
+once the whole file has run (D148); any other use of it is an error at that line. The library
 file will be evaluated first, and what it declares will be available to every scene the same way.
 
 Shipped type definitions declare the same names as globals, so the editor autocompletes them.
@@ -105,8 +107,12 @@ the handle hit or the mode, and a flavor, plain, timed (Shift), or destination (
 selected). A Shift gesture looks ahead to the proposed end before the drag (D103) and, in Chain
 mode, from the end of the last animation it made (D127). Resize works in the object's own frame: the far side stays put, corners keep the
 proportions, and the result is factors applied to the dimension attributes, so the same math
-serves Rect, Circle, and Text. Snapping rounds the value being written. A drag on empty space is a
-marquee.
+serves Rect, Circle, and Text. A move first aligns the dragged extents to other objects' extents
+and the frame within reach (D135), then rounds to the grid where nothing was in reach (D91), then
+walks the dragged outlines toward the pointer in short steps, undoing each step's overlaps with
+other outlines by the smallest separating shift, stopping or pushing (D136, `preview/collide.ts`:
+a separating-axis test on convex outlines and a step loop); the renderer draws the guides a snap
+holds. A drag on empty space is a marquee. With an animation selected, a plain drag sets its start state and a Shift-drag its end state, the playhead at the start or the end; Shift held with one selected jumps to its end, and nothing new is made (D157).
 
 What a drag writes (D122): the sampler evaluates each attribute on its own: the latest absolute
 action that has started defines it, blending from where it was, and every relative change adds on
@@ -189,9 +195,10 @@ slow push-in, is an animation of the scene camera.
 ## Time (D41)
 
 - Time in code is seconds. The timeline shows seconds and frames and snaps to frames.
-- The timeline has no fixed length. The content end is the end of the last action plus the hold from `project.json`, dragged as a marker on the ruler (D54). Playback stops or loops there, and the export range defaults to it. The wheel zooms the time axis around the cursor; Shift and the wheel scroll. Drags snap to whole seconds and to other actions when snapping is on, and place exactly when it is off (D64); the ruler then snaps the playhead the same way and to every fifth frame, and to any frame when snapping is off (D128). The view pages forward while playing.
+- The timeline has no fixed length. The content end is the last action's end or the latest `until` (D54, D143), marked on the ruler; the hold from `project.json`, set in Preferences, keeps the final frame after it: an object removed at the content end stays on through the hold (D155), playback stops or loops at the end plus the hold, and the export range defaults to that. The wheel zooms the time axis around the cursor; Shift and the wheel scroll. Drags snap to whole seconds and to other actions when snapping is on, and place exactly when it is off (D64); the ruler then snaps the playhead the same way and to every fifth frame, and to any frame when snapping is off (D128). The view pages forward while playing.
 - A frame is a pure function of time (R67). Expressions receive the time and read other objects' values at that time. There is no per-frame mutable state.
 - Export samples the frame times exactly: frame i is the scene at (first + i) / fps (D134). Preview samples the display clock and may skip frames.
+- Objects live from `at` to `until` (D138), resolved with the actions, time references included; an animation written or retimed from the GUI widens the life to hold it (D146). The timeline has two views of one model (D139, D140): Objects has three lanes, Objects, Groups, and Classes, where every life is a clip with its animations and opacity inside, cut off at the clip's edges, stacked by drawing order so whatever is higher up appears on top, the order changing as a clip dragged up or down passes the others, the clip following the pointer (D144, D152, D153, D160, D164, D165); List keeps one row per object with the hatched stretches where it does not exist. Both drag the same operations: place the object, moving its written starts with it, set `until`, or move its declaration.
 
 ## Undo
 
@@ -208,8 +215,9 @@ Objects created in loops get generated names and are code-driven.
 ## Errors
 
 A parse or evaluate failure keeps the last good model on screen. The error is shown at its line
-in the code pane and in a status line. An expression that throws at a given time holds its last
-value for that frame and is reported once.
+in the code pane and in a status line; warnings, each tied to the statement that raised it, are
+listed the same way with their lines and marked in the editor (D149). An expression that throws
+at a given time holds its last value for that frame and is reported once.
 
 ## Files and assets (D44)
 

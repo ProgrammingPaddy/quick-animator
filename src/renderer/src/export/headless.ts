@@ -28,7 +28,7 @@ export async function runHeadless(): Promise<void> {
     if (s.error) return finish({ ok: false, message: `${s.error.line ? `line ${s.error.line}: ` : ''}${s.error.message}` })
     if (!s.model) return finish({ ok: false, message: 'the project has no scene' })
     const from = job.from ?? 0
-    const to = job.to ?? s.contentEnd ?? 0
+    const to = job.to ?? s.playbackEnd ?? 0
     if (to < from) return finish({ ok: false, message: `--to ${to} comes before --from ${from}` })
     finish(await runExport(s.model, s.settings, { from, to }, job.preset, job.quality, job.out, (p) => api.render.progress(p.frame, p.total), () => false))
   } catch (err) {

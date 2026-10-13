@@ -14,8 +14,8 @@ npm run render -- <project> [options]
 ```
 
 `<project>` is the folder that holds `project.json`. The width, height, and frame rate come from
-that file, and so does the length: from zero to the end of the last action plus the project's
-`hold`.
+that file, and so does the length: from zero to the end of the content, the last action or
+lifetime, plus the project's `hold`.
 
 | Option | Meaning | Default |
 |--------|---------|---------|

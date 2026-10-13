@@ -3,12 +3,11 @@ import { showMenu } from '../components/ContextMenu'
 import { actionIdents, classActionIdents, classGroups, classKey, classSpan, overrideOf, typeGroups, type ClassGroup } from '../model/groups'
 import { GROUP, PIVOT_PARAMS, VERB_COLORS } from '../model/registry'
 import type { Action, SceneObject } from '../model/types'
-import { addObject, deleteAction, deleteClass, deleteClassAction, deleteObjects, duplicateObjects, jumpToAction, jumpToClass, jumpToObject, materializeClassAction, overrideClassAction, removeFromClass, requestClasses, requestRename, selectClass, selectClassAction, ungroup } from '../project/operations'
-import { isActionSelected, useStore, type Tool } from '../state/store'
+import { addObject, deleteAction, deleteClass, deleteClassAction, deleteObjects, duplicateObjects, jumpToAction, jumpToClass, jumpToObject, materializeClassAction, overrideClassAction, removeFromClass, requestClasses, requestRename, selectClass, selectClassAction, ungroup, setLifetime } from '../project/operations'
+import { isActionSelected, OBJECT_KINDS, useStore } from '../state/store'
 import { timecode } from '../state/time'
 
 const GLYPHS: Record<string, string> = { Rect: '▭', Circle: '○', Text: 'T', Group: '⊞' }
-const TOOLS: Exclude<Tool, 'select'>[] = ['Rect', 'Circle', 'Text']
 
 function actionLabel(action: Action): string {
   const what = action.verb === 'to' ? Object.keys(action.changes).filter((k) => !(PIVOT_PARAMS as readonly string[]).includes(k)).join(', ') || 'to' : action.verb
@@ -37,6 +36,7 @@ export function ObjectPane() {
   const model = useStore((s) => s.model)
   const fps = useStore((s) => s.settings.fps)
   const selection = useStore((s) => s.selection)
+  const anchored = useStore((s) => s.anchored)
   const selectedActions = useStore((s) => s.selectedActions)
   const collapsed = useStore((s) => s.collapsed.objects)
   const select = useStore((s) => s.select)
@@ -79,16 +79,17 @@ export function ObjectPane() {
     if (obj.className === GROUP && !many) {
       showMenu(e, [
         { label: 'Jump to code', run: () => jumpToObject(obj.name) },
-        { label: 'Rename…', run: () => requestRename({ object: obj.name }) },
+        { label: 'Rename', run: () => requestRename({ object: obj.name }) },
         { label: 'Ungroup', run: () => ungroup(obj.name) },
       ])
       return
     }
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToObject(obj.name) },
-      ...(many ? [] : [{ label: 'Rename…', run: () => requestRename({ object: obj.name }) }]),
-      { label: 'Classes…', run: () => requestClasses(targets) },
+      ...(many ? [] : [{ label: 'Rename', run: () => requestRename({ object: obj.name }) }]),
+      { label: 'Classes', run: () => requestClasses(targets) },
       { label: many ? `Duplicate ${targets.length} objects` : 'Duplicate', run: () => duplicateObjects(targets) },
+      ...(many ? [] : [{ label: 'End at', keyword: timecode(s.time, s.settings.fps), run: () => setLifetime(obj.name, { until: useStore.getState().time }) }]),
       { label: many ? `Delete ${targets.length} objects` : 'Delete object', run: () => deleteObjects(targets), danger: true },
     ])
   }
@@ -118,7 +119,7 @@ export function ObjectPane() {
     }
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToAction(obj.name, index) },
-      { label: action?.name ? 'Rename…' : 'Name…', run: () => requestRename({ object: obj.name, index }) },
+      { label: action?.name ? 'Rename' : 'Name', run: () => requestRename({ object: obj.name, index }) },
       { label: 'Delete action', run: () => deleteAction(obj.name, index), danger: true },
     ])
   }
@@ -140,7 +141,7 @@ export function ObjectPane() {
     selectClassAction(classAction)
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToClass(group.className) },
-      { label: classAction.name ? 'Rename…' : 'Name…', run: () => requestRename({ classAction: id }) },
+      { label: classAction.name ? 'Rename' : 'Name', run: () => requestRename({ classAction: id }) },
       { label: 'Delete for every member', run: () => deleteClassAction(id), danger: true },
     ])
   }
@@ -150,7 +151,7 @@ export function ObjectPane() {
     if (!(e.target instanceof Element) || !e.target.matches('.object-list, .empty, .group-head')) return
     showMenu(
       e,
-      TOOLS.map((t) => ({ label: 'Add', keyword: t, run: () => addObject(t, 0, 0) })),
+      [{ label: 'Add', children: OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, 0, 0) })) }],
     )
   }
 
@@ -180,6 +181,11 @@ export function ObjectPane() {
           <span className="dim">{obj.className}</span>
           {obj.className === GROUP && <span className="dim members">{(model?.groups.get(obj.name) ?? []).join(' · ')}</span>}
           {obj.codeDriven && <span className="badge">code</span>}
+          {anchored.includes(obj.name) && (
+            <span className="badge anchor" title="Anchored: a push never moves it (D136)">
+              anchored
+            </span>
+          )}
         </div>
         {obj.actions.length > 0 && !folded && (
           <ul className="action-list">

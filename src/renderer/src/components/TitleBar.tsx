@@ -1,7 +1,7 @@
 import { editorRedo, editorUndo } from '../code/editor'
 import { newProject, pickProject } from '../project/controller'
 import { useStore } from '../state/store'
-import icon from '../../../../resources/icon.svg'
+import icon from '../../../../resources/icon-mono.svg'
 
 /**
  * The top of the window, in place of the system title bar and the menu (D108): the app's own
@@ -12,6 +12,7 @@ export function TitleBar() {
   const project = useStore((s) => s.project)
   const setHelp = useStore((s) => s.setHelp)
   const setExportOpen = useStore((s) => s.setExportOpen)
+  const setPrefsOpen = useStore((s) => s.setPrefsOpen)
   return (
     <div className="titlebar">
       <div className="titlebar-actions">
@@ -28,10 +29,13 @@ export function TitleBar() {
             </button>
           </>
         )}
+        <button onClick={() => setPrefsOpen(true)} title="Preferences: how long new objects last, and how long the final frame holds (Ctrl+,)">
+          Preferences
+        </button>
         <button onClick={editorUndo} title="Undo (Ctrl+Z)">
           Undo
         </button>
-        <button onClick={editorRedo} title="Redo (Ctrl+Y)">
+        <button onClick={editorRedo} title="Redo (Ctrl+Shift+Z)">
           Redo
         </button>
         <button onClick={() => setHelp(true)} title="Help (F1)">

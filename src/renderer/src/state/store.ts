@@ -14,8 +14,12 @@ export interface ProjectSettings {
   background: string
 }
 
-/** What a click in the preview does: select, or place a new object of a class. */
-export type Tool = 'select' | 'Rect' | 'Circle' | 'Text'
+/** The kinds of object the GUI adds. */
+export type ObjectKind = 'Rect' | 'Circle' | 'Text'
+export const OBJECT_KINDS: ObjectKind[] = ['Rect', 'Circle', 'Text']
+
+/** What a click in the preview does: select, or add an object of the chosen kind, until the tool is put away (D163). */
+export type Tool = 'select' | 'add'
 
 /**
  * What the preview's handles do to the selection (D86). `all` shows every handle: the body
@@ -27,11 +31,14 @@ export const TRANSFORM_MODES: TransformMode[] = ['all', 'move', 'rotate', 'resiz
 
 /** Snapping for preview drags: positions and sizes to a grid, angles to a step (D91). */
 export interface PreviewSnap {
+  /** Positions and sizes land on the grid, angles on the step (D91). */
   on: boolean
   /** Pixels. */
   grid: number
   /** Degrees. */
   angle: number
+  /** A dragged box aligns to other objects' edges and centers and to the frame (D135). */
+  edges: boolean
 }
 
 /** Where a new animation sits against the playhead: it starts here, or it ends here (D103). */
@@ -116,6 +123,41 @@ export type Clip = { kind: 'objects'; items: ClipObject[] } | { kind: 'actions';
 
 const DEFAULTS_KEY = 'quick-animator.showDefaults'
 const SNAP_KEY = 'quick-animator.previewSnap'
+const COLLIDE_KEY = 'quick-animator.collide'
+const PUSH_KEY = 'quick-animator.push'
+const STICKY_KEY = 'quick-animator.sticky'
+const TIMELINE_VIEW_KEY = 'quick-animator.timelineView'
+const PREFS_KEY = 'quick-animator.prefs'
+
+/** App preferences (D145). */
+export interface Prefs {
+  /** Seconds a new object lasts from where it is added, or null to last to the end of the content. */
+  objectLength: number | null
+}
+
+export const DEFAULT_PREFS: Prefs = { objectLength: 2 }
+
+function loadPrefs(): Prefs {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY)
+    if (!raw) return DEFAULT_PREFS
+    const saved = JSON.parse(raw) as Partial<Prefs>
+    const length = saved.objectLength
+    return { objectLength: length === null ? null : typeof length === 'number' && length > 0 ? length : DEFAULT_PREFS.objectLength }
+  } catch {
+    return DEFAULT_PREFS
+  }
+}
+
+function savePrefs(prefs: Prefs): void {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
+  } catch {
+    // A preference only.
+  }
+}
+const SOFT_KEY = 'quick-animator.soft'
+const ANCHORED_KEY = 'quick-animator.anchored'
 const WHEEL_STEP_KEY = 'quick-animator.wheelStep'
 const PIN_KEY = 'quick-animator.pin'
 const CHAIN_KEY = 'quick-animator.chain'
@@ -139,6 +181,38 @@ function saveChoice(key: string, value: string): void {
   }
 }
 
+/** Object names kept per project folder under a key: editing state, not code (D136). */
+function loadNames(key: string, path: string): string[] {
+  try {
+    const all = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, string[]>
+    const names = all[path]
+    return Array.isArray(names) ? names : []
+  } catch {
+    return []
+  }
+}
+
+function saveNames(key: string, path: string, names: string[]): void {
+  try {
+    const all = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, string[]>
+    if (names.length > 0) all[path] = names
+    else delete all[path]
+    localStorage.setItem(key, JSON.stringify(all))
+  } catch {
+    // Preference only.
+  }
+}
+
+/** The objects drags pass through in a project. */
+export function loadSoft(path: string): string[] {
+  return loadNames(SOFT_KEY, path)
+}
+
+/** The objects nothing can push in a project. */
+export function loadAnchored(path: string): string[] {
+  return loadNames(ANCHORED_KEY, path)
+}
+
 function loadShowDefaults(): boolean {
   try {
     return localStorage.getItem(DEFAULTS_KEY) !== 'false'
@@ -148,12 +222,12 @@ function loadShowDefaults(): boolean {
 }
 
 function loadPreviewSnap(): PreviewSnap {
-  const fallback: PreviewSnap = { on: false, grid: 10, angle: 15 }
+  const fallback: PreviewSnap = { on: false, grid: 10, angle: 15, edges: true }
   try {
     const raw = localStorage.getItem(SNAP_KEY)
     if (!raw) return fallback
     const saved = JSON.parse(raw) as Partial<PreviewSnap>
-    return { on: saved.on === true, grid: saved.grid && saved.grid > 0 ? saved.grid : fallback.grid, angle: saved.angle && saved.angle > 0 ? saved.angle : fallback.angle }
+    return { on: saved.on === true, grid: saved.grid && saved.grid > 0 ? saved.grid : fallback.grid, angle: saved.angle && saved.angle > 0 ? saved.angle : fallback.angle, edges: saved.edges !== false }
   } catch {
     return fallback
   }
@@ -199,8 +273,13 @@ interface State {
   frameSnap: boolean
   /** Frames a wheel tick adds to or takes from the selected actions' durations (D97). */
   wheelStep: number
-  /** Where the content ends, hold included, or null while nothing animates. */
+  /** Where the content ends: the last action or lifetime, or null while nothing is timed (D54 revised). */
   contentEnd: number | null
+  /** Where playback and export stop: the content end plus the hold on the final frame. */
+  playbackEnd: number | null
+  /** Preferences (D145), kept per app. */
+  prefs: Prefs
+  prefsOpen: boolean
   /** Names of the selected objects. Shared by every pane. */
   selection: string[]
   /** The selected actions, when some were picked in the timeline or the object pane. */
@@ -209,9 +288,23 @@ interface State {
   selectedAction: ActionRef | null
   transformMode: TransformMode
   previewSnap: PreviewSnap
+  /** Dragged objects stop at other objects instead of passing over them (D136). */
+  collide: boolean
+  /** Dragged objects shove what they meet along instead of stopping (D136). */
+  push: boolean
+  /** What a drag pushed stays where it was shoved; off, it springs back when the drag retreats (D136). */
+  sticky: boolean
+  /** The objects in this project that drags pass through, by name (D136). */
+  soft: string[]
+  /** The objects in this project that nothing pushes, by name (D136). */
+  anchored: string[]
   pin: Pin
   /** Whether the animations made while Shift is held follow one another instead of all starting at the playhead (D127). */
   chain: boolean
+  /** The timeline shows objects as clips, or one row per object (D139). */
+  timelineView: 'objects' | 'list'
+  /** The pane the pointer last went down in: it decides what the arrow keys move (D141). */
+  activePane: 'preview' | 'timeline' | 'objects' | 'code' | 'now' | null
   anchor: Anchor
   clipboard: Clip | null
   /** Objects and class groups whose rows are folded, per pane (D98). */
@@ -225,6 +318,8 @@ interface State {
   model: SceneModel | null
   error: SceneError | null
   tool: Tool
+  /** The kind of object the Add tool places (D163). */
+  addKind: ObjectKind
   contextMenu: ContextMenuState | null
   dialog: DialogState | null
   /** Show unset attributes as ghost lines in the code pane (D35). */
@@ -253,8 +348,15 @@ interface State {
   setTransformMode: (mode: TransformMode) => void
   cycleTransformMode: () => void
   setPreviewSnap: (snap: Partial<PreviewSnap>) => void
+  setCollide: (on: boolean) => void
+  setPush: (on: boolean) => void
+  setSticky: (on: boolean) => void
+  setSoft: (name: string, soft: boolean) => void
+  setAnchored: (name: string, anchored: boolean) => void
   setPin: (pin: Pin) => void
   setChain: (chain: boolean) => void
+  setTimelineView: (view: 'objects' | 'list') => void
+  setActivePane: (pane: 'preview' | 'timeline' | 'objects' | 'code' | 'now' | null) => void
   setAnchor: (anchor: Anchor) => void
   setClipboard: (clip: Clip | null) => void
   toggleCollapsed: (pane: Pane, key: string) => void
@@ -263,6 +365,7 @@ interface State {
   openClassesDialog: (names: string[]) => void
   closeClassesDialog: () => void
   setTool: (tool: Tool) => void
+  setAddKind: (kind: ObjectKind) => void
   openMenu: (menu: ContextMenuState) => void
   closeMenu: () => void
   openDialog: (dialog: DialogState) => void
@@ -270,6 +373,8 @@ interface State {
   toggleDefaults: () => void
   setHelp: (open: boolean) => void
   setExportOpen: (open: boolean) => void
+  setPrefsOpen: (open: boolean) => void
+  setPrefs: (prefs: Partial<Prefs>) => void
 }
 
 function createAppStore() {
@@ -298,13 +403,23 @@ function createAppStore() {
       frameSnap: loadChoice<'on' | 'off'>(FRAME_SNAP_KEY, ['on', 'off'], 'on') === 'on',
       wheelStep: loadWheelStep(),
       contentEnd: null,
+      playbackEnd: null,
+      prefs: loadPrefs(),
+      prefsOpen: false,
       selection: [],
       selectedActions: [],
       selectedAction: null,
       transformMode: 'all',
       previewSnap: loadPreviewSnap(),
+      collide: loadChoice<'on' | 'off'>(COLLIDE_KEY, ['on', 'off'], 'off') === 'on',
+      push: loadChoice<'on' | 'off'>(PUSH_KEY, ['on', 'off'], 'off') === 'on',
+      sticky: loadChoice<'on' | 'off'>(STICKY_KEY, ['on', 'off'], 'off') === 'on',
+      soft: [],
+      anchored: [],
       pin: loadChoice<Pin>(PIN_KEY, ['start', 'end'], 'start'),
       chain: loadChoice<'on' | 'off'>(CHAIN_KEY, ['on', 'off'], 'off') === 'on',
+      timelineView: loadChoice<'objects' | 'list'>(TIMELINE_VIEW_KEY, ['objects', 'list'], 'objects'),
+      activePane: null,
       anchor: loadChoice<Anchor>(ANCHOR_KEY, ['edge', 'center'], 'edge'),
       clipboard: null,
       collapsed: { objects: {}, timeline: {} },
@@ -314,6 +429,7 @@ function createAppStore() {
       model: null,
       error: null,
       tool: 'select',
+      addKind: 'Rect',
       contextMenu: null,
       dialog: null,
       showDefaults: loadShowDefaults(),
@@ -326,7 +442,7 @@ function createAppStore() {
         set((s) => {
           // Pausing returns the playhead to where playback started (D126); playing from the end starts over (D59).
           if (s.playing) return { playing: false, time: s.playStart ?? s.time }
-          const from = s.contentEnd !== null && s.time >= s.contentEnd ? 0 : s.time
+          const from = s.playbackEnd !== null && s.time >= s.playbackEnd ? 0 : s.time
           return { playing: true, time: from, playStart: from }
         }),
       toggleLoop: () => set((s) => ({ loop: !s.loop })),
@@ -381,6 +497,30 @@ function createAppStore() {
           }
           return { previewSnap }
         }),
+      setCollide: (collide) => {
+        saveChoice(COLLIDE_KEY, collide ? 'on' : 'off')
+        set({ collide })
+      },
+      setPush: (push) => {
+        saveChoice(PUSH_KEY, push ? 'on' : 'off')
+        set({ push })
+      },
+      setSticky: (sticky) => {
+        saveChoice(STICKY_KEY, sticky ? 'on' : 'off')
+        set({ sticky })
+      },
+      setSoft: (name, soft) =>
+        set((s) => {
+          const next = soft ? [...new Set([...s.soft, name])] : s.soft.filter((n) => n !== name)
+          saveNames(SOFT_KEY, s.project?.path ?? '', next)
+          return { soft: next }
+        }),
+      setAnchored: (name, anchored) =>
+        set((s) => {
+          const next = anchored ? [...new Set([...s.anchored, name])] : s.anchored.filter((n) => n !== name)
+          saveNames(ANCHORED_KEY, s.project?.path ?? '', next)
+          return { anchored: next }
+        }),
       setPin: (pin) => {
         saveChoice(PIN_KEY, pin)
         set({ pin })
@@ -389,6 +529,11 @@ function createAppStore() {
         saveChoice(CHAIN_KEY, chain ? 'on' : 'off')
         set({ chain })
       },
+      setTimelineView: (timelineView) => {
+        saveChoice(TIMELINE_VIEW_KEY, timelineView)
+        set({ timelineView })
+      },
+      setActivePane: (activePane) => set((s) => (s.activePane === activePane ? s : { activePane })),
       setAnchor: (anchor) => {
         saveChoice(ANCHOR_KEY, anchor)
         set({ anchor })
@@ -405,6 +550,7 @@ function createAppStore() {
       openClassesDialog: (classesDialog) => set({ classesDialog, contextMenu: null }),
       closeClassesDialog: () => set((s) => (s.classesDialog ? { classesDialog: null } : s)),
       setTool: (tool) => set({ tool }),
+      setAddKind: (addKind) => set({ addKind }),
       openMenu: (contextMenu) => set({ contextMenu }),
       closeMenu: () => set((s) => (s.contextMenu ? { contextMenu: null } : s)),
       openDialog: (dialog) => set({ dialog, contextMenu: null }),
@@ -421,6 +567,13 @@ function createAppStore() {
         }),
       setHelp: (help) => set({ help }),
       setExportOpen: (exportOpen) => set({ exportOpen, contextMenu: null }),
+      setPrefsOpen: (prefsOpen) => set({ prefsOpen, contextMenu: null }),
+      setPrefs: (partial) =>
+        set((s) => {
+          const prefs = { ...s.prefs, ...partial }
+          savePrefs(prefs)
+          return { prefs }
+        }),
     }
   })
   return store

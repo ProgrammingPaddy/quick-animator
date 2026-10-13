@@ -5,6 +5,33 @@ import type { Action, ActionInfo, AttrSource, ClassAction, SceneError, SceneMode
 
 /** Links a handle (what user code holds) to the model entry behind it. */
 const HANDLE = Symbol('handle')
+/** Marks a stand-in for a name that is only declared further down (D148). */
+const FORWARD = Symbol('forward')
+
+/** The 1-based line of a position in the source. */
+function lineAt(source: string, pos: number): number {
+  return source.slice(0, Math.max(0, pos)).split('\n').length
+}
+
+/** An error raised while resolving times, carrying the line of the statement it came from. */
+class TimingError extends Error {
+  constructor(
+    message: string,
+    readonly line: number | undefined,
+  ) {
+    super(message)
+  }
+}
+
+/** A name used before its declaration in a way that needs the declaration (D148). */
+class ForwardUseError extends Error {
+  constructor(
+    readonly name: string,
+    readonly key: string | null,
+  ) {
+    super(`${name} is not defined`)
+  }
+}
 
 export interface EvaluateResult {
   model: SceneModel | null
@@ -67,7 +94,18 @@ export function evaluateScene(source: string): EvaluateResult {
   const actions: Action[] = []
   const classActions: ClassAction[] = []
   const warnings: SceneError[] = []
-  const model: SceneModel = { source, objects, actions, classActions, classes: new Map(), groups: new Map(), lastActionEnd: null, lastDeclEnd: parsed.lastDeclEnd, warnings }
+  /** Warnings raised while the script runs, tied to what raised them once statements are known, so each can say its line (D149). */
+  const raised: { message: string; about: Action | ClassAction | SceneObject | null }[] = []
+  const warn = (message: string, about: Action | ClassAction | SceneObject | null = null): void => {
+    raised.push({ message, about })
+  }
+  /** Every warning raised since `mark` that nothing has claimed belongs to `about`. */
+  const claim = (mark: number, about: Action | ClassAction | SceneObject): void => {
+    for (let i = mark; i < raised.length; i++) if (!raised[i]!.about) raised[i]!.about = about
+  }
+  /** Actions whose `overrides` names a class action declared further down, applied once the script has run (D148). */
+  const deferredOverrides: { action: Action; name: string }[] = []
+  const model: SceneModel = { source, objects, actions, classActions, classes: new Map(), groups: new Map(), lastActionEnd: null, lastUntil: null, contentEnd: null, lastDeclEnd: parsed.lastDeclEnd, warnings }
 
   const actionHandle = (own: Action[], behind: Action | ClassAction): Record<string | symbol, unknown> => ({
     [HANDLE]: behind,
@@ -96,15 +134,15 @@ export function evaluateScene(source: string): EvaluateResult {
       if (VERB_PARAMS[verb].includes(key)) {
         // Only a group pivots: for anything else the point is meaningless and is dropped with a note.
         if (className === GROUP) changes[key] = value as AttrSource
-        else warnings.push({ message: `${owner}.${verb}: ${key} applies to a group's ${verb}` })
+        else warn(`${owner}.${verb}: ${key} applies to a group's ${verb}`)
         continue
       }
       if (!classes[className]?.attrs.some((a) => a.name === key)) {
-        warnings.push({ message: `${className} has no attribute "${key}"` })
+        warn(`${className} has no attribute "${key}"`)
         continue
       }
       if (allowed && !allowed.includes(key)) {
-        warnings.push({ message: `${verb} does not change "${key}"; use to()` })
+        warn(`${verb} does not change "${key}"; use to()`)
         continue
       }
       changes[key] = value as AttrSource
@@ -119,20 +157,29 @@ export function evaluateScene(source: string): EvaluateResult {
     return action
   }
 
+  /** `overrides: rise` switches the class action off for this object; this action stands in for it. */
+  const applyOverride = (action: Action, value: unknown): void => {
+    const obj = action.object
+    const target = behindHandle(value)
+    const classAction = target && 'members' in target ? target : null
+    const member = classAction?.members.find((m) => m.object === obj)
+    if (!classAction) warn(`${obj.name}.${action.verb}: overrides must name a class action, such as rise = all('bars').move(...)`, action)
+    else if (!member) warn(`${obj.name} is not a member of all('${classAction.className}'); nothing to override`, action)
+    else {
+      member.overridden = true
+      action.overrides = classAction
+    }
+  }
+
   const addAction = (obj: SceneObject, verb: Verb, args: unknown[]): Record<string | symbol, unknown> => {
+    const mark = raised.length
     const block = readBlock(obj.name, verb, obj.className, args)
     const action = makeAction(obj, verb, block, null)
+    claim(mark, action)
     if (block.overrides !== undefined) {
-      // `overrides: rise` switches the class action off for this object; this action stands in for it.
-      const target = behindHandle(block.overrides)
-      const classAction = target && 'members' in target ? target : null
-      const member = classAction?.members.find((m) => m.object === obj)
-      if (!classAction) warnings.push({ message: `${obj.name}.${verb}: overrides must name a class action, such as rise = all('bars').move(...)` })
-      else if (!member) warnings.push({ message: `${obj.name} is not a member of all('${classAction.className}'); nothing to override` })
-      else {
-        member.overridden = true
-        action.overrides = classAction
-      }
+      const forward = forwardName(block.overrides)
+      if (forward !== null) deferredOverrides.push({ action, name: forward })
+      else applyOverride(action, block.overrides)
     }
     return actionHandle([action], action)
   }
@@ -141,13 +188,15 @@ export function evaluateScene(source: string): EvaluateResult {
   const addClassAction = (className: string, verb: Verb, args: unknown[]): Record<string | symbol, unknown> => {
     const classAction: ClassAction = { id: classActions.length, className, verb, name: null, stmt: null, members: [] }
     classActions.push(classAction)
+    const mark = raised.length
     for (const obj of objects) {
       if (!isMember(obj, className)) continue
       // Each member reads the block against its own class, so a Text member ignores `radius`.
       const block = readBlock(`all('${className}')`, verb, obj.className, args)
       classAction.members.push(makeAction(obj, verb, block, classAction))
     }
-    if (classAction.members.length === 0) warnings.push({ message: `all('${className}') has no members yet; declare objects with class: '${className}' above it` })
+    claim(mark, classAction)
+    if (classAction.members.length === 0) warn(`all('${className}') has no members yet; declare objects with class: '${className}' above it`, classAction)
     return actionHandle(classAction.members, classAction)
   }
 
@@ -159,6 +208,8 @@ export function evaluateScene(source: string): EvaluateResult {
         if (typeof key !== 'string') return undefined
         if (VERB_NAMES.has(key)) return (...args: unknown[]) => addAction(obj, key as Verb, args)
         if (key === 'name') return obj.name
+        // When the object begins and when it is removed, as time references (D138).
+        if (key === 'start' || key === 'end') return timeRef({ kind: key === 'start' ? 'objectStart' : 'objectEnd', actions: [], object: obj })
         const attr = schema.attrs.find((a) => a.name === key)
         if (attr) {
           if (samplingContext.model) return valueAt(samplingContext.model, obj, key, samplingContext.time)
@@ -179,9 +230,10 @@ export function evaluateScene(source: string): EvaluateResult {
       if (typeof props !== 'object' || props === null) throw new Error(`${className}({ ... }) expects a block of attributes`)
       const schema = classes[className]!
       const attrs: Record<string, AttrSource> = {}
+      const mark = raised.length
       for (const [key, value] of Object.entries(props as Record<string, unknown>)) {
         if (!schema.attrs.some((a) => a.name === key)) {
-          warnings.push({ message: `${className} has no attribute "${key}"` })
+          warn(`${className} has no attribute "${key}"`)
           continue
         }
         attrs[key] = value as AttrSource
@@ -196,10 +248,42 @@ export function evaluateScene(source: string): EvaluateResult {
         actions: [],
         classes: classNamesOf(attrs),
         groups: [],
+        at: 0,
+        until: null,
       }
       objects.push(obj)
+      claim(mark, obj)
       return objectHandle(obj)
     }
+  }
+
+  /**
+   * A stand-in for a name that is not declared yet (D148): its times, `start`, `end`, and
+   * `progress`, can be referred to now and are looked up once the whole script has run. Anything
+   * else about it needs the declaration first, and says so.
+   */
+  const forwardNames = new Set<string>()
+  const forwardHandle = (name: string): unknown => {
+    forwardNames.add(name)
+    const target = (): void => {}
+    return new Proxy(target as unknown as Record<string | symbol, unknown>, {
+      get(_target, key) {
+        if (key === FORWARD) return name
+        if (typeof key !== 'string' || key.startsWith('__') || key === 'then' || key === 'toJSON' || key === 'valueOf' || key === 'toString') return undefined
+        if (key === 'name') return name
+        if (key === 'start' || key === 'end') return timeRef({ kind: 'forward', actions: [], forward: { name, part: key } })
+        if (key === 'progress') return (fraction: number) => timeRef({ kind: 'forward', actions: [], fraction, forward: { name, part: 'progress' } })
+        throw new ForwardUseError(name, key)
+      },
+      apply() {
+        throw new ForwardUseError(name, null)
+      },
+    })
+  }
+  const forwardName = (value: unknown): string | null => {
+    if (typeof value !== 'function' && (typeof value !== 'object' || value === null)) return null
+    const name = (value as Record<symbol, unknown>)[FORWARD]
+    return typeof name === 'string' ? name : null
   }
   api['all'] = (className: unknown) => {
     if (typeof className !== 'string' || !className) throw new Error("all() expects a class name, as in all('logos')")
@@ -221,7 +305,8 @@ export function evaluateScene(source: string): EvaluateResult {
         if (key in api) return api[key]
         if (key in names) return names[key]
         if (key in globalThis) return (globalThis as unknown as Record<string, unknown>)[key]
-        throw new ReferenceError(`${key} is not defined`)
+        // Not declared yet: a stand-in, checked once the script has run (D148).
+        return forwardHandle(key)
       },
       set(_target, key, value) {
         if (typeof key !== 'string') return true
@@ -237,9 +322,25 @@ export function evaluateScene(source: string): EvaluateResult {
     const run = new Function('__scope', `with (__scope) {\n${runnable}\n}`) as (scope: unknown) => void
     run(scope)
   } catch (err) {
+    if (err instanceof ForwardUseError) {
+      // Declared further down, or not at all: the first use says which line.
+      const declaredBelow = parsed.decls.some((d) => d.name === err.name) || parsed.actions.some((a) => a.name === err.name)
+      const message = !declaredBelow
+        ? `${err.name} is not defined`
+        : err.key === null
+          ? `${err.name} is declared further down: move its declaration above this line`
+          : VERB_NAMES.has(err.key)
+            ? `${err.name}.${err.key} is used above ${err.name}'s declaration: move the declaration up`
+            : `${err.name}.${err.key} is used above ${err.name}'s declaration: move the declaration up, or use a link such as () => ${err.name}.${err.key}`
+      return { model: null, error: { message, line: lineOfName(source, `${err.name} is not defined`) } }
+    }
     const message = err instanceof Error ? err.message : String(err)
     return { model: null, error: { message, line: lineOfName(source, message) } }
   }
+  for (const name of forwardNames) {
+    if (!(name in names)) return { model: null, error: { message: `${name} is not defined`, line: lineOfName(source, `${name} is not defined`) } }
+  }
+  for (const { action, name } of deferredOverrides) applyOverride(action, names[name])
 
   // Tie objects and actions back to the statements that made them.
   const declByName = new Map(parsed.decls.map((d) => [d.name, d]))
@@ -271,14 +372,14 @@ export function evaluateScene(source: string): EvaluateResult {
     const members: string[] = []
     for (const name of names) {
       if (name === group.name) {
-        warnings.push({ message: `${group.name} cannot be its own member` })
+        warn(`${group.name} cannot be its own member`, group)
         continue
       }
       const target = objects.find((o) => o.name === name)
       if (target) members.push(target.name)
       else if (model.classes.has(name)) members.push(...model.classes.get(name)!)
       else if (CLASS_NAMES.has(name)) members.push(...objects.filter((o) => o.className === name && o !== group).map((o) => o.name))
-      else warnings.push({ message: `${group.name} has no member named "${name}"` })
+      else warn(`${group.name} has no member named "${name}"`, group)
     }
     const unique = [...new Set(members)]
     model.groups.set(group.name, unique)
@@ -299,7 +400,7 @@ export function evaluateScene(source: string): EvaluateResult {
       return false
     }
     if (reaches(group.name)) {
-      warnings.push({ message: `${group.name} contains itself through ${trail.slice(1).join(', ')}` })
+      warn(`${group.name} contains itself through ${trail.slice(1).join(', ')}`, group)
       const last = trail[trail.length - 1]!
       model.groups.set(last, (model.groups.get(last) ?? []).filter((n) => n !== group.name))
       group.groups = group.groups.filter((n) => n !== last)
@@ -349,12 +450,30 @@ export function evaluateScene(source: string): EvaluateResult {
 
   // Resolve when everything happens.
   const resolved = new Map<number, [number, number]>()
-  const resolving = new Set<number>()
+  const resolving = new Set<number | string>()
+  const lifetimes = new Map<number, { at: number; until: number | null }>()
 
   const timeOf = (ref: unknown, fallback: number, what: string): number => {
     if (ref === undefined) return fallback
     if (typeof ref === 'number') return Number.isFinite(ref) ? ref : fallback
     if (!isTimeRef(ref)) throw new Error(`${what} must be seconds or a time reference such as other.end`)
+    if (ref.kind === 'forward' && ref.forward) {
+      // The name is declared by now: its handle gives the real reference (D148).
+      const { name, part } = ref.forward
+      const handle = names[name] as Record<string, unknown> | undefined
+      const real = handle === undefined || handle === null ? undefined : part === 'progress' ? (handle['progress'] as ((f: number) => unknown) | undefined)?.(ref.fraction ?? 0) : handle[part]
+      if (!isTimeRef(real)) throw new Error(`${what}: ${name}.${part} is not a time; ${name} must be an object or an animation`)
+      return timeOf(real, fallback, what)
+    }
+    if (ref.kind === 'objectStart' || ref.kind === 'objectEnd') {
+      if (!ref.object) return fallback
+      const life = resolveLifetime(ref.object)
+      if (ref.kind === 'objectStart') return life.at
+      if (life.until !== null) return life.until
+      // Without `until`, an object ends when its last action does, or when it begins if it has none.
+      const own = ref.object.actions.filter((a) => !a.overridden)
+      return own.length > 0 ? Math.max(...own.map((a) => resolveAction(a)[1])) : life.at
+    }
     // A class action's time covers the members that still follow it.
     const active = ref.actions.filter((a) => !a.overridden)
     if (active.length === 0) return fallback
@@ -366,21 +485,53 @@ export function evaluateScene(source: string): EvaluateResult {
     return start + (end - start) * (ref.fraction ?? 0)
   }
 
+  /** When an object begins and ends (D138): `at` and `until` on its declaration, seconds or time references; a group has neither. */
+  function resolveLifetime(obj: SceneObject): { at: number; until: number | null } {
+    const memo = lifetimes.get(obj.id)
+    if (memo) return memo
+    const key = `object ${obj.id}`
+    const line = obj.decl ? lineAt(source, obj.decl.range.from) : undefined
+    if (resolving.has(key)) throw new TimingError(`${obj.name} depends on its own timing`, line)
+    resolving.add(key)
+    let at: number
+    let until: number | null
+    try {
+      at = Math.max(0, timeOf(obj.attrs['at'], 0, `${obj.name} at`))
+      const rawUntil = obj.attrs['until']
+      until = rawUntil === undefined ? null : timeOf(rawUntil, at, `${obj.name} until`)
+    } catch (err) {
+      throw err instanceof TimingError ? err : new TimingError(err instanceof Error ? err.message : String(err), line)
+    }
+    if (until !== null && until <= at) throw new TimingError(`${obj.name} is removed at ${until}, before it begins at ${at}`, line)
+    const life = { at, until }
+    lifetimes.set(obj.id, life)
+    resolving.delete(key)
+    obj.at = at
+    obj.until = until
+    return life
+  }
+
   function resolveAction(action: Action): [number, number] {
     const memo = resolved.get(action.id)
     if (memo) return memo
     const label = `${action.object.name}.${action.verb}`
-    if (resolving.has(action.id)) throw new Error(`${label} depends on its own timing`)
+    const stmt = action.stmt ?? action.classAction?.stmt ?? null
+    const line = stmt ? lineAt(source, stmt.range.from) : undefined
+    if (resolving.has(action.id)) throw new TimingError(`${label} depends on its own timing`, line)
     resolving.add(action.id)
     const index = action.object.actions.indexOf(action)
     let previous: Action | undefined
     for (let i = index - 1; i >= 0 && !previous; i--) if (!action.object.actions[i]!.overridden) previous = action.object.actions[i]
-    const fallbackStart = previous ? resolveAction(previous)[1] : 0
-    const start = timeOf(action.timing.at, fallbackStart, `${label} at`) + (action.timing.delay ?? 0)
-    const duration =
-      action.timing.until !== undefined
-        ? Math.max(0, timeOf(action.timing.until, start, `${label} until`) - start)
-        : Math.max(0, action.timing.duration ?? 1)
+    // Without `at`, an action follows the one before it, and the first starts when the object begins (D138).
+    const fallbackStart = previous ? resolveAction(previous)[1] : resolveLifetime(action.object).at
+    let start: number
+    let duration: number
+    try {
+      start = timeOf(action.timing.at, fallbackStart, `${label} at`) + (action.timing.delay ?? 0)
+      duration = action.timing.until !== undefined ? Math.max(0, timeOf(action.timing.until, start, `${label} until`) - start) : Math.max(0, action.timing.duration ?? 1)
+    } catch (err) {
+      throw err instanceof TimingError ? err : new TimingError(err instanceof Error ? err.message : String(err), line)
+    }
     const result: [number, number] = [start, start + duration]
     resolved.set(action.id, result)
     resolving.delete(action.id)
@@ -391,13 +542,38 @@ export function evaluateScene(source: string): EvaluateResult {
 
   try {
     for (const action of actions) resolveAction(action)
+    for (const obj of objects) resolveLifetime(obj)
   } catch (err) {
-    return { model: null, error: { message: err instanceof Error ? err.message : String(err) } }
+    // Errors from resolving say the line of the statement whose time could not be worked out (D149).
+    return { model: null, error: { message: err instanceof Error ? err.message : String(err), line: err instanceof TimingError ? err.line : undefined } }
   }
 
   let end: number | null = null
   for (const action of actions) if (!action.overridden) end = Math.max(end ?? 0, action.end)
   model.lastActionEnd = end
+  // An action outside its object's lifetime does nothing visible: allowed, and said (D138).
+  for (const obj of objects) {
+    if (obj.until !== null) model.lastUntil = Math.max(model.lastUntil ?? 0, obj.until)
+    for (const action of obj.actions) {
+      if (action.overridden) continue
+      const label = `${action.name ? `${action.name} = ` : ''}${obj.name}.${action.verb}`
+      if (obj.at > 0 && action.end <= obj.at) warn(`${label} ends before ${obj.name} begins at ${obj.at}`, action)
+      else if (obj.until !== null && action.start >= obj.until) warn(`${label} starts after ${obj.name} is removed at ${obj.until}`, action)
+    }
+  }
+  const last = Math.max(model.lastActionEnd ?? -Infinity, model.lastUntil ?? -Infinity)
+  model.contentEnd = Number.isFinite(last) ? last : null
+  // Every warning says the line of what raised it, where that is known (D149).
+  const positionOf = (about: Action | ClassAction | SceneObject | null): number | undefined => {
+    if (!about) return undefined
+    if ('members' in about) return about.stmt?.range.from
+    if ('verb' in about) return (about.stmt ?? about.classAction?.stmt)?.range.from
+    return about.decl?.range.from
+  }
+  for (const r of raised) {
+    const pos = positionOf(r.about)
+    warnings.push(pos === undefined ? { message: r.message } : { message: r.message, line: lineAt(source, pos) })
+  }
 
   return { model, error: null }
 }

@@ -1,4 +1,5 @@
 import { useEffect, useReducer, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { beginGesture, endGesture } from '../code/editor'
 import { showMenu } from '../components/ContextMenu'
 import { NumberField } from '../components/NumberField'
 import { ScrollBar } from '../components/ScrollBar'
@@ -7,13 +8,14 @@ import { GROUP } from '../model/registry'
 import { shownValue } from '../model/sample'
 import type { SceneModel, SceneObject } from '../model/types'
 import { newProject, pickProject } from '../project/controller'
-import { addObject, adjustDurations, beginTimed, createGroup, deleteObjects, duplicateObjects, inProgressActions, jumpToObject, lastActionIndex, overrideClassAction, requestClasses, requestRename, resizeAttrs, resizedValues, setActionDestination, setAttrsAtMany, ungroup } from '../project/operations'
-import { SceneRenderer, type Frame, type Handle } from '../preview/SceneRenderer'
+import { DEFAULT_EASE_FRACTION, easingFor } from '../model/easing'
+import { addObject, adjustDurations, appendPushedMove, beginTimed, createGroup, deleteActions, deleteObjects, duplicateObjects, inProgressActions, jumpToObject, lastActionIndex, overrideClassAction, requestClasses, requestRename, resizeAttrs, resizedValues, setActionDestination, setActionTiming, setAttrsAtMany, ungroup } from '../project/operations'
+import { makeMover, outlineOf, walk, type Mover, type Pushing } from '../preview/collide'
+import { SceneRenderer, type Frame, type GuideLine, type Handle } from '../preview/SceneRenderer'
 import { Viewport } from '../preview/Viewport'
-import { TRANSFORM_MODES, useStore, type Tool, type TransformMode } from '../state/store'
+import { OBJECT_KINDS, TRANSFORM_MODES, useStore, type ActionRef, type TransformMode } from '../state/store'
 import { formatTime } from '../state/time'
 
-const TOOLS: Exclude<Tool, 'select'>[] = ['Rect', 'Circle', 'Text']
 const MODE_LABEL: Record<TransformMode, string> = { all: 'Transform', move: 'Move', rotate: 'Rotate', resize: 'Resize' }
 const MODE_TIP: Record<TransformMode, string> = {
   all: 'Every handle: drag the body to move, a corner or an edge to resize, the handle above to rotate. Shift makes the drag an animation.',
@@ -52,6 +54,13 @@ interface Drag {
   base: Map<string, Record<string, number>>
   /** Each thing's center in the frame's own axes when the drag began, for turning and scaling several at once. */
   locals: Map<string, { x: number; y: number }>
+  /** The dragged things' upright box when the drag began, for edge snapping and collision; null for turns and resizes (D135, D136). */
+  box0: Box | null
+  /** Every other visible object's upright box when the drag began, and the camera frame's. */
+  others: { name: string; box: Box }[]
+  frameBox: Box
+  /** The dragged outlines and everyone else's, moved along as the drag goes, for collision; null for turns and resizes (D136). */
+  movers: { dragged: Mover; obstacles: Mover[] } | null
   /** The pointer's last angle around the gizmo center, and the turn so far, in radians; turns add up past a full circle (D105). */
   lastAngle: number
   turned: number
@@ -64,6 +73,11 @@ interface Drag {
   shown: boolean
   /** What a click without movement does. */
   click: 'cycle' | 'object' | 'none'
+  /** The values the drag has written so far, as name:attr, so one brought back to its start is still written. */
+  touched: Set<string>
+  /** The moves written for what this animation's drag has pushed, by object, and how far each was pushed last (D136). */
+  pushedActions: Map<string, number>
+  pushedShifts: Map<string, { x: number; y: number }>
 }
 
 interface Marquee {
@@ -75,6 +89,37 @@ interface Marquee {
 
 function snapTo(value: number, step: number): number {
   return step > 0 ? Math.round(value / step) * step : value
+}
+
+/** How close, in screen pixels, a dragged edge or center must come to another to snap to it (D135). */
+const SNAP_REACH_PX = 8
+
+/** An upright box in world coordinates. */
+interface Box {
+  left: number
+  right: number
+  top: number
+  bottom: number
+}
+
+function toBox(frame: Frame): Box {
+  return { left: frame.x - frame.width / 2, right: frame.x + frame.width / 2, top: frame.y + frame.height / 2, bottom: frame.y - frame.height / 2 }
+}
+
+/**
+ * The nearest alignment of a dragged span's low edge, center, or high edge with one of the
+ * candidates' three marks, within reach: how far to shift, and where the guide goes (D135).
+ */
+function snapAxis(lo: number, hi: number, candidates: number[][], reach: number): { shift: number; at: number } | null {
+  const mine = [lo, (lo + hi) / 2, hi]
+  let best: { shift: number; at: number } | null = null
+  for (const marks of candidates)
+    for (const mark of marks)
+      for (const m of mine) {
+        const shift = mark - m
+        if (Math.abs(shift) <= reach && (!best || Math.abs(shift) < Math.abs(best.shift))) best = { shift, at: mark }
+      }
+  return best
 }
 
 /** A world point in a frame's own axes: relative to its center, unrotated. */
@@ -107,8 +152,21 @@ function groupOf(model: SceneModel, selection: string[]): SceneObject | null {
 }
 
 /** Where the playhead rests after a Shift gesture: where it was, or in Chain mode the end of the chain (D103, D127). */
-function restingTime(gesture: { restore: number; from: number }): number {
+/** The progress at which an easing has come a fraction of the way: its inverse, by bisection, since an easing only climbs. */
+function unease(ease: (progress: number) => number, fraction: number): number {
+  let lo = 0
+  let hi = 1
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2
+    if (ease(mid) < fraction) lo = mid
+    else hi = mid
+  }
+  return (lo + hi) / 2
+}
+
+function restingTime(gesture: { restore: number; from: number; editing?: boolean }): number {
   const s = useStore.getState()
+  if (gesture.editing) return gesture.restore
   return s.chain && s.pin === 'start' ? gesture.from : gesture.restore
 }
 
@@ -144,9 +202,10 @@ export function PreviewPane() {
    * written at that end; it returns to `restore` when Shift is released. `from` is where the next
    * animation starts: where the playhead was, or in Chain mode the end of the last one made, where
    * the playhead then rests (D127). `duration` is the proposed length, which Shift and the wheel
-   * change before the animation exists.
+   * change before the animation exists. With `editing`, an animation was selected when Shift was
+   * held: the playhead shows its end, a drag sets its end state, and nothing new is chained (D157).
    */
-  const gestureRef = useRef<{ restore: number; from: number; duration: number } | null>(null)
+  const gestureRef = useRef<{ restore: number; from: number; duration: number; editing?: boolean } | null>(null)
   /** Whether the pointer has moved over the pane since anything else took the focus, so Shift held here starts a gesture and Shift typed elsewhere does not. */
   const hoverRef = useRef(false)
   /** The turn plain drags have given the box's axes since the selection was made; the box stays turned until it changes (D116). */
@@ -165,12 +224,20 @@ export function PreviewPane() {
   const selection = useStore((s) => s.selection)
   const transformMode = useStore((s) => s.transformMode)
   const previewSnap = useStore((s) => s.previewSnap)
+  const collide = useStore((s) => s.collide)
+  const push = useStore((s) => s.push)
+  const sticky = useStore((s) => s.sticky)
   const pin = useStore((s) => s.pin)
   const chain = useStore((s) => s.chain)
   const anchor = useStore((s) => s.anchor)
   const setTool = useStore((s) => s.setTool)
+  const addKind = useStore((s) => s.addKind)
+  const setAddKind = useStore((s) => s.setAddKind)
   const setTransformMode = useStore((s) => s.setTransformMode)
   const setPreviewSnap = useStore((s) => s.setPreviewSnap)
+  const setCollide = useStore((s) => s.setCollide)
+  const setPush = useStore((s) => s.setPush)
+  const setSticky = useStore((s) => s.setSticky)
   const setPin = useStore((s) => s.setPin)
   const setChain = useStore((s) => s.setChain)
   const setAnchor = useStore((s) => s.setAnchor)
@@ -188,7 +255,8 @@ export function PreviewPane() {
 
     const paint = () => {
       const s = useStore.getState()
-      renderer.update(s.model, s.time, s.selection, s.transformMode, 1 / viewport.zoom, axesRef.current)
+      // While Shift looks ahead, whatever was alive where the gesture began stays drawn (D138).
+      renderer.update(s.model, s.time, s.selection, s.transformMode, 1 / viewport.zoom, axesRef.current, gestureRef.current?.restore, s.anchored)
       viewport.render()
     }
     paintRef.current = paint
@@ -232,7 +300,12 @@ export function PreviewPane() {
         const after = useStore.getState()
         const primary = after.selectedActions[0]
         const action = primary ? after.model?.objects.find((o) => o.name === primary.object)?.actions[primary.index] : undefined
-        if (gestureRef.current && action && after.pin === 'start') {
+        if (gestureRef.current?.editing && action) {
+          // The animation being edited grew or shrank: the playhead stays at its end, and its span is what a new animation would take (D157).
+          gestureRef.current.from = action.start
+          gestureRef.current.duration = action.end - action.start
+          after.setTime(action.end)
+        } else if (gestureRef.current && action && after.pin === 'start') {
           // In Chain mode the next animation follows the adjusted end, and the playhead looks ahead from there (D127).
           if (after.chain) {
             gestureRef.current.from = action.end
@@ -265,7 +338,17 @@ export function PreviewPane() {
       if (e.key !== 'Shift' || e.repeat || !hoverRef.current || gestureRef.current || dragRef.current) return
       if (e.target instanceof Element && e.target.closest('input, textarea')) return
       const s = useStore.getState()
-      if (s.pin !== 'start' || !s.model) return
+      if (!s.model) return
+      // With an animation selected, Shift jumps to its end: what is dragged then is its end state, and nothing new is made (D157).
+      const picked = s.selectedActions.find((r) => s.selection.includes(r.object)) ?? s.selectedActions[0]
+      const editing = picked ? s.model.objects.find((o) => o.name === picked.object)?.actions[picked.index] : undefined
+      if (editing) {
+        if (e.target instanceof Element && e.target.closest('.cm-editor')) (document.activeElement as HTMLElement | null)?.blur()
+        gestureRef.current = { restore: s.time, from: editing.start, duration: editing.end - editing.start, editing: true }
+        s.setTime(editing.end)
+        return
+      }
+      if (s.pin !== 'start') return
       // The code pane may still hold the focus from an earlier click; the pointer being here says what Shift is for.
       if (e.target instanceof Element && e.target.closest('.cm-editor')) (document.activeElement as HTMLElement | null)?.blur()
       gestureRef.current = { restore: s.time, from: s.time, duration: 1 }
@@ -356,9 +439,9 @@ export function PreviewPane() {
     const { renderer } = located
     const store = useStore.getState()
 
-    if (store.tool !== 'select') {
-      addObject(store.tool, located.world.x, located.world.y)
-      store.setTool('select')
+    // The Add tool places one object per click and stays on (D163).
+    if (store.tool === 'add') {
+      addObject(store.addKind, located.world.x, located.world.y)
       return
     }
     const model = store.model
@@ -436,25 +519,35 @@ export function PreviewPane() {
     let actionIndex = -1
     let derived = false
     let showTime: number | null = null
+    /** The time whose state the drag sets when the selected animation is what it is about: its start, or with Shift its end (D157). */
+    let editAt: number | null = null
+    let runningToSelect: ActionRef[] | null = null
     const selected = store.selectedActions.find((r) => r.object === subject.name)
     const selectedAction = selected ? subject.actions[selected.index] : undefined
-    if (!e.shiftKey && objects.length === 1 && selectedAction && primaryAttrs(subject).some((a) => a in selectedAction.changes)) {
+    const matches = objects.length === 1 && !!selectedAction && primaryAttrs(subject).some((a) => a in selectedAction.changes)
+    if (matches && e.shiftKey) {
+      // Shift with the animation selected: the drag sets its end state, and makes nothing new.
       kind = 'destination'
       actionIndex = selected!.index
-      derived = !!selectedAction.classAction
-      showTime = selectedAction.end
+      derived = !!selectedAction!.classAction
+      editAt = selectedAction!.end
+    } else if (matches) {
+      // The animation selected: a plain drag sets its start state, what the object is as it begins.
+      editAt = selectedAction!.start
     } else if (!e.shiftKey && objects.length === 1) {
       // Dragging something mid-animation edits that animation's end state, and shows it (D102).
       const running = inProgressActions([subject.name], [...primaryAttrs(subject), ...(op === 'resize' ? ['x', 'y'] : [])], store.time)
       if (running.length > 0) {
         showTime = Math.max(...running.map((r) => model.objects.find((o) => o.name === r.object)!.actions[r.index]!.end))
-        store.selectActions(running)
+        // The running action is selected once the drag moves; a click keeps the object as what is selected (D147).
+        runningToSelect = running
       }
     }
+    if (editAt !== null) showTime = editAt
     // A gesture on a group, plain or not, edits the group itself, as on any object (D124).
     const targets = objects
     const primary = targets.find((o) => o.name === hit) ?? targets[0]!
-    const sampleTime = kind === 'destination' ? selectedAction!.end : store.time
+    const sampleTime = editAt ?? store.time
     const frame = (objects.length > 1 ? renderer.boxAround(names, axesRef.current) : renderer.frameOf(subject.name)) ?? { x: 0, y: 0, rotation: 0, width: 1, height: 1 }
     const axes0 = axesRef.current
     const base = new Map<string, Record<string, number>>()
@@ -466,6 +559,35 @@ export function PreviewPane() {
     }
     const alreadySingle = selection.length === 1 && selection[0] === hit && store.selectedActions.length === 0
     const angle0 = Math.atan2(located.world.y - frame.y, located.world.x - frame.x)
+    // A move knows the dragged things' box and everyone else's, for edge snapping and collision (D135, D136).
+    const dragged = new Set<string>()
+    const expand = (name: string): void => {
+      if (dragged.has(name)) return
+      dragged.add(name)
+      if (model.objects.find((o) => o.name === name)?.className === GROUP) for (const member of groupMembers(model, name)) expand(member)
+    }
+    for (const o of targets) expand(o.name)
+    const box0Frame = op === 'move' ? renderer.boxAround(targets.map((o) => o.name)) : null
+    const others: { name: string; box: Box }[] = []
+    let movers: Drag['movers'] = null
+    if (op === 'move') {
+      const draggedPolys: Mover['polys'] = []
+      const obstacles: Mover[] = []
+      for (const o of model.objects) {
+        if (o.className === GROUP) continue
+        const f = renderer.frameOf(o.name)
+        if (!f) continue
+        if (dragged.has(o.name)) {
+          draggedPolys.push(outlineOf(o, f))
+          continue
+        }
+        others.push({ name: o.name, box: toBox(f) })
+        // What a push moves is written through the solver from where it shows now; what cannot be written is as good as anchored.
+        if (!base.has(o.name)) base.set(o.name, baseValues(model, o, sampleTime))
+        obstacles.push(makeMover(o.name, [outlineOf(o, f)], store.anchored.includes(o.name) || !o.decl, store.soft.includes(o.name)))
+      }
+      movers = { dragged: makeMover(primary.name, draggedPolys, false, false), obstacles }
+    }
     const drag: Drag = {
       kind,
       op,
@@ -484,6 +606,10 @@ export function PreviewPane() {
       frame,
       base,
       locals,
+      box0: box0Frame ? toBox(box0Frame) : null,
+      others,
+      frameBox: viewport.frameRect(),
+      movers,
       lastAngle: angle0,
       turned: 0,
       local0: toLocal(frame, located.world),
@@ -491,12 +617,17 @@ export function PreviewPane() {
       created: false,
       shown: false,
       click: alreadySingle && !e.shiftKey && !handle ? 'cycle' : selected && !handle && !e.shiftKey ? 'object' : 'none',
+      touched: new Set(),
+      pushedActions: new Map(),
+      pushedShifts: new Map(),
     }
     dragRef.current = drag
     if (drag.op === 'resize' && drag.keepAspect) setDragging('aspect')
     // A Shift gesture that began on the key already moved the playhead to the proposed end; the animation still starts where it was, or after the last one made in Chain mode (D103, D127).
     const restoreTime = gestureRef.current?.from ?? store.time
     const proposed = gestureRef.current?.duration ?? 1
+    // One drag is one undo step, pushed things included (D22, D136).
+    beginGesture()
     capture(
       host,
       e.pointerId,
@@ -528,6 +659,7 @@ export function PreviewPane() {
             drag.actionIndex = index
             drag.derived = false
           }
+          if (runningToSelect) useStore.getState().selectActions(runningToSelect)
           if (drag.showTime !== null) useStore.getState().setTime(drag.showTime)
           if (drag.kind === 'timed') {
             if (!useStore.getState().selection.includes(drag.primary)) useStore.getState().select([drag.primary])
@@ -588,6 +720,11 @@ export function PreviewPane() {
               const f = Math.max(1 / Math.max(w0, h0), ((v.x * d.x + v.y * d.y) / (d.x * d.x + d.y * d.y)) * across)
               width = w0 * f
               height = h0 * f
+            } else if (drag.keepAspect && sx !== 0) {
+              // A side handle keeps the proportions too: the far side stays put, and the other axis scales about its middle (D158).
+              height = h0 * (width / w0)
+            } else if (drag.keepAspect && sy !== 0) {
+              width = w0 * (height / h0)
             }
             if (snap.on) {
               width = Math.max(1, snapTo(width, snap.grid))
@@ -609,26 +746,100 @@ export function PreviewPane() {
             }
           }
         } else {
-          let tx = primaryBase['x']! + dx / viewport.zoom
-          let ty = primaryBase['y']! - dy / viewport.zoom
-          if (snap.on) {
-            tx = snapTo(tx, snap.grid)
-            ty = snapTo(ty, snap.grid)
+          const tx = primaryBase['x']! + dx / viewport.zoom
+          const ty = primaryBase['y']! - dy / viewport.zoom
+          let ddx = tx - primaryBase['x']!
+          let ddy = ty - primaryBase['y']!
+          const guides: GuideLine[] = []
+          const pushed: Mover[] = []
+          if (drag.box0) {
+            const live = useStore.getState()
+            // Edges and centers within reach come first (D135), then the grid where nothing is in reach (D91).
+            const reach = SNAP_REACH_PX / viewport.zoom
+            const boxes = [...drag.others.map((o) => o.box), drag.frameBox]
+            const sx = snap.edges ? snapAxis(drag.box0.left + ddx, drag.box0.right + ddx, boxes.map((b) => [b.left, (b.left + b.right) / 2, b.right]), reach) : null
+            const sy = snap.edges ? snapAxis(drag.box0.bottom + ddy, drag.box0.top + ddy, boxes.map((b) => [b.bottom, (b.bottom + b.top) / 2, b.top]), reach) : null
+            if (sx) {
+              ddx += sx.shift
+              guides.push({ x: sx.at })
+            } else if (snap.on) ddx = snapTo(tx, snap.grid) - primaryBase['x']!
+            if (sy) {
+              ddy += sy.shift
+              guides.push({ y: sy.at })
+            } else if (snap.on) ddy = snapTo(ty, snap.grid) - primaryBase['y']!
+            if (live.collide && drag.movers) {
+              // Outlines collide (D136): the dragged thing walks toward the pointer and stops or pushes; only a plain drag pushes, an animation never moves other things.
+              const pushing: Pushing = live.push ? (live.sticky ? 'sticky' : 'stateless') : 'off'
+              walk(drag.movers.dragged, { x: ddx, y: ddy }, drag.movers.obstacles, pushing)
+              ddx = drag.movers.dragged.shift.x
+              ddy = drag.movers.dragged.shift.y
+              pushed.push(...drag.movers.obstacles.filter((o) => Math.abs(o.shift.x) > 1e-9 || Math.abs(o.shift.y) > 1e-9))
+            }
+          } else if (snap.on) {
+            ddx = snapTo(tx, snap.grid) - primaryBase['x']!
+            ddy = snapTo(ty, snap.grid) - primaryBase['y']!
           }
-          const ddx = tx - primaryBase['x']!
-          const ddy = ty - primaryBase['y']!
+          renderer.setGuides(guides, viewport.viewRect(), 1 / viewport.zoom)
           for (const name of drag.names) {
             const b = drag.base.get(name)!
             values.set(name, { x: b['x']! + ddx, y: b['y']! + ddy })
           }
+          for (const o of pushed) {
+            const b = drag.base.get(o.name)
+            if (b) values.set(o.name, { x: b['x']! + o.shift.x, y: b['y']! + o.shift.y })
+          }
+          // What was pushed earlier in this drag and is pushed no more goes back to where it was.
+          for (const key of drag.touched) {
+            const name = key.slice(0, key.lastIndexOf(':'))
+            if (!values.has(name) && !drag.names.includes(name)) {
+              const b = drag.base.get(name)
+              if (b) values.set(name, { x: b['x']!, y: b['y']! })
+            }
+          }
         }
-        // Only values the gesture moved get written, so an edge drag on a circle adds one line, not two.
+        // Only values the gesture has moved get written, so an edge drag on a circle adds one line, not two; once moved, a value is written even when it comes back to its start.
         const changed = (name: string, v: Record<string, number>): Record<string, number> => {
           const b = drag.base.get(name)!
-          return Object.fromEntries(Object.entries(v).filter(([attr, value]) => Math.abs(value - (b[attr] ?? 0)) > 1e-6))
+          return Object.fromEntries(
+            Object.entries(v).filter(([attr, value]) => {
+              const key = `${name}:${attr}`
+              if (Math.abs(value - (b[attr] ?? 0)) > 1e-6) drag.touched.add(key)
+              return drag.touched.has(key)
+            }),
+          )
+        }
+        // What an animation's drag pushes gets a move of its own over the same span, kept up to date as the push goes on (D136).
+        const writePushed = (ownerIndex: number): void => {
+          if (!drag.movers) return
+          const owner = useStore.getState().model?.objects.find((o) => o.name === drag.primary)?.actions[ownerIndex]
+          if (!owner) return
+          for (const o of drag.movers.obstacles) {
+            const moved = Math.abs(o.shift.x) > 1e-9 || Math.abs(o.shift.y) > 1e-9
+            let index = drag.pushedActions.get(o.name)
+            if (index === undefined) {
+              if (!moved) continue
+              const made = appendPushedMove(o.name, owner.start, owner.end - owner.start)
+              if (made === null) continue
+              index = made
+              drag.pushedActions.set(o.name, index)
+            }
+            const b = drag.base.get(o.name)
+            if (b) setActionDestination(o.name, index, { x: b['x']! + o.shift.x, y: b['y']! + o.shift.y })
+            // Its move begins when the dragged thing reaches it and keeps the same ramps from there, so the two move as one (D167).
+            const travelled = Math.hypot(drag.movers.dragged.shift.x, drag.movers.dragged.shift.y)
+            const fraction = o.contact === null || travelled < 1e-6 ? 0 : Math.max(0, Math.min(1, o.contact / travelled))
+            const span = owner.end - owner.start
+            const minimum = 1 / useStore.getState().settings.fps
+            const at = Math.min(owner.end - minimum, owner.start + unease(easingFor(owner.timing, span), fraction) * span)
+            const easeIn = Math.max(0, (owner.timing.easeIn ?? span * DEFAULT_EASE_FRACTION) - (at - owner.start))
+            const easeOut = owner.timing.easeOut ?? span * DEFAULT_EASE_FRACTION
+            setActionTiming(o.name, index, { at, duration: owner.end - at, easeIn, easeOut })
+            drag.pushedShifts.set(o.name, { x: o.shift.x, y: o.shift.y })
+          }
         }
         if (drag.kind === 'timed') {
-          const pinNow = useStore.getState().pin
+          // While an animation is being edited, a new one of another kind takes its span (D157).
+          const pinNow = gestureRef.current?.editing ? 'start' : useStore.getState().pin
           const v = values.get(drag.primary)
           if (!v) return
           if (!drag.created) {
@@ -636,7 +847,7 @@ export function PreviewPane() {
             if (end === null) return
             drag.created = true
             // In Chain mode the next animation starts where this one ends (D127).
-            if (gestureRef.current && pinNow === 'start' && useStore.getState().chain) gestureRef.current.from = end
+            if (gestureRef.current && !gestureRef.current.editing && pinNow === 'start' && useStore.getState().chain) gestureRef.current.from = end
             if (pinNow === 'start' && !drag.shown) {
               drag.shown = true
               useStore.getState().setTime(end)
@@ -646,9 +857,11 @@ export function PreviewPane() {
           if (index === null) return
           // The target is what shows; the action's values follow through the solver, so a member of a turned group lands where it is dragged (D122).
           setActionDestination(drag.primary, index, v)
+          writePushed(index)
         } else if (drag.kind === 'destination') {
           const v = values.get(drag.primary)
           if (v) setActionDestination(drag.primary, drag.actionIndex, changed(drag.primary, v))
+          writePushed(drag.actionIndex)
         } else {
           // A group's own turn or scale keeps the center of its box where it shows: the solver moves the group's shift only when its stored pivot no longer sits there (D124).
           const keepCenter: Record<string, number> = drag.group && drag.op !== 'move' ? { x: primaryBase['x']!, y: primaryBase['y']! } : {}
@@ -669,11 +882,20 @@ export function PreviewPane() {
         }
         dragRef.current = null
         setDragging(null)
+        renderer.clearGuides()
+        paintRef.current()
+        // A move written for something pushed and then let go of again says nothing: it goes.
+        const idle = [...drag.pushedActions].filter(([name]) => {
+          const shift = drag.pushedShifts.get(name)
+          return !shift || (Math.abs(shift.x) < 1e-9 && Math.abs(shift.y) < 1e-9)
+        })
+        if (idle.length > 0) deleteActions(idle.map(([object, index]) => ({ object, index })), true)
+        endGesture()
         if (gestureRef.current && !ev.shiftKey) {
           // Shift already released: the gesture is over, the playhead goes back, or rests at the end of the chain.
           s.setTime(restingTime(gestureRef.current))
           gestureRef.current = null
-        } else if (gestureRef.current && drag.created && s.chain && s.pin === 'start') {
+        } else if (gestureRef.current && !gestureRef.current.editing && drag.created && s.chain && s.pin === 'start') {
           // Chain mode, Shift still held: look ahead to the end of the next animation (D127).
           s.setTime(gestureRef.current.from + gestureRef.current.duration)
         }
@@ -694,7 +916,7 @@ export function PreviewPane() {
       if (group && s.model && groupMembers(s.model, group.name).includes(hit)) {
         showMenu(e, [
           { label: 'Jump to code', run: () => jumpToObject(group.name) },
-          { label: 'Rename…', run: () => requestRename({ object: group.name }) },
+          { label: 'Rename', run: () => requestRename({ object: group.name }) },
           { label: 'Select', keyword: hit, run: () => s.select([hit]) },
           { label: 'Ungroup', keyword: group.name, run: () => ungroup(group.name) },
         ])
@@ -705,16 +927,27 @@ export function PreviewPane() {
       const many = targets.length > 1
       showMenu(e, [
         { label: 'Jump to code', run: () => jumpToObject(hit) },
-        ...(many ? [] : [{ label: 'Rename…', run: () => requestRename({ object: hit }) }]),
-        { label: 'Classes…', run: () => requestClasses(targets) },
+        ...(many ? [] : [{ label: 'Rename', run: () => requestRename({ object: hit }) }]),
+        { label: 'Classes', run: () => requestClasses(targets) },
+        {
+          label: targets.every((n) => s.anchored.includes(n)) ? 'Unanchor' : 'Anchor',
+          run: () => {
+            const anchored = !targets.every((n) => s.anchored.includes(n))
+            for (const n of targets) s.setAnchored(n, anchored)
+          },
+        },
+        {
+          label: targets.every((n) => s.soft.includes(n)) ? 'Disable passthrough' : 'Enable passthrough',
+          run: () => {
+            const soft = !targets.every((n) => s.soft.includes(n))
+            for (const n of targets) s.setSoft(n, soft)
+          },
+        },
         { label: many ? `Duplicate ${targets.length} objects` : 'Duplicate', run: () => duplicateObjects(targets) },
         { label: many ? `Delete ${targets.length} objects` : 'Delete object', run: () => deleteObjects(targets), danger: true },
       ])
     } else {
-      showMenu(
-        e,
-        TOOLS.map((t) => ({ label: 'Add', keyword: t, run: () => addObject(t, world.x, world.y) })),
-      )
+      showMenu(e, [{ label: 'Add', children: OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, world.x, world.y) })) }])
     }
   }
 
@@ -739,7 +972,7 @@ export function PreviewPane() {
 
   return (
     <div
-      className={`preview${tool !== 'select' ? ' placing' : ''} mode-${transformMode}`}
+      className={`preview${tool === 'add' ? ' placing' : ''} mode-${transformMode}`}
       ref={hostRef}
       onPointerDown={onPointerDown}
       onPointerMove={() => (hoverRef.current = true)}
@@ -752,12 +985,19 @@ export function PreviewPane() {
         <div className="preview-marquee" style={{ left: Math.min(marquee.x0, marquee.x1), top: Math.min(marquee.y0, marquee.y1), width: Math.abs(marquee.x1 - marquee.x0), height: Math.abs(marquee.y1 - marquee.y0) }} />
       )}
       <div className="preview-toolbar" onPointerDown={stop}>
-        {TOOLS.map((t) => (
-          <button key={t} className={tool === t ? 'active' : ''} onClick={() => setTool(tool === t ? 'select' : t)} title={`Add a ${t}: pick it, then click where it goes. Click again to put it away.`}>
-            {t}
-          </button>
-        ))}
-        {tool !== 'select' && <span className="hint">Click to place</span>}
+        <button className={tool === 'add' ? 'active' : ''} onClick={() => setTool(tool === 'add' ? 'select' : 'add')} title="Add object: pick a kind, then click where each one goes. The tool stays on until clicked again, or Escape." aria-pressed={tool === 'add'}>
+          Add object
+        </button>
+        {tool === 'add' && (
+          <div className="preview-modes" role="group" aria-label="Kind of object to add">
+            {OBJECT_KINDS.map((k) => (
+              <button key={k} className={addKind === k ? 'active' : ''} onClick={() => setAddKind(k)} title={`Each click adds a ${k}`} aria-pressed={addKind === k}>
+                {k}
+              </button>
+            ))}
+          </div>
+        )}
+        {tool === 'add' && <span className="hint">Click to place</span>}
         {selection.length > 0 && (
           <>
             <div className="preview-modes" role="group" aria-label="Drag mode">
@@ -797,10 +1037,26 @@ export function PreviewPane() {
       </div>
       <div className="preview-tools" onPointerDown={stop}>
         <button className={previewSnap.on ? 'on' : ''} onClick={() => setPreviewSnap({ on: !previewSnap.on })} title={previewSnap.on ? 'Drags snap positions and sizes to the grid and angles to the step. Click for free placement.' : 'Drags place freely. Click to snap positions and sizes to a grid and angles to a step.'} aria-pressed={previewSnap.on}>
-          Snap
+          Grid
         </button>
         {previewSnap.on && <NumberField label="Grid, in pixels" value={previewSnap.grid} unit="px" onChange={(grid) => setPreviewSnap({ grid })} />}
         {previewSnap.on && <NumberField label="Angle step, in degrees" value={previewSnap.angle} unit={'°'} onChange={(angle) => setPreviewSnap({ angle })} />}
+        <button className={previewSnap.edges ? 'on' : ''} onClick={() => setPreviewSnap({ edges: !previewSnap.edges })} title={previewSnap.edges ? 'A dragged box aligns its edges and center to other objects and the frame, with guides. Click to stop aligning.' : 'Dragged boxes do not align to others. Click to align edges and centers to other objects and the frame.'} aria-pressed={previewSnap.edges}>
+          Edges
+        </button>
+        <button className={collide ? 'on' : ''} onClick={() => setCollide(!collide)} title={collide ? 'Dragged objects stop at the outlines of other objects and slide along them; right-click an object to anchor it or to enable passthrough on it. Click to let objects overlap.' : 'Dragged objects pass over others. Click to make them stop at each other.'} aria-pressed={collide}>
+          Collide
+        </button>
+        {collide && (
+          <button className={push ? 'on' : ''} onClick={() => setPush(!push)} title={push ? 'A dragged object shoves what it meets along, chains included, until something anchored stops it; an animation never pushes. Click to stop at objects instead.' : 'Dragged objects stop at what they meet. Click to make them push it along.'} aria-pressed={push}>
+            Push
+          </button>
+        )}
+        {collide && push && (
+          <button className={sticky ? 'on' : ''} onClick={() => setSticky(!sticky)} title={sticky ? 'What a drag pushes stays where it was shoved. Click to have it spring back when the drag retreats.' : 'What a drag pushes springs back when the drag retreats: things make room for the dragged object where it is. Click to have them stay where they were shoved.'} aria-pressed={sticky}>
+            Sticky
+          </button>
+        )}
         <button onClick={() => viewportRef.current?.setZoom(1)} title="Actual size">
           {Math.round(zoom * 100)}%
         </button>

@@ -1,19 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
-import { applyEdits, createEditor, getEditor, highlightRanges, markErrorLine, placeCursor, scrollToPos, setGhostClickHandler, setGhostLines, type GhostBlock, type HighlightSpec } from '../code/editor'
+import { applyEdits, createEditor, getEditor, highlightRanges, markProblemLines, placeCursor, scrollToPos, setGhostClickHandler, setGhostLines, type GhostBlock, type HighlightSpec } from '../code/editor'
 import { DEFAULT_EASE_FRACTION } from '../model/easing'
 import { formatNumber, formatValue, setProp } from '../model/edits'
 import { classes, GROUP, OBJECT_COLOR, PIVOT_PARAMS, VERB_COLORS } from '../model/registry'
 import { memberBox } from '../model/sample'
 import type { SceneModel, SceneObject } from '../model/types'
 import type { Action } from '../model/types'
-import { commitSource } from '../project/controller'
+import { commitSource, contentEndFor } from '../project/controller'
+import { roundSeconds } from '../project/operations'
 import { useStore } from '../state/store'
 
 interface Mark {
   from: number
   to: number
   color: string
-  kind: 'full' | 'bar' | 'error'
+  kind: 'full' | 'bar' | 'error' | 'warning'
 }
 
 /** The attributes a declaration leaves unset, with the values they take (D35); a group's pivot shows the center of its members' box at time zero, which it uses until written (D124). */
@@ -27,6 +28,9 @@ function declarationDefaults(obj: SceneObject, model: SceneModel): { key: string
     const box = memberBox(model, obj, 0)
     if (box) for (const g of out) if (g.key === 'pivotX' || g.key === 'pivotY') g.value = formatNumber(Math.round(g.key === 'pivotX' ? box.x : box.y))
   }
+  // An object lasts to the end of the content unless `until` says otherwise: the ghost shows where that is now (D138).
+  const end = contentEndFor(model)
+  for (const g of out) if (g.key === 'until') g.value = formatNumber(roundSeconds(end ?? 0))
   return out
 }
 
@@ -109,6 +113,7 @@ export function CodePane() {
     for (const f of spec.full) next.push({ from: lineOf(f.range.from), to: lineOf(f.range.to), color: f.color, kind: 'full' })
     for (const b of spec.bars) next.push({ from: lineOf(b.range.from), to: lineOf(b.range.to), color: b.color, kind: 'bar' })
     if (error?.line) next.push({ from: error.line, to: error.line, color: 'var(--error)', kind: 'error' })
+    if (!error && model) for (const w of model.warnings) if (w.line) next.push({ from: w.line, to: w.line, color: 'var(--warning)', kind: 'warning' })
     setMarks(next)
     setDocLines(doc.lines)
   }, [selection, selectedActions, model, error, source])
@@ -127,9 +132,10 @@ export function CodePane() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, selectedActions])
 
+  // The error's line in red, the warnings' in amber, each with a jump from the strip below (D149).
   useEffect(() => {
-    markErrorLine(error?.line ?? null)
-  }, [error])
+    markProblemLines(error?.line ? [error.line] : [], !error && model ? model.warnings.map((w) => w.line ?? 0).filter((l) => l > 0) : [])
+  }, [error, model])
 
   // Ghost lines for unset attributes and unset timing, only while the model describes the current text.
   useEffect(() => {
@@ -167,7 +173,7 @@ export function CodePane() {
         const attr = classes[obj.className]?.attrs.find((a) => a.name === key)
         if (!obj.decl || !attr || !s.model) return
         // A group's pivot ghost shows the center it uses; writing it keeps that point.
-        const ghost = key === 'pivotX' || key === 'pivotY' ? declarationDefaults(obj, s.model).find((g) => g.key === key) : undefined
+        const ghost = key === 'pivotX' || key === 'pivotY' || key === 'until' ? declarationDefaults(obj, s.model).find((g) => g.key === key) : undefined
         edit = setProp(s.source, obj.decl, key, ghost ? Number(ghost.value) : attr.default)
         applyEdits([edit])
         s.select([name])
@@ -179,12 +185,14 @@ export function CodePane() {
     return () => setGhostClickHandler(null)
   }, [])
 
-  const jumpToError = () => {
+  /** Put the cursor at the start of a line's text, which also scrolls there. */
+  const jumpToProblem = (n: number | undefined) => {
     const view = getEditor()
-    if (!view || !error?.line || error.line > view.state.doc.lines) return
-    const line = view.state.doc.line(error.line)
+    if (!view || !n || n > view.state.doc.lines) return
+    const line = view.state.doc.line(n)
     placeCursor(line.from + (line.text.length - line.text.trimStart().length))
   }
+  const jumpToError = () => jumpToProblem(error?.line)
 
   const jumpToLine = (n: number) => {
     const view = getEditor()
@@ -214,7 +222,13 @@ export function CodePane() {
           <span className="dim"> Fix it to edit from the preview and timeline.</span>
         </button>
       )}
-      {!error && model?.warnings[0] && <div className="code-warning">{model.warnings[0].message}</div>}
+      {!error &&
+        model?.warnings.map((w, i) => (
+          <button key={i} className="code-warning" onClick={() => jumpToProblem(w.line)} title={w.line ? 'Jump to the warning' : undefined} disabled={!w.line}>
+            {w.line ? `Line ${w.line}: ` : ''}
+            {w.message}
+          </button>
+        ))}
       {!project && <div className="code-empty dim">Open a project to edit its scene.</div>}
     </div>
   )
