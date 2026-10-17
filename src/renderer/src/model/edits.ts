@@ -105,6 +105,22 @@ function attachedCommentStart(source: string, from: number): number {
   return start
 }
 
+/**
+ * Move a statement elsewhere in the file, its comment lines with it (D129, D210): the edits that
+ * take it out, line breaks after it included, and put it before or after another statement.
+ */
+export function moveStatementEdits(source: string, range: Range, target: Range, where: 'before' | 'after'): TextEdit[] {
+  const from = attachedCommentStart(source, range.from)
+  let to = range.to
+  while (to < source.length && (source[to] === '\n' || source[to] === '\r')) to++
+  const text = source.slice(from, range.to)
+  const at = where === 'before' ? attachedCommentStart(source, target.from) : target.to
+  return [
+    { from, to, insert: '' },
+    where === 'before' ? { from: at, to: at, insert: `${text}\n\n` } : { from: at, to: at, insert: `\n\n${text}` },
+  ]
+}
+
 /** Remove whole statements together with the comment lines directly above them and the line breaks that follow them (D129). */
 export function removeStatements(source: string, ranges: Range[]): TextEdit[] {
   return [...ranges]

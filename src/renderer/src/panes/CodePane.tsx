@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { applyEdits, createEditor, getEditor, highlightRanges, markProblemLines, placeCursor, scrollToPos, setGhostClickHandler, setGhostLines, type GhostBlock, type HighlightSpec } from '../code/editor'
 import { DEFAULT_EASE_FRACTION } from '../model/easing'
-import { formatNumber, formatValue, setProp } from '../model/edits'
+import { formatNumber, formatValue, setProp, setPropText } from '../model/edits'
 import { classes, GROUP, OBJECT_COLOR, PIVOT_PARAMS, VERB_COLORS } from '../model/registry'
 import { memberBox } from '../model/sample'
 import type { SceneModel, SceneObject } from '../model/types'
@@ -42,6 +42,12 @@ function timingDefaults(action: Action, model: SceneModel | null): { key: string
   if (model && action.object.className === GROUP && ('rotation' in action.changes || 'scale' in action.changes) && !PIVOT_PARAMS.every((k) => present.has(k))) {
     const box = memberBox(model, action.object, action.start)
     if (box) for (const key of PIVOT_PARAMS) if (!present.has(key)) out.push({ key, value: formatNumber(Math.round(key === 'pivotX' ? box.x : box.y)) })
+  }
+  if (action.verb === 'path') {
+    // A path's settings: whether it turns the object with it, and the shift of the whole shape (D193).
+    if (!present.has('orient')) out.push({ key: 'orient', value: 'false' })
+    if (!present.has('offset')) out.push({ key: 'offset', value: '[0, 0]' })
+    if (!present.has('smooth')) out.push({ key: 'smooth', value: 'false' })
   }
   if (!present.has('at')) out.push({ key: 'at', value: formatNumber(action.start - (action.timing.delay ?? 0)) })
   if (!present.has('delay')) out.push({ key: 'delay', value: '0' })
@@ -166,7 +172,8 @@ export function CodePane() {
         const action = obj.actions[index]
         const ghost = action ? timingDefaults(action, s.model).find((g) => g.key === key) : undefined
         if (!action?.stmt || !ghost) return
-        edit = setProp(s.source, action.stmt, key, key === 'relative' ? false : Number(ghost.value))
+        const text = ghost.value
+        edit = text === 'true' || text === 'false' ? setProp(s.source, action.stmt, key, text === 'true') : text.startsWith('[') ? setPropText(s.source, action.stmt, key, text) : setProp(s.source, action.stmt, key, Number(text))
         applyEdits([edit])
         s.selectAction(name, index)
       } else {

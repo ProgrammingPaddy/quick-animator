@@ -1,9 +1,10 @@
-import { useMemo, type MouseEvent as ReactMouseEvent } from 'react'
+import { useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { showMenu } from '../components/ContextMenu'
 import { LinkIcon } from '../components/LinkIcon'
 import { actionLinks, dependentsByTarget, objectLinks, targetKey } from '../model/links'
 import { actionIdents, classActionIdents, classGroups, classKey, classSpan, overrideOf, typeGroups, type ClassGroup } from '../model/groups'
 import { GROUP, PIVOT_PARAMS, VERB_COLORS } from '../model/registry'
+import { isVisibleAt } from '../model/sample'
 import type { Action, SceneObject } from '../model/types'
 import { addObject, deleteAction, deleteClass, deleteClassAction, deleteObjects, duplicateObjects, jumpToAction, jumpToClass, jumpToObject, materializeClassAction, overrideClassAction, removeFromClass, requestClasses, requestRename, selectClass, selectClassAction, ungroup, setLifetime } from '../project/operations'
 import { isActionSelected, OBJECT_KINDS, useStore } from '../state/store'
@@ -39,6 +40,13 @@ export function ObjectPane() {
   const fps = useStore((s) => s.settings.fps)
   const selection = useStore((s) => s.selection)
   const anchored = useStore((s) => s.anchored)
+  const time = useStore((s) => s.time)
+  /** The search, and whether only what is active at the playhead is listed (D176). */
+  const [query, setQuery] = useState('')
+  const [activeOnly, setActiveOnly] = useState(false)
+  /** Whether only the animations running at the playhead are listed under each object (D184). */
+  const [activeAnimations, setActiveAnimations] = useState(false)
+  const running = (a: { start: number; end: number }): boolean => a.start <= time && time < a.end
   const dependents = useMemo(() => (model ? dependentsByTarget(model) : new Map<string, string[]>()), [model])
   /** Link marks, icons only, saying what in their tooltips (D169). */
   const marks = (links: { key: string; text: string; kind: string }[], referredBy: string[] | undefined) => (
@@ -66,7 +74,20 @@ export function ObjectPane() {
   const objects = model?.objects ?? []
   const groups = useMemo(() => (model ? classGroups(model) : []), [model])
   const types = useMemo(() => typeGroups(objects), [objects])
-  const foldable = [...objects.filter((o) => o.actions.length > 0).map((o) => o.name), ...groups.map((g) => classKey(g.className))]
+  /** Active at the playhead: within its life and visible; a group when any member is (D176). */
+  const isActive = (obj: SceneObject): boolean => {
+    if (!model) return true
+    if (obj.className === GROUP) return (model.groups.get(obj.name) ?? []).some((n) => {
+      const m = model.objects.find((o) => o.name === n)
+      return !!m && isVisibleAt(model, m, time)
+    })
+    return isVisibleAt(model, obj, time)
+  }
+  const q = query.trim().toLowerCase()
+  const matches = (obj: SceneObject): boolean => !q || `${obj.name} ${obj.className} ${obj.classes.join(' ')} ${obj.actions.map((a) => `${a.name ?? ''} ${a.verb}`).join(' ')}`.toLowerCase().includes(q)
+  const shown = (obj: SceneObject): boolean => matches(obj) && (!activeOnly || isActive(obj))
+  /** Everything that folds: the type sections, the class groups, and the objects with actions (D177). */
+  const foldable = [...types.map((t) => `type:${t.className}`), ...groups.map((g) => classKey(g.className)), ...objects.filter((o) => o.actions.length > 0).map((o) => o.name)]
   const anyExpanded = foldable.some((key) => !collapsed[key])
   const selectedClassActions = useMemo(() => {
     const set = new Set<unknown>()
@@ -106,6 +127,7 @@ export function ObjectPane() {
       { label: 'Jump to code', run: () => jumpToObject(obj.name) },
       ...(many ? [] : [{ label: 'Rename', run: () => requestRename({ object: obj.name }) }]),
       { label: 'Classes', run: () => requestClasses(targets) },
+      ...(many ? [] : [{ label: 'Edit links', run: () => useStore.getState().openLinksDialog({ object: obj.name }) }]),
       { label: many ? `Duplicate ${targets.length} objects` : 'Duplicate', run: () => duplicateObjects(targets) },
       ...(many ? [] : [{ label: 'End at', keyword: timecode(s.time, s.settings.fps), run: () => setLifetime(obj.name, { until: useStore.getState().time }) }]),
       { label: many ? `Delete ${targets.length} objects` : 'Delete object', run: () => deleteObjects(targets), danger: true },
@@ -138,6 +160,7 @@ export function ObjectPane() {
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToAction(obj.name, index) },
       { label: action?.name ? 'Rename' : 'Name', run: () => requestRename({ object: obj.name, index }) },
+      { label: 'Edit links', run: () => useStore.getState().openLinksDialog({ object: obj.name, index }) },
       { label: 'Delete action', run: () => deleteAction(obj.name, index), danger: true },
     ])
   }
@@ -174,10 +197,12 @@ export function ObjectPane() {
   }
 
   const renderObject = (obj: SceneObject, member: boolean) => {
+    if (!shown(obj)) return null
     const selected = selection.includes(obj.name) && selectedActions.length === 0
     const folded = !!collapsed[obj.name]
+    const active = isActive(obj)
     return (
-      <li key={`${member ? 'm:' : ''}${obj.name}`} className={`object${selected ? ' selected' : ''}${member ? ' member' : ''}`}>
+      <li key={`${member ? 'm:' : ''}${obj.name}`} className={`object${selected ? ' selected' : ''}${member ? ' member' : ''}${active ? '' : ' inactive'}`} title={active ? undefined : 'Not on screen at the playhead'}>
         <div className="object-row" onClick={clickObject(obj.name)} onDoubleClick={() => jumpToObject(obj.name)} onContextMenu={objectMenu(obj)} title="Click to select, Ctrl-click to add, double-click to jump to the code, right-click for more">
           {obj.actions.length > 0 ? (
             <button
@@ -209,6 +234,7 @@ export function ObjectPane() {
         {obj.actions.length > 0 && !folded && (
           <ul className="action-list">
             {obj.actions.map((action, index) => {
+              if (activeAnimations && !running(action)) return null
               const isSelected = isActionSelected(selectedActions, obj.name, index)
               const title = action.overridden
                 ? `From all('${action.classAction!.className}'), switched off for ${obj.name} by its own override.`
@@ -269,6 +295,7 @@ export function ObjectPane() {
           <ul className="action-list">
             {group.actions.map((classAction) => {
               const span = classSpan(classAction)
+              if (activeAnimations && (!span || !running(span))) return null
               const isSelected = selectedClassActions.has(classAction)
               return (
                 <li
@@ -298,31 +325,52 @@ export function ObjectPane() {
     <div className="objects">
       {objects.length === 0 ? (
         <div className="empty" onContextMenu={blankMenu}>
-          {project ? 'No objects yet. Pick Rect, Circle, or Text above the preview and click where it goes, or right-click here.' : 'Open or create a project to begin.'}
+          {project ? 'No objects yet. Turn on Add object above the preview and click where it goes, or right-click here.' : 'Open or create a project to begin.'}
         </div>
       ) : (
         <>
           <div className="objects-tools">
-            <span className="dim">
-              {objects.length} {objects.length === 1 ? 'object' : 'objects'}
-              {selection.length > 1 ? `, ${selection.length} selected` : ''}
-            </span>
-            {foldable.length > 0 && (
-              <button className="small" onClick={() => setAllCollapsed('objects', anyExpanded ? foldable : null)} title={anyExpanded ? 'Hide every action list' : 'Show every action list'}>
-                {anyExpanded ? 'Collapse all' : 'Expand all'}
+            <div className="objects-tools-row">
+              <input className="objects-search" type="search" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search objects" title="Objects whose name, kind, class, or animations contain this" />
+              {foldable.length > 0 && (
+                <button className="small" onClick={() => setAllCollapsed('objects', anyExpanded ? foldable : null)} title={anyExpanded ? 'Fold every section, class, and action list' : 'Unfold everything'}>
+                  {anyExpanded ? 'Collapse all' : 'Expand all'}
+                </button>
+              )}
+            </div>
+            <div className="objects-tools-row">
+              <span className="dim" title="Only what is active at the playhead">Active:</span>
+              <button className={`small${activeOnly ? ' on' : ''}`} onClick={() => setActiveOnly(!activeOnly)} title={activeOnly ? 'Listing only the objects on screen at the playhead. Click to list every object; the ones not on screen are dimmed.' : 'Listing every object, the ones not on screen at the playhead dimmed. Click to list only the ones on screen.'} aria-pressed={activeOnly}>
+                objects
               </button>
-            )}
+              <button className={`small${activeAnimations ? ' on' : ''}`} onClick={() => setActiveAnimations(!activeAnimations)} title={activeAnimations ? 'Listing only the animations running at the playhead. Click to list every animation.' : 'Listing every animation. Click to list only the ones running at the playhead.'} aria-pressed={activeAnimations}>
+                animations
+              </button>
+              <span className="dim count">
+                {objects.length} {objects.length === 1 ? 'object' : 'objects'}
+                {selection.length > 1 ? `, ${selection.length} selected` : ''}
+              </span>
+            </div>
           </div>
           <ul className="object-list" onContextMenu={blankMenu}>
-            {groups.map(renderClass)}
-            {types.map((group) => (
-              <li key={group.className} className="group">
-                <div className="group-head dim">
-                  {group.className} <span className="mono">{group.objects.length}</span>
-                </div>
-                <ul className="type-list">{group.objects.map((obj) => renderObject(obj, false))}</ul>
-              </li>
-            ))}
+            {groups.filter((g) => g.members.some(shown)).map(renderClass)}
+            {types
+              .filter((group) => group.objects.some(shown))
+              .map((group) => {
+                const key = `type:${group.className}`
+                const folded = !!collapsed[key]
+                const count = group.objects.filter(shown).length
+                return (
+                  <li key={group.className} className="group">
+                    <div className="group-head dim" onClick={() => toggleCollapsed('objects', key)} title={folded ? 'Show these' : 'Hide these'}>
+                      <button className={`chevron${folded ? '' : ' open'}`} onClick={(e) => { e.stopPropagation(); toggleCollapsed('objects', key) }} aria-label={folded ? 'Show these' : 'Hide these'} aria-expanded={!folded} />
+                      {group.className} <span className="mono">{count}</span>
+                    </div>
+                    {!folded && <ul className="type-list">{group.objects.map((obj) => renderObject(obj, false))}</ul>}
+                  </li>
+                )
+              })}
+            {(q || activeOnly) && !objects.some(shown) && <li className="empty dim">Nothing matches.</li>}
           </ul>
         </>
       )}

@@ -201,6 +201,10 @@ button.small:hover {
   grid-template-rows: minmax(0, 1fr) 4px var(--row-now);
 }
 
+.column.left {
+  grid-template-rows: minmax(0, 1fr) 4px var(--row-presets);
+}
+
 .gutter {
   background: var(--gutter);
   transition: background 120ms;
@@ -435,7 +439,15 @@ button.icon:hover {
 }
 
 .preview-toolbar {
-  left: 10px;
+  left: 76px;
+  right: 270px;
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+.preview-toolbar button,
+.preview-toolbar .preview-chip {
+  white-space: nowrap;
 }
 
 .preview-tools {
@@ -1219,19 +1231,58 @@ button.icon:hover {
   user-select: text;
 }
 
-.help-shortcuts table {
-  border-collapse: collapse;
-  margin-bottom: 16px;
+.help-search {
+  width: 260px;
+  margin: 0 10px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
 }
 
-.help-shortcuts td {
+.help-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.help-section h2 {
+  font-size: 14px;
+  margin: 18px 0 6px;
+}
+
+.help-section table {
+  border-collapse: collapse;
+  margin-bottom: 4px;
+}
+
+.help-section td {
   padding: 3px 14px 3px 0;
   vertical-align: top;
+  line-height: 1.4;
 }
 
-.help-shortcuts td.mono {
+.help-section td.mono {
   color: var(--fg-dim);
   white-space: nowrap;
+}
+
+.help mark {
+  background: rgba(245, 158, 11, 0.35);
+  color: inherit;
+  border-radius: 2px;
+}
+
+.help-empty {
+  padding: 24px 0;
+  color: var(--fg-dim);
+}
+
+.help-language {
+  margin-top: 24px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
 }
 
 .markdown h1 {
@@ -1606,6 +1657,358 @@ button.chevron:hover {
   opacity: 1;
 }
 
+/* The links dialog (D172) */
+.links-dialog {
+  width: 560px;
+}
+
+.links-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.links-slot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.links-slot.active {
+  background: var(--accent-soft);
+}
+
+.links-slot .k {
+  width: 64px;
+  color: var(--fg-dim);
+}
+
+.links-slot .v.linked {
+  color: #93c5fd;
+}
+
+.links-search {
+  width: 100%;
+  margin: 4px 0 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+.links-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.links-list {
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px;
+}
+
+.links-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.links-row:hover {
+  background: var(--bg-raised);
+}
+
+.links-what {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.links-what .kind {
+  display: inline-block;
+  width: 64px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.links-parts {
+  display: inline-flex;
+  gap: 4px;
+  flex: none;
+}
+
+/* The object pane's tools, two rows with room to breathe (D184) */
+.objects-tools {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.objects-tools-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+}
+
+.objects-tools-row .count {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* Bake: a linked value settles into a literal (D189) */
+.bake-button {
+  padding: 1px 4px;
+  color: var(--fg-dim);
+}
+
+.bake-button:hover:not(:disabled) {
+  color: #fde68a;
+}
+
+.bake-icon {
+  flex: none;
+}
+
+/* The Selected pane's link buttons and evaluated links (D183) */
+.now-values td.l {
+  width: 22px;
+  padding: 0 2px;
+}
+
+.now-values .link-button {
+  padding: 1px 4px;
+  color: var(--fg-dim);
+}
+
+.now-values .link-button:hover {
+  color: #93c5fd;
+}
+
+.now-linked .now-input {
+  width: 150px;
+  color: #93c5fd;
+}
+
+.now-evaluated {
+  white-space: nowrap;
+}
+
+/* The links dialog, tiered (D182) */
+.links-dialog {
+  width: 720px;
+}
+
+.links-grid {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: 12px;
+  margin: 8px 0;
+}
+
+.links-grid .links-slots {
+  max-height: 340px;
+  overflow: auto;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px;
+}
+
+.links-slots .k {
+  width: 72px;
+}
+
+.links-slots .v {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.links-targets .links-search {
+  margin-top: 0;
+}
+
+.links-row {
+  display: block;
+  padding: 0;
+}
+
+.links-row .links-what {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 6px;
+  border-radius: 4px;
+  text-align: left;
+  color: var(--fg);
+  background: transparent;
+  overflow: hidden;
+}
+
+.links-row .links-what:hover,
+.links-row.open .links-what {
+  background: var(--bg-raised);
+}
+
+.links-row .caret {
+  width: 12px;
+  color: var(--fg-dim);
+}
+
+.links-row .links-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 6px 6px 30px;
+}
+
+/* The object pane's search and Active filter (D176) */
+.objects-search {
+  flex: 1 1 60px;
+  min-width: 40px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+}
+
+.objects-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.objects-tools button.small.on {
+  color: var(--accent);
+}
+
+.object-list li.object.inactive > .object-row .name,
+.object-list li.object.inactive > .object-row .dim,
+.object-list li.object.inactive > .object-row .glyph {
+  opacity: 0.45;
+}
+
+.object-list .group-head {
+  cursor: pointer;
+}
+
+.object-list .group-head .chevron {
+  margin-right: 2px;
+}
+
+/* The Selected pane's controls (D174) */
+.now-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.now-input {
+  width: 72px;
+  padding: 1px 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.now-input.text {
+  width: 140px;
+}
+
+.now-input:hover:not(:disabled) {
+  border-color: var(--border);
+}
+
+.now-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg);
+}
+
+.now-input:disabled {
+  color: var(--fg-dim);
+}
+
+.now-input::-webkit-outer-spin-button,
+.now-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.now-slider {
+  width: 90px;
+  accent-color: var(--accent);
+}
+
+.now-color {
+  width: 22px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+}
+
+.now-select {
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+}
+
+.now-linked {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #93c5fd;
+}
+
+.now-values tr.now-section td {
+  padding-top: 8px;
+  color: var(--fg-dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.now-note {
+  padding: 4px 8px 6px;
+  font-size: 11px;
+}
+
+.now-head .ident {
+  padding: 0 5px;
+  border-radius: 3px;
+  background: rgba(59, 130, 246, 0.25);
+  font-size: 11px;
+}
+
 /* Preferences (D145) */
 .prefs-dialog {
   width: 420px;
@@ -1696,14 +2099,6 @@ button.chevron:hover {
 
 .tl-row.dragging .tl-row-header {
   opacity: 0.5;
-}
-
-.tl-drop-line {
-  position: fixed;
-  height: 0;
-  border-top: 2px solid var(--accent);
-  pointer-events: none;
-  z-index: 50;
 }
 
 .class-list li {
@@ -1903,8 +2298,8 @@ button.chevron:hover {
 
 /* The app icon in the title bar. */
 .titlebar .app-icon {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   margin-right: 8px;
   border-radius: 3px;
   vertical-align: middle;
@@ -2167,6 +2562,16 @@ button.chevron:hover {
   color: #fde68a;
 }
 
+/* The guide where a drag has snapped (D179). */
+.tl-snap-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed var(--accent);
+  pointer-events: none;
+  z-index: 4;
+}
+
 /* Clips settle into their levels; the one being dragged follows the pointer, above the rest (D165). */
 .oclip {
   transition: top 120ms ease;
@@ -2236,33 +2641,174 @@ button.chevron:hover {
   color: #ffffff;
 }
 
-.absent {
+
+/* The Draw tool adds points to the selected path (D194). */
+.preview.drawing {
+  cursor: crosshair;
+}
+
+/* A line being drawn, until the pointer is let go. */
+.preview-sketch {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.09) 0 6px, transparent 6px 12px);
+  inset: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
-  z-index: 1;
 }
 
-.absent-edge {
+.preview-sketch polyline {
+  fill: none;
+  stroke: #86efac;
+  stroke-width: 1.5;
+}
+
+/* The tool palette down the left of the preview (D203). */
+.preview-palette {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 7px;
-  cursor: ew-resize;
-  pointer-events: auto;
-  background: rgba(255, 255, 255, 0.14);
+  left: 10px;
+  top: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.absent-edge.right {
-  right: 0;
+.preview-palette button {
+  width: 58px;
+  height: 24px;
+  border-radius: 4px;
+  background: rgba(32, 32, 32, 0.85);
+  color: var(--fg-dim);
+  font-size: 11px;
+  text-align: center;
 }
 
-.absent-edge.left {
-  left: 0;
+.preview-palette button:hover {
+  background: var(--bg-raised);
+  color: var(--fg);
 }
 
-.absent-edge:hover {
-  background: rgba(255, 255, 255, 0.4);
+.preview-palette button.active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+/* What the tool in hand does, on the status line (D203). */
+.preview-hud .hint {
+  color: var(--fg-dim);
+}
+
+/* An animation's bar slides to its lane when the stack changes; the one being dragged follows the pointer (D210). */
+.clip {
+  transition: top 120ms;
+}
+
+.clip.dragging {
+  transition: none;
+  z-index: 3;
+}
+
+/* The presets under the objects (D217). */
+.presets {
+  padding: 6px 10px 10px;
+  overflow: auto;
+  font-size: 12px;
+}
+
+.presets-section + .presets-section {
+  margin-top: 10px;
+}
+
+.presets-title {
+  margin: 4px 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-dim);
+}
+
+.presets-title .dim {
+  text-transform: none;
+  letter-spacing: 0;
+  margin-left: 6px;
+}
+
+.presets-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.preset {
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--fg);
+  font-size: 11px;
+}
+
+.preset:hover:not(:disabled) {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.preset:disabled {
+  opacity: 0.45;
+}
+
+/* The ease name menu in the code pane (D216). */
+.cm-ease-widget {
+  margin-left: 3px;
+  color: var(--fg-dim);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.cm-ease-widget:hover {
+  color: var(--fg);
+}
+
+.cm-ease-menu {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.cm-ease-menu button {
+  padding: 3px 10px;
+  text-align: left;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+}
+
+.cm-ease-menu button:hover,
+.cm-ease-menu button.on {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+/* An object's states in the links dialog, under "while" (D212). */
+.links-groups {
+  margin: 4px 0 6px 22px;
+}
+
+.links-group-heads {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.links-group-heads button.on {
+  background: var(--accent);
+  color: #ffffff;
 }

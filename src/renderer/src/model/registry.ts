@@ -88,17 +88,27 @@ export const GROUP = 'Group'
 
 export const CLASS_NAMES: ReadonlySet<string> = new Set(Object.keys(classes))
 
-export const VERBS = ['to', 'move', 'rotate', 'scale', 'resize', 'fade'] as const
+export const VERBS = ['to', 'move', 'rotate', 'resize', 'fade', 'path'] as const
 export type Verb = (typeof VERBS)[number]
-export const VERB_NAMES: ReadonlySet<string> = new Set(VERBS)
+
+/** Old names for verbs, still read, each as the verb it now is: `scale` folded into `resize` (D211). A file using one loads, with a note at the line. */
+export const VERB_ALIASES: Readonly<Record<string, Verb>> = { scale: 'resize' }
+
+/** The verb a written name means, or null when it is none. */
+export function canonicalVerb(name: string): Verb | null {
+  if ((VERBS as readonly string[]).includes(name)) return name as Verb
+  return VERB_ALIASES[name] ?? null
+}
+
+export const VERB_NAMES: ReadonlySet<string> = new Set([...VERBS, ...Object.keys(VERB_ALIASES)])
 
 /** Attributes each verb may change. Null means any animatable attribute. */
 export const VERB_ATTRS: Record<Verb, readonly string[] | null> = {
   to: null,
   move: ['x', 'y', 'z'],
+  path: ['x', 'y', 'rotation'],
   rotate: ['rotation'],
-  scale: ['scale'],
-  resize: ['width', 'height', 'radius', 'fontSize'],
+  resize: ['width', 'height', 'radius', 'fontSize', 'scale'],
   fade: ['opacity'],
 }
 
@@ -111,9 +121,9 @@ export const VERB_ATTRS: Record<Verb, readonly string[] | null> = {
 export const VERB_PARAMS: Record<Verb, readonly string[]> = {
   to: ['pivotX', 'pivotY'],
   move: [],
+  path: ['shape', 'orient', 'offset', 'smooth'],
   rotate: ['pivotX', 'pivotY'],
-  scale: ['pivotX', 'pivotY'],
-  resize: [],
+  resize: ['pivotX', 'pivotY'],
   fade: [],
 }
 export const PIVOT_PARAMS = ['pivotX', 'pivotY'] as const
@@ -121,8 +131,8 @@ export const PIVOT_PARAMS = ['pivotX', 'pivotY'] as const
 /** One color per kind of change, used wherever an action is shown. */
 export const VERB_COLORS: Record<Verb, string> = {
   move: '#3b82f6',
+  path: '#86efac',
   rotate: '#a855f7',
-  scale: '#f59e0b',
   resize: '#f59e0b',
   fade: '#64748b',
   to: '#10b981',
@@ -154,4 +164,11 @@ export function defaultFor(className: string, attr: string, attrs: Record<string
   const literals: Record<string, AttrValue> = {}
   for (const [key, value] of Object.entries(attrs)) if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean') literals[key] = value
   return schema.derive(literals)
+}
+
+/** The text color that reads on a color: dark on a light one, white otherwise (D201). */
+export function labelOn(hex: string): string {
+  const n = parseInt(hex.slice(1, 7), 16)
+  const luminance = (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255
+  return luminance > 0.6 ? '#111827' : '#ffffff'
 }

@@ -2,13 +2,13 @@ import type { ReactNode } from 'react'
 
 interface PaneProps {
   title: string
-  side: 'left' | 'right' | 'bottom' | 'now' | 'center'
+  side: 'left' | 'right' | 'bottom' | 'now' | 'center' | 'presets'
   collapsed: boolean
   onToggle?: () => void
   children: ReactNode
 }
 
-const COLLAPSE_GLYPH = { left: '◂', right: '▸', bottom: '▾', now: '▾', center: '' } as const
+const COLLAPSE_GLYPH = { left: '◂', right: '▸', bottom: '▾', now: '▾', presets: '▾', center: '' } as const
 
 /** A titled pane. Collapsed, it becomes a thin strip that expands on click. */
 export function Pane({ title, side, collapsed, onToggle, children }: PaneProps) {

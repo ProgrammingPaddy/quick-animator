@@ -49,7 +49,21 @@ export const namedEasings: Record<string, Easing> = {
 /** Default ease at each end, as a fraction of the duration. */
 export const DEFAULT_EASE_FRACTION = 0.3
 
-export function easingFor(timing: { ease?: string; easeIn?: number; easeOut?: number }, duration: number): Easing {
+export function easingFor(timing: { ease?: string | Easing; easeIn?: number; easeOut?: number }, duration: number): Easing {
+  if (typeof timing.ease === 'function') {
+    // A custom curve written in the code, `ease: (p) => p * p`: whatever it returns, within 0 to 1; a throw holds the ends.
+    const custom = timing.ease
+    return (p) => {
+      if (p <= 0) return 0
+      if (p >= 1) return 1
+      try {
+        const v = Number(custom(p))
+        return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : p
+      } catch {
+        return p
+      }
+    }
+  }
   if (timing.ease && namedEasings[timing.ease]) return namedEasings[timing.ease]!
   const easeIn = timing.easeIn ?? duration * DEFAULT_EASE_FRACTION
   const easeOut = timing.easeOut ?? duration * DEFAULT_EASE_FRACTION

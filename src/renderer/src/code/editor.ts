@@ -1,7 +1,7 @@
 import { acceptCompletion, autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete'
 import { defaultKeymap, history, indentLess, indentSelection, invertedEffects, redo, undo } from '@codemirror/commands'
 import { javascript } from '@codemirror/lang-javascript'
-import { bracketMatching, foldGutter, foldKeymap, indentOnInput, indentUnit, syntaxHighlighting } from '@codemirror/language'
+import { bracketMatching, ensureSyntaxTree, foldable, foldEffect, foldedRanges, foldGutter, foldKeymap, indentOnInput, indentUnit, syntaxHighlighting } from '@codemirror/language'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import { Annotation, EditorState, RangeSet, RangeSetBuilder, StateEffect, StateField, Transaction, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, GutterMarker, WidgetType, drawSelection, gutterLineClass, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from '@codemirror/view'
@@ -9,6 +9,8 @@ import type { TextEdit } from '../model/edits'
 import type { Range } from '../model/types'
 import type { SelectionState } from '../state/store'
 import { colorSwatches } from './colors'
+import { easePicks } from './easePicker'
+import { numberScrub } from './scrub'
 import { sceneCompletions } from './completions'
 import { editorHighlight, editorTheme } from './theme'
 
@@ -245,6 +247,8 @@ function extensions(): Extension[] {
     search({ top: true }),
     autocompletion({ override: [sceneCompletions], icons: false }),
     colorSwatches,
+    easePicks,
+    numberScrub({ begin: beginGesture, end: endGesture }),
     EditorView.lineWrapping,
     javascript(),
     syntaxHighlighting(editorHighlight),
@@ -299,6 +303,29 @@ export function resetEditorDoc(text: string): void {
   } finally {
     suppress = false
   }
+  foldShapes()
+}
+
+/** Fold every `shape: [` list that spans lines, so a path's points stay out of the way until wanted (D204); one already open is left open. */
+export function foldShapes(): void {
+  if (!view) return
+  const { state } = view
+  // A freshly loaded file may not be parsed yet, and a fold needs the tree.
+  ensureSyntaxTree(state, state.doc.length, 500)
+  const effects: StateEffect<unknown>[] = []
+  const folded = foldedRanges(state)
+  for (let n = 1; n <= state.doc.lines; n++) {
+    const line = state.doc.line(n)
+    if (!/^\s*shape:\s*\[\s*$/.test(line.text)) continue
+    const range = foldable(state, line.from, line.to)
+    if (!range) continue
+    let open = true
+    folded.between(range.from, range.to, (from, to) => {
+      if (from === range.from && to === range.to) open = false
+    })
+    if (open) effects.push(foldEffect.of(range))
+  }
+  if (effects.length > 0) view.dispatch({ effects })
 }
 
 /**
@@ -320,6 +347,7 @@ export function setEditorDoc(text: string): void {
   } finally {
     suppress = false
   }
+  foldShapes()
 }
 
 /** Which gesture a transaction belongs to, so the history joins a gesture's edits (D22). */

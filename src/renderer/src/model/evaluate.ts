@@ -1,7 +1,7 @@
-import { CLASS_NAMES, GROUP, TIMING_KEY_NAMES, VERB_ATTRS, VERB_NAMES, VERB_PARAMS, classes, type Verb } from './registry'
+import { CLASS_NAMES, GROUP, TIMING_KEY_NAMES, VERB_ALIASES, VERB_ATTRS, VERB_NAMES, VERB_PARAMS, canonicalVerb, classes, type Verb } from './registry'
 import { parseScene } from './parse'
-import { samplingContext, valueAt } from './sample'
-import type { Action, ActionInfo, AttrSource, ClassAction, SceneError, SceneModel, SceneObject, TimeRef, Timing } from './types'
+import { forgetSampling, samplingContext, stateStretches, valueAt, type Stretch } from './sample'
+import { STATE_DIRECTIONS, STATE_NAMES, type Action, type ActionInfo, type AttrSource, type ClassAction, type SceneError, type SceneModel, type SceneObject, type StateDirection, type StateName, type TimeRef, type Timing } from './types'
 
 /** Links a handle (what user code holds) to the model entry behind it. */
 const HANDLE = Symbol('handle')
@@ -78,8 +78,16 @@ export function isMember(obj: SceneObject, name: string): boolean {
  * The file runs as plain JavaScript inside a scope that already holds every class, so nothing is
  * imported, and a bare `name = Circle({ ... })` names the object (decision D48).
  */
-export function evaluateScene(source: string): EvaluateResult {
+export function evaluateScene(source: string, fps = 60): EvaluateResult {
   const parsed = parseScene(source, CLASS_NAMES, VERB_NAMES)
+  // A statement written with an old name for a verb is the verb it now means, and remembers the name for a note (D211).
+  for (const info of parsed.actions) {
+    const meant = VERB_ALIASES[info.verb]
+    if (meant) {
+      info.alias = info.verb
+      info.verb = meant
+    }
+  }
   if (parsed.error) return { model: null, error: { message: parsed.error.message, line: parsed.error.line } }
 
   // Blank out `const` and friends in front of recognised statements so every name is assigned
@@ -132,8 +140,8 @@ export function evaluateScene(source: string): EvaluateResult {
         continue
       }
       if (VERB_PARAMS[verb].includes(key)) {
-        // Only a group pivots: for anything else the point is meaningless and is dropped with a note.
-        if (className === GROUP) changes[key] = value as AttrSource
+        // Only a group pivots: for anything else the point is meaningless and is dropped with a note. A path's shape and its settings belong to any object's path (D192).
+        if (className === GROUP || verb === 'path') changes[key] = value as AttrSource
         else warn(`${owner}.${verb}: ${key} applies to a group's ${verb}`)
         continue
       }
@@ -174,6 +182,8 @@ export function evaluateScene(source: string): EvaluateResult {
   const addAction = (obj: SceneObject, verb: Verb, args: unknown[]): Record<string | symbol, unknown> => {
     const mark = raised.length
     const block = readBlock(obj.name, verb, obj.className, args)
+    // A path is nothing without its shape: points, or a function of the progress (D192).
+    if (verb === 'path' && !('shape' in block.changes)) warn(`${obj.name}.path needs a shape: points [[x, y], ...] or a function of the progress, (p) => [x, y]`)
     const action = makeAction(obj, verb, block, null)
     claim(mark, action)
     if (block.overrides !== undefined) {
@@ -200,16 +210,37 @@ export function evaluateScene(source: string): EvaluateResult {
     return actionHandle(classAction.members, classAction)
   }
 
+  /**
+   * A state of an object as a handle (D212): `box.moving` is its first stretch of moving, with
+   * `start`, `end`, and `progress(f)`; `box.moving[2]` its second and `box.moving.last` its last;
+   * `box.moving.right` the stretches of moving right, and `box.turning.clockwise` likewise.
+   */
+  const stateHandle = (obj: SceneObject, name: StateName, direction: StateDirection | undefined, index: number | 'last'): unknown =>
+    new Proxy({} as Record<string | symbol, unknown>, {
+      get(_target, key) {
+        if (typeof key !== 'string') return undefined
+        const ref = (part: 'start' | 'end' | 'progress', fraction?: number) => timeRef({ kind: 'state', actions: [], object: obj, state: { name, direction, index, part }, fraction })
+        if (key === 'start' || key === 'end') return ref(key)
+        if (key === 'progress') return (fraction: number) => ref('progress', fraction)
+        if (key === 'last') return stateHandle(obj, name, direction, 'last')
+        if (/^\d+$/.test(key)) return stateHandle(obj, name, direction, Math.max(1, Number(key)))
+        if (direction === undefined && (STATE_DIRECTIONS[name] as readonly string[] | undefined)?.includes(key)) return stateHandle(obj, name, key as StateDirection, index)
+        return undefined
+      },
+    })
+
   const objectHandle = (obj: SceneObject): unknown => {
     const schema = classes[obj.className]!
     return new Proxy({} as Record<string | symbol, unknown>, {
       get(_target, key) {
         if (key === HANDLE) return obj
         if (typeof key !== 'string') return undefined
-        if (VERB_NAMES.has(key)) return (...args: unknown[]) => addAction(obj, key as Verb, args)
+        if (VERB_NAMES.has(key)) return (...args: unknown[]) => addAction(obj, canonicalVerb(key)!, args)
         if (key === 'name') return obj.name
         // When the object begins and when it is removed, as time references (D138).
         if (key === 'start' || key === 'end') return timeRef({ kind: key === 'start' ? 'objectStart' : 'objectEnd', actions: [], object: obj })
+        // What the object is doing, as time references worked out once the file has run (D212).
+        if ((STATE_NAMES as readonly string[]).includes(key)) return stateHandle(obj, key as StateName, undefined, 1)
         const attr = schema.attrs.find((a) => a.name === key)
         if (attr) {
           if (samplingContext.model) return valueAt(samplingContext.model, obj, key, samplingContext.time)
@@ -289,7 +320,7 @@ export function evaluateScene(source: string): EvaluateResult {
     if (typeof className !== 'string' || !className) throw new Error("all() expects a class name, as in all('logos')")
     return new Proxy({} as Record<string | symbol, unknown>, {
       get(_target, key) {
-        if (typeof key === 'string' && VERB_NAMES.has(key)) return (...args: unknown[]) => addClassAction(className, key as Verb, args)
+        if (typeof key === 'string' && VERB_NAMES.has(key)) return (...args: unknown[]) => addClassAction(className, canonicalVerb(key)!, args)
         return undefined
       },
     })
@@ -424,6 +455,8 @@ export function evaluateScene(source: string): EvaluateResult {
       if (info && info.verb === action.verb) {
         action.stmt = info
         if (info.name && !action.name) action.name = info.name
+        // An old name for the verb still runs, and says so at its line (D211).
+        if (info.alias) warn(`${obj.name}.${info.alias} is now ${action.verb}: write ${obj.name}.${action.verb}({ ... })`, action)
         next++
       } else {
         action.codeDriven = true
@@ -452,6 +485,31 @@ export function evaluateScene(source: string): EvaluateResult {
   const resolved = new Map<number, [number, number]>()
   const resolving = new Set<number | string>()
   const lifetimes = new Map<number, { at: number; until: number | null }>()
+  const states = new Map<string, Stretch[]>()
+
+  /**
+   * The stretches of a state (D212). Everything not already being worked out is worked out
+   * first, so the object's values can be sampled; an animation of the object itself that waits on
+   * this state is a loop, and says so. The sampler's memory is dropped after, since what it saw may
+   * still change.
+   */
+  function statesOf(obj: SceneObject, name: StateName, direction: StateDirection | undefined): Stretch[] {
+    const key = `${obj.id}:${name}:${direction ?? ''}`
+    const memo = states.get(key)
+    if (memo) return memo
+    for (const other of objects) if (!resolving.has(`object ${other.id}`)) resolveLifetime(other)
+    for (const action of actions) if (!resolving.has(action.id)) resolveAction(action)
+    for (const action of obj.actions) {
+      if (!action.overridden && resolving.has(action.id)) {
+        const stmt = action.stmt ?? action.classAction?.stmt ?? null
+        throw new TimingError(`${obj.name}.${action.verb} waits on ${obj.name}.${name}, which it is part of`, stmt ? lineAt(source, stmt.range.from) : undefined)
+      }
+    }
+    const stretches = stateStretches(model, obj, name, direction, fps)
+    forgetSampling(model)
+    states.set(key, stretches)
+    return stretches
+  }
 
   const timeOf = (ref: unknown, fallback: number, what: string): number => {
     if (ref === undefined) return fallback
@@ -464,6 +522,17 @@ export function evaluateScene(source: string): EvaluateResult {
       const real = handle === undefined || handle === null ? undefined : part === 'progress' ? (handle['progress'] as ((f: number) => unknown) | undefined)?.(ref.fraction ?? 0) : handle[part]
       if (!isTimeRef(real)) throw new Error(`${what}: ${name}.${part} is not a time; ${name} must be an object or an animation`)
       return timeOf(real, fallback, what)
+    }
+    if (ref.kind === 'state' && ref.state && ref.object) {
+      // A state is read off the finished timeline (D212): every other animation is worked out first, and this one sees its own object's.
+      const { name, direction, index, part } = ref.state
+      const stretches = statesOf(ref.object, name, direction)
+      const label = `${ref.object.name}.${name}${direction ? `.${direction}` : ''}`
+      const stretch = index === 'last' ? stretches[stretches.length - 1] : stretches[index - 1]
+      if (!stretch) throw new Error(stretches.length === 0 ? `${what}: ${ref.object.name} is never ${name}${direction ? ` ${direction}` : ''}` : `${what}: ${label} happens ${stretches.length} ${stretches.length === 1 ? 'time' : 'times'}, so there is no ${label}[${index}]`)
+      if (part === 'start') return stretch.start
+      if (part === 'end') return stretch.end
+      return stretch.start + (stretch.end - stretch.start) * (ref.fraction ?? 0)
     }
     if (ref.kind === 'objectStart' || ref.kind === 'objectEnd') {
       if (!ref.object) return fallback
@@ -522,8 +591,8 @@ export function evaluateScene(source: string): EvaluateResult {
     const index = action.object.actions.indexOf(action)
     let previous: Action | undefined
     for (let i = index - 1; i >= 0 && !previous; i--) if (!action.object.actions[i]!.overridden) previous = action.object.actions[i]
-    // Without `at`, an action follows the one before it, and the first starts when the object begins (D138).
-    const fallbackStart = previous ? resolveAction(previous)[1] : resolveLifetime(action.object).at
+    // Without `at`, an action follows the one before it, which is worked out first, and the first starts when the object begins (D138). With `at`, the one before is left alone, so a later animation that waits on a state is no loop through it (D212).
+    const fallbackStart = action.timing.at === undefined && previous ? resolveAction(previous)[1] : resolveLifetime(action.object).at
     let start: number
     let duration: number
     try {

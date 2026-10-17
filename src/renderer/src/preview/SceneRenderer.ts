@@ -228,6 +228,76 @@ class Cross {
 }
 
 const guideMaterial = new THREE.MeshBasicMaterial({ color: 0x3b82f6, depthTest: false, transparent: true })
+const pathMaterial = new THREE.MeshBasicMaterial({ color: 0x86efac, depthTest: false, transparent: true, opacity: 0.9 })
+
+/** A handle on each point of an editable path, the one last placed or picked a little larger (D194). */
+const POINT_PX = 7
+const ACTIVE_POINT_PX = 10
+
+/** The line of a selected path, its start as a dot and its end as a diamond (D192), and a handle on each point when the points can be edited (D194). */
+class PathLine {
+  readonly group = new THREE.Group()
+  private readonly segments: THREE.Mesh[] = []
+  private readonly start = new THREE.Mesh(unitCircle, pathMaterial)
+  private readonly end = new THREE.Mesh(unitPlane, pathMaterial)
+  private readonly handles: Marker[] = []
+
+  constructor() {
+    this.start.renderOrder = ORDER + 7
+    this.end.renderOrder = ORDER + 7
+    this.end.rotation.z = Math.PI / 4
+    this.group.add(this.start, this.end)
+    this.group.visible = false
+  }
+
+  set(points: { x: number; y: number }[], pixel: number, anchors: { x: number; y: number }[] | null = null, active: number[] = []): void {
+    if (points.length === 0) {
+      this.group.visible = false
+      return
+    }
+    this.group.visible = true
+    const shown = anchors ? anchors.length : 0
+    while (this.handles.length < shown) {
+      const mark = new Marker(unitPlane)
+      this.group.add(mark.group)
+      this.handles.push(mark)
+    }
+    this.handles.forEach((mark, i) => {
+      if (i < shown) mark.set(anchors![i]!.x, anchors![i]!.y, 0, (active.includes(i) ? ACTIVE_POINT_PX : POINT_PX) * pixel, pixel)
+      else mark.hide()
+    })
+    while (this.segments.length < points.length - 1) {
+      const mesh = new THREE.Mesh(unitPlane, pathMaterial)
+      mesh.renderOrder = ORDER + 6
+      this.group.add(mesh)
+      this.segments.push(mesh)
+    }
+    this.segments.forEach((mesh, i) => {
+      const a = points[i]
+      const b = points[i + 1]
+      mesh.visible = !!a && !!b
+      if (!a || !b) return
+      const length = Math.hypot(b.x - a.x, b.y - a.y)
+      mesh.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, 0.85)
+      mesh.rotation.z = Math.atan2(b.y - a.y, b.x - a.x)
+      mesh.scale.set(length, LINE_PX * 1.5 * pixel, 1)
+    })
+    const first = points[0]!
+    const last = points[points.length - 1]!
+    this.start.position.set(first.x, first.y, 0.86)
+    this.start.scale.set(8 * pixel, 8 * pixel, 1)
+    this.end.position.set(last.x, last.y, 0.86)
+    this.end.scale.set(8 * pixel, 8 * pixel, 1)
+  }
+
+  count(): number {
+    return this.group.visible ? this.segments.filter((m) => m.visible).length : 0
+  }
+
+  hide(): void {
+    this.group.visible = false
+  }
+}
 
 /** Thin lines across the view where a dragged box has snapped to an edge or a center (D135). */
 class Guides {
@@ -293,6 +363,10 @@ export class SceneRenderer {
   private readonly anchorMarks: Marker[] = []
   private readonly stem: THREE.Mesh
   private readonly guides = new Guides()
+  /** The selected path (D191). */
+  readonly pathLine = new PathLine()
+  /** The selected object's other paths (D205). */
+  private readonly otherLines: PathLine[] = []
   /** The handles shown right now, with their world positions, for picking. */
   private handles: { handle: Handle; x: number; y: number; radius: number }[] = []
   private readonly raycaster = new THREE.Raycaster()
@@ -312,7 +386,7 @@ export class SceneRenderer {
     this.stem = new THREE.Mesh(unitPlane, lightMaterial)
     this.stem.renderOrder = ORDER + 1
     this.stem.visible = false
-    this.group.add(this.gizmoOutline.group, this.rotateRing, this.rotateHandle.group, this.anchorCross.group, this.stem, this.guides.group)
+    this.group.add(this.gizmoOutline.group, this.rotateRing, this.rotateHandle.group, this.anchorCross.group, this.stem, this.guides.group, this.pathLine.group)
   }
 
   private outline(index: number): Outline {
@@ -433,6 +507,30 @@ export class SceneRenderer {
   /** Show the lines a drag has snapped to, across the view (D135). They stay until cleared. */
   setGuides(lines: GuideLine[], view: { left: number; right: number; top: number; bottom: number }, pixel: number): void {
     this.guides.set(lines, view, pixel)
+  }
+
+  /** Draw a path's curve as a line with its ends marked, with a handle on each anchor when they can be edited, the picked ones larger, or nothing (D192, D194, D198). */
+  setPath(points: { x: number; y: number }[] | null, pixel: number, anchors: { x: number; y: number }[] | null = null, active: number[] = []): void {
+    if (points) this.pathLine.set(points, pixel, anchors, active)
+    else this.pathLine.hide()
+  }
+
+  /** The other paths of the selected object, as lines without handles (D205). */
+  setOtherPaths(curves: { x: number; y: number }[][], pixel: number): void {
+    while (this.otherLines.length < curves.length) {
+      const line = new PathLine()
+      this.group.add(line.group)
+      this.otherLines.push(line)
+    }
+    this.otherLines.forEach((line, i) => {
+      if (i < curves.length) line.set(curves[i]!, pixel)
+      else line.hide()
+    })
+  }
+
+  /** How many path lines show right now, the selected one included. */
+  pathLineCount(): number {
+    return (this.pathLine.group.visible ? 1 : 0) + this.otherLines.filter((l) => l.group.visible).length
   }
 
   clearGuides(): void {

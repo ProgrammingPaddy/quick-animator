@@ -4,12 +4,13 @@ import { ClassesDialogLayer } from './components/ClassesDialog'
 import { ContextMenuLayer } from './components/ContextMenu'
 import { DialogLayer } from './components/Dialog'
 import { ExportDialogLayer } from './components/ExportDialog'
+import { LinksDialogLayer } from './components/LinksDialog'
 import { PreferencesDialogLayer } from './components/PreferencesDialog'
 import { HelpOverlay } from './components/HelpOverlay'
 import { Layout } from './Layout'
 import { runHeadless } from './export/headless'
 import { initProject } from './project/controller'
-import { copySelection, cutSelection, deleteActions, deleteObjects, duplicateObjects, nudgeActions, nudgeObjects, nudgeObjectsInTime, pasteClipboard, requestRename } from './project/operations'
+import { copySelection, cutSelection, deleteActions, deleteObjects, duplicateObjects, nudgeActions, nudgeObjects, nudgeObjectsInTime, pasteClipboard, removePathPoints, requestRename } from './project/operations'
 import { useClock } from './state/clock'
 import { useStore } from './state/store'
 
@@ -55,7 +56,7 @@ export function App() {
         store.setHelp(!store.help)
         return
       }
-      if (store.dialog || store.classesDialog || isTypingTarget(e.target)) return
+      if (store.dialog || store.classesDialog || store.linksDialog || isTypingTarget(e.target)) return
       const { togglePlaying, stepFrames, setTime, setPlaying, contentEnd, time, selection, selectedActions, select, tool, setTool } = store
       const ctrl = e.ctrlKey || e.metaKey
       if (ctrl && e.code === 'KeyE') {
@@ -132,8 +133,12 @@ export function App() {
           break
         case 'Delete':
         case 'Backspace':
-          // Delete what is fully highlighted: the selected actions, or else the selected objects (D73).
-          if (selectedActions.length > 0) {
+          // Delete what is fully highlighted: a path's picked points (D194, D198), the selected actions, or else the selected objects (D73).
+          if (store.pathPoints.length > 0 && selectedActions.length === 1) {
+            e.preventDefault()
+            removePathPoints(selectedActions[0]!, store.pathPoints)
+            store.setPathPoints([])
+          } else if (selectedActions.length > 0) {
             e.preventDefault()
             deleteActions(selectedActions)
           } else if (selection.length > 0) {
@@ -143,6 +148,7 @@ export function App() {
           break
         case 'Escape':
           if (tool !== 'select') setTool('select')
+          else if (store.pathPoints.length > 0) store.setPathPoints([])
           else if (selectedActions.length > 0) select(selection)
           else select([])
           break
@@ -167,6 +173,7 @@ export function App() {
       <DialogLayer />
       <ExportDialogLayer />
       <PreferencesDialogLayer />
+      <LinksDialogLayer />
       <ClassesDialogLayer />
       <HelpOverlay />
     </>

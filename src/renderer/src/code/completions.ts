@@ -4,7 +4,7 @@ import type { EditorState } from '@codemirror/state'
 import type { SyntaxNode } from '@lezer/common'
 import { formatValue } from '../model/edits'
 import { classes, EASE_NAMES, TIMING_KEYS, VERBS, VERB_ATTRS, type AttrSchema, type Verb } from '../model/registry'
-import type { SceneModel } from '../model/types'
+import { STATE_DIRECTIONS, STATE_NAMES, type SceneModel, type StateName } from '../model/types'
 import { useStore } from '../state/store'
 
 /**
@@ -42,10 +42,24 @@ const TIMING_PLACEHOLDER: Record<string, string> = {
 const VERB_DOCS: Record<Verb, string> = {
   move: 'Move to a position over time.',
   rotate: 'Turn to an angle over time.',
-  scale: 'Grow or shrink over time.',
-  resize: 'Change width, height, radius, or font size over time.',
+  resize: 'Change width, height, radius, or font size over time; or scale, a multiplier of the drawn size, which is how a group grows or shrinks, around its pivot.',
   fade: 'Change opacity over time. Opacity 0 means the object does not exist.',
   to: 'Change any attributes over time.',
+  path: 'Take the object along a path over time: shape is points [[x, y], ...] or a function of the progress, (p) => [x, y]; orient turns the object with the path; offset shifts the whole path (D192).',
+}
+
+/** The keys of a path block besides its timing (D192). */
+const PATH_DOCS: Record<string, string> = {
+  shape: "The path: points [[x, y], ...] in the scene's space, traveled by distance, or a function of the progress, (p) => [x, y].",
+  orient: 'true: the object turns to face along the path.',
+  offset: 'A shift of the whole path, [dx, dy].',
+  smooth: 'true: a smooth curve through the points instead of straight lines between them.',
+}
+
+function pathCompletion(key: string): Completion {
+  const f = new Fields()
+  const text = key === 'shape' ? `shape: [\n    [${f.field('0')}, ${f.field('0')}],\n    [${f.field('200')}, ${f.field('0')}],\n  ],` : key === 'offset' ? `offset: [${f.field('0')}, ${f.field('0')}],` : `${key}: ${f.field('true')},`
+  return snippetCompletion(text, { label: key, info: PATH_DOCS[key], type: 'property' })
 }
 
 /**
@@ -90,6 +104,7 @@ function verbSnippet(verb: Verb, className: string | undefined): Completion {
   const lines: string[] = []
   const allowed = VERB_ATTRS[verb]
   if (verb === 'to') lines.push(`  ${f.field('')}`)
+  else if (verb === 'path') lines.push('  shape: [', `    [${f.field('0')}, ${f.field('0')}],`, `    [${f.field('200')}, ${f.field('0')}],`, '  ],')
   else if (allowed && className) {
     const schema = classes[className]
     const attrs = allowed.filter((a) => schema?.attrs.some((s) => s.name === a)).slice(0, verb === 'move' ? 2 : 1)
@@ -231,13 +246,34 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
     return { from: pos - inSelector[1]!.length, options: selectorOptions(model), validFor: /^[\w$-]*$/ }
   }
 
+  // object.state.| : the moments of a state, and its directions (D212).
+  const stateMember = /([A-Za-z_$][\w$]*)\.(moving|still|turning|growing|shrinking|visible|hidden|fadingIn|fadingOut)((?:\.(?:left|right|up|down|clockwise|counterclockwise|last))?(?:\[\d+\])?)\.([\w$]*)$/.exec(before)
+  if (stateMember) {
+    const obj = model?.objects.find((o) => o.name === stateMember[1])
+    if (!obj) return null
+    const name = stateMember[2] as StateName
+    const options: Completion[] = [
+      { label: 'start', type: 'property', info: `When ${obj.name} starts ${name}.` },
+      { label: 'end', type: 'property', info: `When ${obj.name} stops ${name}.` },
+      snippetCompletion('progress(${1:0.5})', { label: 'progress', detail: '(fraction)', info: 'A fraction of the way through the stretch.', type: 'method' }),
+    ]
+    if (!stateMember[3]) {
+      options.push({ label: 'last', type: 'property', info: `The last stretch of ${name}; a number in brackets, [2], picks one by count.` })
+      for (const direction of STATE_DIRECTIONS[name] ?? []) options.push({ label: direction, type: 'property', info: `Only while ${name} ${direction}.` })
+    }
+    return { from: pos - stateMember[4]!.length, options, validFor: /^[\w$]*$/ }
+  }
+
   // object.| or action.|
   const member = /([A-Za-z_$][\w$]*)\.([\w$]*)$/.exec(before)
   if (member) {
     const owner = member[1]!
     const from = pos - member[2]!.length
     const obj = model?.objects.find((o) => o.name === owner)
-    if (obj) return { from, options: VERBS.map((v) => verbSnippet(v, obj.className)), validFor: /^[\w$]*$/ }
+    if (obj) {
+      const states: Completion[] = STATE_NAMES.map((s) => ({ label: s, type: 'property', info: `What ${obj.name} is doing, as a time: ${obj.name}.${s}.start and .end, [2] for the second stretch, .last for the last.` }))
+      return { from, options: [...VERBS.map((v) => verbSnippet(v, obj.className)), { label: 'start', type: 'property', info: `When ${obj.name} begins.` }, { label: 'end', type: 'property', info: `When ${obj.name} is removed.` }, ...states], validFor: /^[\w$]*$/ }
+    }
     const action = model?.actions.find((a) => a.name === owner)
     if (action) {
       return {
@@ -296,7 +332,9 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
       const owner = call.objectName ? model?.objects.find((o) => o.name === call.objectName) : call.cssClass ? model?.objects.find((o) => o.classes.includes(call.cssClass!) || o.className === call.cssClass) : undefined
       const className = owner?.className
       const allowed = VERB_ATTRS[call.verb!]
-      if (className) {
+      // A path block takes its shape and settings in place of attributes (D192).
+      if (call.verb === 'path') for (const key of Object.keys(PATH_DOCS)) if (!present.has(key)) options.push(pathCompletion(key))
+      else if (className) {
         for (const attr of classes[className]!.attrs) {
           if (!attr.animatable || present.has(attr.name)) continue
           if (allowed && !allowed.includes(attr.name)) continue

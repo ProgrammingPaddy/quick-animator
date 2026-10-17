@@ -1,13 +1,14 @@
-import { applyEdits, beginGesture, endGesture, scrollToPos } from '../code/editor'
+import { applyEdits, beginGesture, endGesture, foldShapes, scrollToPos } from '../code/editor'
 import { findDependents, type Dependent } from '../model/dependents'
-import { appendStatement, blockText, formatNumber, insertDeclaration, removeProp, removeStatements, setProp, setPropText, type TextEdit } from '../model/edits'
+import { appendStatement, blockText, formatNumber, insertDeclaration, moveStatementEdits, removeProp, removeStatements, setProp, setPropText, type TextEdit } from '../model/edits'
 import { isMember } from '../model/evaluate'
 import { memberRef, normalizeSelection } from '../model/groups'
-import { classes, GROUP, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
-import { memberBox } from '../model/sample'
+import { classes, GROUP, TIMING_KEY_NAMES, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
+import { memberBox, pathFrame, pathHolds, pathShift, positionAt, type Point } from '../model/sample'
+import { insertPointsEdit, pointText, removePointEdit, setPointEdit, shapeLiteral, type ShapeLiteral } from '../model/pathEdits'
 import { identifierEdits, nameProblem, replaceIdentifiers } from '../model/rename'
 import { currentWritten, definingAction, shownValue, valueAt, withWritten, writtenValues } from '../model/sample'
-import type { Action, ActionInfo, ClassAction, Range, SceneModel, SceneObject } from '../model/types'
+import type { Action, ActionInfo, BlockInfo, ClassAction, Range, SceneModel, SceneObject } from '../model/types'
 import { useStore, type ActionRef, type Clip, type ClipAction, type ClipObject, type Pin, type SelectionState, type ObjectKind } from '../state/store'
 
 /**
@@ -95,7 +96,8 @@ export function verbFor(attrs: string[]): Verb {
   const set = new Set(attrs)
   if (set.size > 0 && [...set].every((a) => a === 'x' || a === 'y' || a === 'z')) return 'move'
   if (set.size === 1 && set.has('rotation')) return 'rotate'
-  if (set.size === 1 && set.has('scale')) return 'scale'
+  // A scaling is a resize by a factor (D211).
+  if (set.size === 1 && set.has('scale')) return 'resize'
   if (set.size === 1 && set.has('opacity')) return 'fade'
   if (set.size > 0 && [...set].every((a) => RESIZE_ATTRS.includes(a))) return 'resize'
   return 'to'
@@ -187,9 +189,12 @@ export function setAttrsAtMany(entries: { name: string; attrs: Record<string, nu
   const { model, source } = state()
   if (!model) return false
   const edits: TextEdit[] = []
-  for (const { name, attrs } of entries) {
+  for (const { name, attrs: wanted } of entries) {
     const found = model.objects.find((o) => o.name === name)
     if (!found) continue
+    // A value a path owns right now cannot be written to show: the path is edited instead (D205), and the solver is kept off it.
+    const attrs = Object.fromEntries(Object.entries(wanted).filter(([attr]) => !pathHolds(found, attr, time)))
+    if (Object.keys(attrs).length === 0) continue
     let obj: SceneObject = found
     let probed = model
     const definers = Object.fromEntries(['x', 'y', ...Object.keys(attrs)].map((attr) => [attr, definingAction(found, attr, time)]))
@@ -252,18 +257,22 @@ export function setActionDestination(name: string, index: number, destination: R
   if (!model || !obj || !action?.stmt || action.classAction) return false
   const stmt = action.stmt
   const schema = classes[obj.className]
-  // A resize whose center moves becomes a `to`, which can hold the position as well.
-  const upgrade = action.verb === 'resize' && ('x' in destination || 'y' in destination) && !('x' in action.changes) && !('y' in action.changes)
-  const takes = (attr: string): boolean => (attr in action.changes && typeof action.changes[attr] !== 'function') || (upgrade && (attr === 'x' || attr === 'y') && !!schema?.attrs.some((a) => a.name === attr))
+  // A path's position comes from its shape: a drag edits the shape instead (D197), never this.
+  if (action.verb === 'path') return false
+  // An animation given a change its verb cannot hold becomes a `to`, which holds any (D188): a resize whose center moves, a turn that is also dragged.
+  const allowed = VERB_ATTRS[action.verb]
+  const animatable = (attr: string): boolean => !!schema?.attrs.some((a) => a.name === attr && a.animatable)
+  const upgrade = action.verb !== 'to' && Object.keys(destination).some((attr) => !(attr in action.changes) && animatable(attr) && allowed !== null && !allowed.includes(attr))
+  const takes = (attr: string): boolean => (attr in action.changes && typeof action.changes[attr] !== 'function') || (upgrade && animatable(attr))
   const wanted = Object.fromEntries(Object.entries(destination).filter(([attr]) => takes(attr)))
   if (Object.keys(wanted).length === 0) return false
   const definers = Object.fromEntries(['x', 'y', ...Object.keys(wanted)].map((attr) => [attr, takes(attr) ? action : definingAction(obj, attr, action.end)]))
   const edits: TextEdit[] = []
   if (upgrade) {
     const head = source.slice(stmt.range.from, stmt.propsOpen)
-    const at = head.lastIndexOf('.resize(')
+    const at = head.lastIndexOf(`.${action.verb}(`)
     if (at < 0) return false
-    edits.push({ from: stmt.range.from + at + 1, to: stmt.range.from + at + 1 + 'resize'.length, insert: 'to' })
+    edits.push({ from: stmt.range.from + at + 1, to: stmt.range.from + at + 1 + action.verb.length, insert: 'to' })
   }
   for (const [attr, value] of Object.entries(writtenValues(model, obj, action.end, wanted, definers))) {
     if (!takes(attr)) continue
@@ -330,7 +339,15 @@ export function coverEdits(source: string, obj: SceneObject, start: number, end:
 }
 
 /** Write a new action pinned to a time (D103) and select it; the object's life widens to hold it (D146). Returns its end, or null. */
-function appendTimed(name: string, verb: Verb, block: Record<string, AttrValue>, pin: Pin, when: number, length = 1): number | null {
+/** Append an action written as text, widening the object's life to hold its span, and select it (D217). */
+export function appendActionText(name: string, text: string, start: number, end: number): void {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl) return
+  applyEdits([appendStatement(source, text), ...coverEdits(source, obj, start, end)], actionSelected(name, obj.actions.length))
+}
+
+export function appendTimed(name: string, verb: Verb, block: Record<string, AttrValue>, pin: Pin, when: number, length = 1): number | null {
   const { source, model } = state()
   const obj = model?.objects.find((o) => o.name === name)
   if (!model || !obj) return null
@@ -414,6 +431,8 @@ function startingValues(model: SceneModel, obj: SceneObject, verb: Verb, time: n
   for (const attr of allowed) {
     const def = schema?.attrs.find((a) => a.name === attr)
     if (!def || attr === 'z') continue
+    // A resize starts with the object's dimensions; the scale factor is for what has none, a group (D211).
+    if (verb === 'resize' && attr === 'scale' && obj.className !== GROUP) continue
     const value = valueAt(model, obj, attr, time)
     attrs[attr] = typeof value === 'number' ? roundAttr(attr, value) : value
   }
@@ -422,6 +441,10 @@ function startingValues(model: SceneModel, obj: SceneObject, verb: Verb, time: n
 
 /** Add an action of a kind at a time. Its values start as the object's current ones, so nothing jumps. */
 export function addAction(name: string, verb: Verb, time: number): void {
+  if (verb === 'path') {
+    addPath(name, time)
+    return
+  }
   const { source, model } = state()
   const obj = model?.objects.find((o) => o.name === name)
   if (!model || !obj || !obj.decl) return
@@ -437,10 +460,142 @@ export function addClassAction(className: string, verb: Verb, time: number): voi
   const { source, model } = state()
   const first = model?.objects.find((o) => isMember(o, className))
   if (!model || !first) return
+  if (verb === 'path') {
+    // Every member takes the same path, which begins where the first member is (D194).
+    const here = positionAt(model, first, roundSeconds(time))
+    applyEdits([appendStatement(source, pathText(`all('${className}').path`, [{ x: Math.round(here.x), y: Math.round(here.y) }], roundSeconds(time), 1))], actionSelected(first.name, first.actions.length))
+    return
+  }
   const attrs = startingValues(model, first, verb, time)
   attrs['at'] = roundSeconds(time)
   attrs['duration'] = 1
   applyEdits([appendStatement(source, blockText(`all('${className}').${verb}`, attrs))], actionSelected(first.name, first.actions.length))
+}
+
+/** The statement of a new path: its points one per line, then when it runs (D194). */
+function pathText(head: string, points: Point[], at: number, duration: number): string {
+  const lines = points.map((p) => `    ${pointText(p.x, p.y)},`)
+  return `${head}({\n  shape: [\n${lines.join('\n')}\n  ],\n  at: ${formatNumber(at)},\n  duration: ${formatNumber(duration)},\n})`
+}
+
+/**
+ * Add a path to an object at a time (D194): its shape begins with one point, where the object is
+ * then, and the Draw tool adds the rest. The object's life widens to hold it. Returns the index
+ * of the new action.
+ */
+export function addPath(name: string, time: number): number | null {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj || !obj.decl) return null
+  const at = roundSeconds(time)
+  const here = positionAt(model, obj, at)
+  const index = obj.actions.length
+  applyEdits([appendStatement(source, pathText(`${name}.path`, [{ x: Math.round(here.x), y: Math.round(here.y) }], at, 1)), ...coverEdits(source, obj, at, at + 1)], actionSelected(name, index))
+  // The points stay folded in the code until wanted (D204).
+  foldShapes()
+  return index
+}
+
+interface EditableShape {
+  source: string
+  model: SceneModel
+  obj: SceneObject
+  action: Action
+  shape: ShapeLiteral
+}
+
+/** A path action with its shape written as literal points, in the object's own statement, which the GUI edits point by point (D194). */
+function editableShape(ref: ActionRef): EditableShape | null {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === ref.object)
+  const action = obj?.actions[ref.index]
+  if (!model || !obj || !action?.stmt || action.classAction || action.verb !== 'path') return null
+  const shape = shapeLiteral(source, action.stmt)
+  return shape ? { source, model, obj, action, shape } : null
+}
+
+/** Whether the preview can edit a path's points: they are written as literals in the object's own statement. */
+export function pathEditable(ref: ActionRef): boolean {
+  return editableShape(ref) !== null
+}
+
+/** The literal a point of the scene is written as: the shift of `offset` and `relative` taken off, in whole pixels. */
+function rawPoint(e: EditableShape, world: Point): Point {
+  const shift = pathShift(e.action)
+  return { x: Math.round(world.x - shift.x), y: Math.round(world.y - shift.y) }
+}
+
+/** Move several points of a path at once, each to a place in the scene (D198). */
+export function setPathPoints(ref: ActionRef, entries: { index: number; world: Point }[]): void {
+  const e = editableShape(ref)
+  if (!e) return
+  const edits: TextEdit[] = []
+  for (const { index, world } of entries) {
+    const p = rawPoint(e, world)
+    const edit = setPointEdit(e.shape, index, p.x, p.y)
+    if (edit) edits.push(edit)
+  }
+  if (edits.length > 0) applyEdits(edits)
+}
+
+/** Take several points out of a path, as one undo step; at least one point stays (D198). */
+export function removePathPoints(ref: ActionRef, indices: number[]): void {
+  const sorted = [...new Set(indices)].sort((a, b) => b - a)
+  if (sorted.length === 0) return
+  beginGesture()
+  for (const index of sorted) removePathPoint(ref, index)
+  endGesture()
+}
+
+/** Make a path a smooth curve through its points, or straight lines between them (D199). */
+export function setPathSmooth(ref: ActionRef, smooth: boolean): void {
+  setActionProp(ref, 'smooth', smooth ? true : null)
+}
+
+/**
+ * Where a drag of an object that a path places goes (D197, D205), as a drag during a move goes to
+ * the move's end: the path, selected or else the one that owns the position at the playhead, and
+ * the anchor to move: the first at the path's start, the last anywhere after that, with the
+ * playhead shown at the path's end while it is running. Null when no path has a say.
+ */
+export function pathDragTarget(name: string, selectedIndex: number | null, time: number): { ref: ActionRef; index: number; showTime: number | null } | null {
+  const { model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj) return null
+  const action = selectedIndex !== null ? obj.actions[selectedIndex] : pathHolds(obj, 'x', time)
+  if (!action || action.verb !== 'path' || action.classAction || !action.stmt || action.overridden || action.timing.relative) return null
+  const index = obj.actions.indexOf(action)
+  const ref = { object: name, index }
+  if (!pathEditable(ref)) return null
+  const frame = pathFrame(model, action, time)
+  if (!frame || frame.anchors.length === 0) return null
+  const atStart = time <= action.start
+  return { ref, index: atStart ? 0 : frame.anchors.length - 1, showTime: !atStart && time < action.end ? action.end : null }
+}
+
+/** Move one point of a path to a place in the scene (D194). */
+export function setPathPoint(ref: ActionRef, index: number, world: Point): void {
+  const e = editableShape(ref)
+  if (!e) return
+  const p = rawPoint(e, world)
+  const edit = setPointEdit(e.shape, index, p.x, p.y)
+  if (edit) applyEdits([edit])
+}
+
+/** Put points into a path so that the first lands at `index`; the count appends (D194). */
+export function insertPathPoints(ref: ActionRef, index: number, worlds: Point[]): void {
+  const e = editableShape(ref)
+  if (!e) return
+  const edit = insertPointsEdit(e.source, e.shape, index, worlds.map((w) => rawPoint(e, w)))
+  if (edit) applyEdits([edit])
+}
+
+/** Take one point out of a path; the last point stays (D194). */
+export function removePathPoint(ref: ActionRef, index: number): void {
+  const e = editableShape(ref)
+  if (!e) return
+  const edit = removePointEdit(e.source, e.shape, index)
+  if (edit) applyEdits([edit])
 }
 
 /** Make the object exist from here: base opacity 0, then a fade to 1 at this time, or a pop with `instant`. */
@@ -662,8 +817,8 @@ function refText(name: string, part: LinkPart, fraction: number): string {
   return part === 'progress' ? `${name}.progress(${fraction})` : `${name}.${part}`
 }
 
-/** Link an action's start to another's timing, or to when an object begins or is removed (D170): `at: slide.end`, naming the target first when it has no name. */
-export function linkStart(ref: ActionRef, target: LinkTarget, part: LinkPart, fraction = 0.5): void {
+/** Link an action's start or end to another's timing, or to when an object begins or is removed (D170, D172): `at: slide.end` or `until: box.end`, naming the target first when it has no name. */
+export function linkAction(ref: ActionRef, key: 'at' | 'until', target: LinkTarget, part: LinkPart, fraction = 0.5): void {
   const { source, model } = state()
   const obj = model?.objects.find((o) => o.name === ref.object)
   const action = obj?.actions[ref.index]
@@ -672,16 +827,97 @@ export function linkStart(ref: ActionRef, target: LinkTarget, part: LinkPart, fr
   const edits: TextEdit[] = []
   const name = linkName(model, target, edits)
   if (!name) return
-  edits.push(setPropText(source, action.stmt, 'at', refText(name, part, fraction)))
+  rememberReplaced(action.stmt, ref.object, key, ref.index)
+  edits.push(setPropText(source, action.stmt, key, refText(name, part, fraction)))
   applyEdits(edits)
 }
 
-/** Put the start the link gave in place of the link, as a number (D170). */
-export function unlinkStart(ref: ActionRef): void {
+/** Unlink an action's start or end: what the link replaced comes back, else the time it came to (D170, D189). */
+export function unlinkAction(ref: ActionRef, key: 'at' | 'until'): void {
+  restoreActionProp(ref, key)
+}
+
+/**
+ * What each link replaced, as it was written, or '' when nothing was: unlinking puts it back, so a
+ * value linked and unlinked is as it was (D189). Kept per object and attribute, and per action by
+ * its place, for the session.
+ */
+const replacedByLinks = new Map<string, string>()
+const replacedKey = (object: string, key: string, index?: number): string => (index === undefined ? `${object}:${key}` : `${object}:${index}:${key}`)
+function rememberReplaced(block: BlockInfo, object: string, key: string, index?: number): void {
+  const prop = block.props.find((p) => p.key === key)
+  if (prop && prop.kind !== 'literal') return
+  replacedByLinks.set(replacedKey(object, key, index), prop ? prop.raw : '')
+}
+
+/** Set, or with null remove, one property of an action's block: a value it changes, or its timing (D174). Text is written as given, and what it replaces is remembered. */
+export function setActionProp(ref: ActionRef, key: string, value: AttrValue | null, asText = false): void {
   const { source, model } = state()
   const action = model?.objects.find((o) => o.name === ref.object)?.actions[ref.index]
   if (!model || !action?.stmt || action.classAction) return
-  applyEdits([setProp(source, action.stmt, 'at', roundSeconds(action.start - (action.timing.delay ?? 0)))])
+  if (asText) rememberReplaced(action.stmt, ref.object, key, ref.index)
+  const edit = value === null ? removeProp(source, action.stmt, key) : asText && typeof value === 'string' ? setPropText(source, action.stmt, key, value) : setProp(source, action.stmt, key, typeof value === 'number' ? (TIMING_KEY_NAMES.has(key) ? roundSeconds(value) : roundAttr(key, value)) : value)
+  if (edit) applyEdits([edit])
+}
+
+/** Set, or with null remove, one attribute in an object's declaration, as written (D174). Text is written as given, and what it replaces is remembered. */
+export function setObjectProp(name: string, key: string, value: AttrValue | null, asText = false): void {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl) return
+  if (asText) rememberReplaced(obj.decl, name, key)
+  const edit = value === null ? removeProp(source, obj.decl, key) : asText && typeof value === 'string' ? setPropText(source, obj.decl, key, value) : setProp(source, obj.decl, key, typeof value === 'number' ? roundAttr(key, value) : value)
+  if (edit) applyEdits([edit])
+}
+
+/** Unlink an object's attribute: what the link replaced comes back, or, when nothing is remembered, the default (D189). */
+export function restoreObjectProp(name: string, key: string): void {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl) return
+  const remembered = replacedByLinks.get(replacedKey(name, key))
+  replacedByLinks.delete(replacedKey(name, key))
+  const edit = remembered ? setPropText(source, obj.decl, key, remembered) : removeProp(source, obj.decl, key)
+  if (edit) applyEdits([edit])
+}
+
+/** Unlink an action's property: what the link replaced comes back; a timing with nothing remembered keeps the time it came to, a change with nothing remembered goes (D189). */
+export function restoreActionProp(ref: ActionRef, key: string): void {
+  const { source, model } = state()
+  const action = model?.objects.find((o) => o.name === ref.object)?.actions[ref.index]
+  if (!model || !action?.stmt || action.classAction) return
+  const id = replacedKey(ref.object, key, ref.index)
+  const remembered = replacedByLinks.get(id)
+  replacedByLinks.delete(id)
+  let edit: TextEdit | null
+  if (remembered) edit = setPropText(source, action.stmt, key, remembered)
+  else if (key === 'at') edit = setProp(source, action.stmt, 'at', roundSeconds(action.start - (action.timing.delay ?? 0)))
+  else if (key === 'until') edit = setProp(source, action.stmt, 'until', roundSeconds(action.end))
+  else edit = removeProp(source, action.stmt, key)
+  if (edit) applyEdits([edit])
+}
+
+/** Bake an object's linked attribute: what it comes to at the playhead stays as the value, and the link goes (D189). */
+export function bakeObjectProp(name: string, key: string, time: number): void {
+  const { model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl) return
+  if (key === 'at') return setLifetime(name, { at: obj.at })
+  if (key === 'until') return setLifetime(name, { until: obj.until })
+  const now = valueAt(model, obj, key, time)
+  if (typeof now === 'number' || typeof now === 'string' || typeof now === 'boolean') setObjectProp(name, key, now)
+}
+
+/** Bake an action's linked property: a change keeps what it comes to when the animation ends; a start or end keeps its time (D189). */
+export function bakeActionProp(ref: ActionRef, key: string): void {
+  const { model } = state()
+  const obj = model?.objects.find((o) => o.name === ref.object)
+  const action = obj?.actions[ref.index]
+  if (!model || !obj || !action?.stmt || action.classAction) return
+  if (key === 'at') return setActionProp(ref, 'at', action.start - (action.timing.delay ?? 0))
+  if (key === 'until') return setActionProp(ref, 'until', action.end)
+  const now = valueAt(model, obj, key, action.end)
+  if (typeof now === 'number' || typeof now === 'string' || typeof now === 'boolean') setActionProp(ref, key, now)
 }
 
 /** Link when an object begins or is removed to an action's timing or another object's life (D170). */
@@ -693,15 +929,24 @@ export function linkLifetime(objectName: string, key: 'at' | 'until', target: Li
   const edits: TextEdit[] = []
   const name = linkName(model, target, edits)
   if (!name) return
+  rememberReplaced(obj.decl, objectName, key)
   edits.push(setPropText(source, obj.decl, key, refText(name, part, fraction)))
   applyEdits(edits)
 }
 
-/** Put the time the link gave in place of the link, as a number; an end that was open stays open (D170). */
+/** Unlink when an object begins or is removed: what the link replaced comes back, else the time it came to (D170, D189). */
 export function unlinkLifetime(objectName: string, key: 'at' | 'until'): void {
   const { source, model } = state()
   const obj = model?.objects.find((o) => o.name === objectName)
   if (!model || !obj?.decl) return
+  const id = replacedKey(objectName, key)
+  const remembered = replacedByLinks.get(id)
+  replacedByLinks.delete(id)
+  if (remembered !== undefined) {
+    const edit = remembered ? setPropText(source, obj.decl, key, remembered) : removeProp(source, obj.decl, key)
+    if (edit) applyEdits([edit])
+    return
+  }
   const value = key === 'at' ? obj.at : obj.until
   const edit = value === null || (key === 'at' && value <= 0) ? removeProp(source, obj.decl, key) : setProp(source, obj.decl, key, roundSeconds(value))
   if (edit) applyEdits([edit])
@@ -986,10 +1231,28 @@ export function moveDeclaration(name: string, target: { before: string } | { aft
   const at = declared.indexOf(obj)
   const otherAt = declared.indexOf(other)
   if ('before' in target ? at === otherAt - 1 : at === otherAt + 1) return
-  const text = source.slice(obj.decl.range.from, obj.decl.range.to)
-  const removal = removeStatements(source, [obj.decl.range])[0]!
-  const insert: TextEdit = 'before' in target ? { from: other.decl.range.from, to: other.decl.range.from, insert: `${text}\n\n` } : { from: other.decl.range.to, to: other.decl.range.to, insert: `\n\n${text}` }
-  applyEdits([removal, insert], objectsSelected([name]))
+  applyEdits(moveStatementEdits(source, obj.decl.range, other.decl.range, 'before' in target ? 'before' : 'after'), objectsSelected([name]))
+}
+
+/**
+ * Put an action's statement before or after another of the same object's own, which moves it in
+ * the stack (D210): higher in the file is higher in the clip, and has the say while it runs. The
+ * selection follows the moved action to its new index.
+ */
+export function moveAction(ref: ActionRef, target: { before: ActionRef } | { after: ActionRef }): void {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === ref.object)
+  const other = 'before' in target ? target.before : target.after
+  const action = obj?.actions[ref.index]
+  const otherAction = obj?.actions[other.index]
+  if (!model || !obj || other.object !== ref.object || !action?.stmt || action.classAction || !otherAction?.stmt || otherAction.classAction || action === otherAction) return
+  const where = 'before' in target ? 'before' : 'after'
+  const at = obj.actions.indexOf(action)
+  const otherAt = obj.actions.indexOf(otherAction)
+  if (where === 'before' ? at === otherAt - 1 : at === otherAt + 1) return
+  const reordered = obj.actions.filter((a) => a !== action)
+  reordered.splice(reordered.indexOf(otherAction) + (where === 'after' ? 1 : 0), 0, action)
+  applyEdits(moveStatementEdits(source, action.stmt.range, otherAction.stmt.range, where), actionSelected(ref.object, reordered.indexOf(action)))
 }
 
 function numberedCopies(model: SceneModel, names: string[], from: number): Record<string, string> {

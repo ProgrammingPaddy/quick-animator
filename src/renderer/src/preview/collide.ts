@@ -100,7 +100,7 @@ export interface Mover {
   contact: number | null
 }
 
-export type Pushing = 'off' | 'sticky' | 'stateless'
+export type Pushing = 'off' | 'on'
 
 export function makeMover(name: string, polys: Polygon[], anchored: boolean, soft: boolean): Mover {
   return { name, polys: polys.map((poly) => poly.map((p) => ({ ...p }))), start: polys, shift: { x: 0, y: 0 }, anchored, soft, contact: null }
@@ -113,12 +113,6 @@ function translate(m: Mover, d: Point): void {
       p.y += d.y
     }
   m.shift = { x: m.shift.x + d.x, y: m.shift.y + d.y }
-}
-
-function reset(m: Mover): void {
-  m.polys = m.start.map((poly) => poly.map((p) => ({ ...p })))
-  m.shift = { x: 0, y: 0 }
-  m.contact = null
 }
 
 function bounds(m: Mover): [number, number, number, number] {
@@ -175,21 +169,15 @@ const STEP = 4
 /**
  * Take the dragged thing toward `target`, its shift from where the drag began, in short steps
  * among the others, undoing each step's overlaps (D136), so it slides along whatever it meets
- * and comes to rest against it. With pushing off everything blocks and the walk follows the
- * pointer's path from wherever the last step left off. Sticky pushing shoves what it meets along
- * as it goes, and what was shoved stays. Stateless pushing starts everything over from where the
- * drag began and walks straight to the target, so each pointer position gives the one
- * arrangement a straight drag there would, and pulling back un-pushes. Where things are comes
- * out in each mover's `shift`.
+ * and comes to rest against it. The walk follows the pointer's path from wherever the last step
+ * left off, so nothing is met that the dragged thing did not actually touch (D186). With pushing
+ * off everything blocks; with it on, what is met is shoved along and stays where it was shoved.
+ * Where things are comes out in each mover's `shift`.
  */
-export function walk(dragged: Mover, target: Point, others: Mover[], pushing: Pushing): void {
-  if (pushing === 'stateless') {
-    reset(dragged)
-    for (const o of others) if (!o.anchored && !o.soft) reset(o)
-  }
+export function walk(dragged: Mover, target: Point, others: Mover[], pushing: Pushing, stepLength = STEP): void {
   const all = [dragged, ...others]
   const remaining = { x: target.x - dragged.shift.x, y: target.y - dragged.shift.y }
-  const steps = Math.max(1, Math.ceil(Math.hypot(remaining.x, remaining.y) / STEP))
+  const steps = Math.max(1, Math.ceil(Math.hypot(remaining.x, remaining.y) / stepLength))
   const step = { x: remaining.x / steps, y: remaining.y / steps }
   for (let i = 0; i < steps; i++) {
     translate(dragged, step)
@@ -197,4 +185,11 @@ export function walk(dragged: Mover, target: Point, others: Mover[], pushing: Pu
     // The step that first moves something is where the dragged thing met it (D167).
     for (const o of others) if (o.contact === null && (Math.abs(o.shift.x) > 1e-9 || Math.abs(o.shift.y) > 1e-9)) o.contact = Math.hypot(dragged.shift.x, dragged.shift.y)
   }
+}
+
+/** Put a mover back where the drag began, for a sweep that starts over from there (D206). */
+export function resetMover(m: Mover): void {
+  m.polys = m.start.map((poly) => poly.map((p) => ({ ...p })))
+  m.shift = { x: 0, y: 0 }
+  m.contact = null
 }

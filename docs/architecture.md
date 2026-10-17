@@ -198,8 +198,8 @@ slow push-in, is an animation of the scene camera.
 - The timeline has no fixed length. The content end is the last action's end or the latest `until` (D54, D143), marked on the ruler; the hold from `project.json`, set in Preferences, keeps the final frame after it: an object removed at the content end stays on through the hold (D155), playback stops or loops at the end plus the hold, and the export range defaults to that. The wheel zooms the time axis around the cursor; Shift and the wheel scroll. Drags snap to whole seconds and to other actions when snapping is on, and place exactly when it is off (D64); the ruler then snaps the playhead the same way and to every fifth frame, and to any frame when snapping is off (D128). The view pages forward while playing.
 - A frame is a pure function of time (R67). Expressions receive the time and read other objects' values at that time. There is no per-frame mutable state.
 - Export samples the frame times exactly: frame i is the scene at (first + i) / fps (D134). Preview samples the display clock and may skip frames.
-- Links are marks (D169): the timeline and the object pane read each statement's non-literal `at`, `until`, and function-valued attributes as written and show them beside a chain mark, and `dependentsByTarget` in `model/links.ts` turns the resolved time references into the marks on the things referred to. Linking from the menu writes the reference as text, naming the target first (D170).
-- Objects live from `at` to `until` (D138), resolved with the actions, time references included; an animation written or retimed from the GUI widens the life to hold it (D146). The timeline has two views of one model (D139, D140): Objects has three lanes, Objects, Groups, and Classes, where every life is a clip with its animations and opacity inside, cut off at the clip's edges, stacked by drawing order so whatever is higher up appears on top, the order changing as a clip dragged up or down passes the others, the clip following the pointer (D144, D152, D153, D160, D164, D165); List keeps one row per object with the hatched stretches where it does not exist. Both drag the same operations: place the object, moving its written starts with it, set `until`, or move its declaration.
+- Links are marks (D169): the timeline and the object pane read each statement's non-literal `at`, `until`, and function-valued attributes as written and show them beside a chain mark, and `dependentsByTarget` in `model/links.ts` turns the resolved time references into the marks on the things referred to. The links dialog writes the reference as text, naming the target first (D170, D172). The Selected pane writes through the same operations as the drags, plus one property of an action or a declaration at a time (D174).
+- Objects live from `at` to `until` (D138), resolved with the actions, time references included; an animation written or retimed from the GUI widens the life to hold it (D146). The timeline has three lanes, Objects, Groups, and Classes (D139, D173), where every life is a clip with its animations and opacity inside, cut off at the clip's edges, stacked by drawing order so whatever is higher up appears on top, the order changing as a clip dragged up or down passes the others, the clip following the pointer (D144, D152, D153, D160, D164, D165). A clip drags four operations: place the object, moving its written starts with it, set `until`, or move its declaration.
 
 ## Undo
 
@@ -340,7 +340,12 @@ bullet.move({
   duration: 0.8,
 })
 
-ride = bullet.follow(arc, {
+ride = bullet.path({
+  shape: [
+    [400, 60],
+    [550, 180],
+    [700, 60],
+  ],
   at: 3,
   duration: 2,
   orient: true,
@@ -373,11 +378,11 @@ bullet.morph(Circle, {
 
 Vocabulary. Items marked "coming" are not built yet.
 
-- **Classes** (D36, D43): `Rect`, `Circle`, `Text`; coming: `Line`, `Polygon`, `Image`, `Group`, `Path`, `Video`, `Camera`, and the 3D shapes. Every visible object is a shape with a kind, which is what lets one object morph into another kind.
+- **Classes** (D36, D43): `Rect`, `Circle`, `Text`; coming: `Line`, `Polygon`, `Image`, `Group`, `Video`, `Camera`, and the 3D shapes. Every visible object is a shape with a kind, which is what lets one object morph into another kind.
 - **Attributes.** Common: `x`, `y`, `z`, `rotation`, `scale`, `opacity`, `fill`; coming: `anchor`, `stroke`, `strokeWidth`. Per class: `width`, `height`, `radius`, `text`, `fontSize`, `font`. The registry lists them all with defaults.
-- **Verbs** (D37): `move` for x, y, z; `rotate`; `scale`; `resize` for width, height, radius, fontSize; `fade` for opacity; `to` for any attributes. Coming: `follow(path, { ... })`, `morph(Class, { ... })`, `link({ ... })`. The timeline labels and colors clips by verb.
+- **Verbs** (D37): `move` for x, y, z; `rotate`; `resize` for width, height, radius, fontSize, and scale, a multiplier (D211); `fade` for opacity; `to` for any attributes; `path` along a shape, points or a function of the progress, with orient and offset (D192). Coming: `morph(Class, { ... })`, `link({ ... })`. The timeline labels and colors clips by verb.
 - **Timing keys**, reserved in every action block: `at`, `delay`, `duration`, `until`, `easeIn`, `easeOut`, `ease`, `relative`. `at` takes seconds or a time reference; omitted, it means right after the object's previous action, or 0. `until` is an end time or reference, as an alternative to `duration`.
-- **Relative** (D51): `relative: true` makes the block's values changes from wherever the object is when the action starts. A relative action adds on top of whatever else is happening; an absolute one takes over from its start (D53).
+- **Relative** (D51): `relative: true` makes the block's values changes from wherever the object is when the action starts. A relative action adds on top of whatever else is happening; of the absolute ones running, the one later in the file has the say, and the ones below show through again when it ends (D53, D210).
 - **Visibility** (D52): opacity is the one system. An object with opacity 0 does not exist, is not drawn, not hit, and not sampled. To appear later, the cast sets `opacity: 0` and the script fades it in; the timeline shows every object's opacity as its own lane.
 - **Easing** (D39): `easeIn` and `easeOut` are seconds of easing at each end, default 30% of the duration each; `ease: 'linear'` removes them, and named curves such as `bounce`, `elastic`, `back`, `snap` cover what durations cannot express.
 - **Time references:** `action.start`, `action.end`, `action.progress(f)`. Coming: object states such as `startsMoving`.

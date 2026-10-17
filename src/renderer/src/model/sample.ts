@@ -1,6 +1,6 @@
 import { attrSchema, defaultFor, GROUP, type AttrType, type AttrValue } from './registry'
 import { easingFor, type Easing } from './easing'
-import type { Action, AttrSource, SceneModel, SceneObject } from './types'
+import type { Action, AttrSource, SceneModel, SceneObject, StateDirection, StateName } from './types'
 
 /**
  * While a sample is in progress, attribute reads on object handles (inside link functions)
@@ -85,8 +85,27 @@ function cacheFor(model: SceneModel): Cache {
   return c
 }
 
-function byStart(a: Action, b: Action): number {
-  return a.start - b.start || a.id - b.id
+/** The order animations stack in (D210): later in the file is on top, and of those running, the top one wins. */
+function byStack(a: Action, b: Action): number {
+  return a.id - b.id
+}
+
+/**
+ * The action that has a say at a time, among those given in stack order (D210): of the ones
+ * running, the top one; with none running, the one that ended last, the top one among those;
+ * null when none has begun. With `strictStart`, an action at its very start is left out, for
+ * edits that set the start state (D102 note).
+ */
+function topActionAt<T extends { action: Action }>(items: T[], time: number, strictStart: boolean): T | null {
+  let running: T | null = null
+  let ended: T | null = null
+  for (const item of items) {
+    const a = item.action
+    if (strictStart ? a.start >= time : a.start > time) continue
+    if (time < a.end && a.end > a.start) running = item
+    else if (!ended || a.end >= ended.action.end) ended = item
+  }
+  return running ?? ended
 }
 
 function segmentsFor(model: SceneModel, obj: SceneObject, attr: string): Segments {
@@ -96,7 +115,7 @@ function segmentsFor(model: SceneModel, obj: SceneObject, attr: string): Segment
   if (!segments) {
     const type = attrSchema(obj.className, attr)?.type
     segments = { absolute: [], relative: [] }
-    const sorted = obj.actions.filter((a) => attr in a.changes && !a.overridden).sort(byStart)
+    const sorted = obj.actions.filter((a) => (attr in a.changes || (a.verb === 'path' && pathDrives(a, attr))) && !a.overridden).sort(byStack)
     for (const action of sorted) {
       const segment: Segment = { action, to: action.changes[attr]!, ease: easingFor(action.timing, action.end - action.start) }
       if (action.timing.relative && type === 'number') segments.relative.push(segment)
@@ -112,16 +131,15 @@ function isAttrValue(v: unknown): v is AttrValue {
 }
 
 /** Turn a written attribute into a value at a time: literals pass through, functions run. */
-function resolveSource(model: SceneModel, source: AttrSource, time: number, fallback: AttrValue): AttrValue {
-  if (typeof source !== 'function') return source
+/** Run code from the scene with the sampling context at this time, so what it reads of other objects is their animated value; its fallback when it throws or nests too deep. */
+function sampled<T>(model: SceneModel, time: number, fn: () => T, fallback: T): T {
   if (samplingContext.depth > 8) return fallback
   const previous = { model: samplingContext.model, time: samplingContext.time }
   samplingContext.model = model
   samplingContext.time = time
   samplingContext.depth++
   try {
-    const value = source()
-    return isAttrValue(value) ? value : fallback
+    return fn()
   } catch {
     return fallback
   } finally {
@@ -129,6 +147,12 @@ function resolveSource(model: SceneModel, source: AttrSource, time: number, fall
     samplingContext.model = previous.model
     samplingContext.time = previous.time
   }
+}
+
+function resolveSource(model: SceneModel, source: AttrSource, time: number, fallback: AttrValue): AttrValue {
+  if (typeof source !== 'function') return source
+  const value = sampled<unknown>(model, time, source, fallback)
+  return isAttrValue(value) ? value : fallback
 }
 
 function num(model: SceneModel, source: AttrSource | undefined, time: number): number {
@@ -151,20 +175,273 @@ export function baseValue(model: SceneModel, obj: SceneObject, attr: string, tim
   return source === undefined ? fallback : resolveSource(model, source, time, fallback)
 }
 
+/**
+ * The value the first `count` absolute segments, in stack order, give at a time (D210): of the
+ * segments running, the top one; with none running, the one that ended last holds its end, the
+ * top one among ties; with none begun, the base value. A segment starts from what the segments
+ * below it show as it begins, so a higher one takes over for its span and the lower ones show
+ * through again after it.
+ */
 function evalAbsolute(model: SceneModel, obj: SceneObject, attr: string, segments: Segment[], count: number, time: number, type: AttrType): AttrValue {
-  // The latest segment that has started wins; earlier ones only supply its starting value.
-  let index = -1
+  let running = -1
+  let ended = -1
   for (let i = 0; i < count; i++) {
-    if (segments[i]!.action.start <= time) index = i
-    else break
+    const a = segments[i]!.action
+    if (a.start > time) continue
+    if (time < a.end && a.end > a.start) running = i
+    else if (ended < 0 || a.end >= segments[ended]!.action.end) ended = i
   }
+  const index = running >= 0 ? running : ended
   if (index < 0) return baseValue(model, obj, attr, time)
   const segment = segments[index]!
   const action = segment.action
+  // A path puts the object on its shape by the eased progress (D192).
+  if (action.verb === 'path') return pathValue(model, obj, action, attr, time)
   const to = resolveSource(model, segment.to, time, fallbackFor(obj, attr))
-  if (time >= action.end || action.end <= action.start) return to
+  if (running < 0) return to
   const from = evalAbsolute(model, obj, attr, segments, index, action.start, type)
   return interpolate(from, to, segment.ease((time - action.start) / (action.end - action.start)), type)
+}
+
+/** Which attributes a path drives: the position, and the rotation when it orients along the shape (D192). */
+function pathDrives(action: Action, attr: string): boolean {
+  return attr === 'x' || attr === 'y' || (attr === 'rotation' && action.changes['orient'] === true)
+}
+
+/**
+ * The absolute path that owns an attribute at a time, or null (D205): it has begun, it drives the
+ * attribute, and no action that began later changes the attribute outright. While a path owns a
+ * value, nothing written elsewhere shows, so the GUI edits the path instead.
+ */
+export function pathHolds(obj: SceneObject, attr: string, time: number): Action | null {
+  const items = obj.actions
+    .filter((a) => !a.overridden && !a.timing.relative && (a.verb === 'path' ? pathDrives(a, attr) : attr in a.changes))
+    .sort(byStack)
+    .map((action) => ({ action }))
+  const top = topActionAt(items, time, false)
+  return top?.action.verb === 'path' ? top.action : null
+}
+
+function pointOf(raw: unknown): Point | null {
+  if (Array.isArray(raw) && raw.length >= 2 && typeof raw[0] === 'number' && typeof raw[1] === 'number' && Number.isFinite(raw[0]) && Number.isFinite(raw[1])) return { x: raw[0], y: raw[1] }
+  if (raw && typeof raw === 'object' && typeof (raw as Point).x === 'number' && typeof (raw as Point).y === 'number') return { x: (raw as Point).x, y: (raw as Point).y }
+  return null
+}
+
+function pointsOf(raw: unknown): Point[] {
+  return Array.isArray(raw) ? raw.map(pointOf).filter((p): p is Point => !!p) : []
+}
+
+/**
+ * A path's shape (D192): a list of points, traveled by distance, or a function of the progress,
+ * 0 to 1, giving the point there. A function with no parameter is a link that gives the points.
+ */
+export type Shape = { kind: 'points'; points: Point[] } | { kind: 'function'; at: (p: number) => Point | null }
+
+/** The shape a path action was given, as it stands at a time; null when it has none that can be used. */
+export function pathShape(model: SceneModel, action: Action, time: number): Shape | null {
+  const raw = action.changes['shape'] as unknown
+  if (typeof raw === 'function') {
+    const fn = raw as (p?: number) => unknown
+    if (fn.length === 0) {
+      const points = pointsOf(sampled<unknown>(model, time, () => fn(), null))
+      return points.length > 0 ? { kind: 'points', points } : null
+    }
+    return { kind: 'function', at: (p) => pointOf(sampled<unknown>(model, time, () => fn(p), null)) }
+  }
+  const points = pointsOf(raw)
+  return points.length > 0 ? { kind: 'points', points } : null
+}
+
+/** How far a path's shape is shifted from how it is written: by `offset` (D192). */
+export function pathShift(action: Action): Point {
+  return pointOf(action.changes['offset'] as unknown) ?? { x: 0, y: 0 }
+}
+
+/** How many pieces a function shape is drawn in, and how many a smooth span between two anchors is. */
+const SHAPE_SAMPLES = 96
+const SPAN_STEPS = 24
+
+/**
+ * A path's line (D194, D199): its anchors as written, the curve through them, straight or
+ * smooth, each point of the curve tagged with the span of anchors it comes from, and the length
+ * along the curve up to it, so the object travels by distance and the preview edits by anchor.
+ * A function shape is sampled along its progress and has no anchors.
+ */
+export interface PathFrame {
+  anchors: Point[]
+  curve: Point[]
+  /** For each point of the curve, the span it comes from: the first point counts as span 0, and a span's end anchor as that span. */
+  spans: number[]
+  /** The length along the curve up to each of its points. */
+  cumulative: number[]
+}
+
+function framed(anchors: Point[], curve: Point[], spans: number[]): PathFrame {
+  const cumulative = [0]
+  for (let i = 1; i < curve.length; i++) cumulative.push(cumulative[i - 1]! + Math.hypot(curve[i]!.x - curve[i - 1]!.x, curve[i]!.y - curve[i - 1]!.y))
+  return { anchors, curve, spans, cumulative }
+}
+
+/** A smooth curve through the anchors: a centripetal Catmull-Rom spline, which passes through every anchor and needs no handles (D199). */
+function smoothCurve(anchors: Point[]): PathFrame {
+  const n = anchors.length
+  if (n < 3) return framed(anchors, anchors, anchors.map((_, i) => Math.max(0, i - 1)))
+  const curve: Point[] = [anchors[0]!]
+  const spans: number[] = [0]
+  // Beyond each end the curve continues straight: a mirror of the next anchor stands in.
+  const at = (i: number): Point => {
+    if (i < 0) return { x: 2 * anchors[0]!.x - anchors[1]!.x, y: 2 * anchors[0]!.y - anchors[1]!.y }
+    if (i >= n) return { x: 2 * anchors[n - 1]!.x - anchors[n - 2]!.x, y: 2 * anchors[n - 1]!.y - anchors[n - 2]!.y }
+    return anchors[i]!
+  }
+  const knot = (a: Point, b: Point): number => Math.max(1e-6, Math.sqrt(Math.hypot(b.x - a.x, b.y - a.y)))
+  const mix = (a: Point, b: Point, w: number): Point => ({ x: a.x + (b.x - a.x) * w, y: a.y + (b.y - a.y) * w })
+  for (let i = 0; i + 1 < n; i++) {
+    const p0 = at(i - 1)
+    const p1 = at(i)
+    const p2 = at(i + 1)
+    const p3 = at(i + 2)
+    const t0 = 0
+    const t1 = t0 + knot(p0, p1)
+    const t2 = t1 + knot(p1, p2)
+    const t3 = t2 + knot(p2, p3)
+    for (let s = 1; s <= SPAN_STEPS; s++) {
+      const t = t1 + ((t2 - t1) * s) / SPAN_STEPS
+      const a1 = mix(p0, p1, (t - t0) / (t1 - t0))
+      const a2 = mix(p1, p2, (t - t1) / (t2 - t1))
+      const a3 = mix(p2, p3, (t - t2) / (t3 - t2))
+      const b1 = mix(a1, a2, (t - t0) / (t2 - t0))
+      const b2 = mix(a2, a3, (t - t1) / (t3 - t1))
+      curve.push(mix(b1, b2, (t - t1) / (t2 - t1)))
+      spans.push(i)
+    }
+  }
+  return framed(anchors, curve, spans)
+}
+
+/** The curves built from each literal shape, which stays the same object for as long as the model does. */
+const frameCache = new WeakMap<object, { smooth: boolean; frame: PathFrame }>()
+
+/** The line of a path, as written and shifted, or null when it has no shape to use. */
+export function pathFrame(model: SceneModel, action: Action, time: number): PathFrame | null {
+  const shape = pathShape(model, action, time)
+  if (!shape) return null
+  let frame: PathFrame
+  if (shape.kind === 'function') {
+    const curve: Point[] = []
+    for (let i = 0; i <= SHAPE_SAMPLES; i++) {
+      const p = shape.at(i / SHAPE_SAMPLES)
+      if (p) curve.push(p)
+    }
+    frame = framed([], curve, curve.map(() => 0))
+  } else {
+    const smooth = action.changes['smooth'] === true
+    const raw = action.changes['shape'] as unknown
+    const key = typeof raw === 'object' && raw !== null ? raw : null
+    const cached = key ? frameCache.get(key) : undefined
+    if (cached && cached.smooth === smooth) frame = cached.frame
+    else {
+      frame = smooth ? smoothCurve(shape.points) : framed(shape.points, shape.points, shape.points.map((_, i) => Math.max(0, i - 1)))
+      if (key) frameCache.set(key, { smooth, frame })
+    }
+  }
+  const shift = pathShift(action)
+  if (shift.x === 0 && shift.y === 0) return frame
+  const moved = (p: Point): Point => ({ x: p.x + shift.x, y: p.y + shift.y })
+  return { anchors: frame.anchors.map(moved), curve: frame.curve.map(moved), spans: frame.spans, cumulative: frame.cumulative }
+}
+
+/** The point a fraction of the way along a frame's curve, by distance, the direction of travel there in degrees, and which piece of the curve it is on. */
+function alongFrame(frame: PathFrame, fraction: number): { point: Point; angle: number; segment: number } {
+  const { curve, cumulative } = frame
+  if (curve.length === 1) return { point: curve[0]!, angle: 0, segment: 0 }
+  const total = cumulative[cumulative.length - 1]!
+  const target = Math.max(0, Math.min(1, fraction)) * total
+  let lo = 0
+  let hi = cumulative.length - 2
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (cumulative[mid + 1]! < target) lo = mid + 1
+    else hi = mid
+  }
+  const a = curve[lo]!
+  const b = curve[lo + 1]!
+  const length = cumulative[lo + 1]! - cumulative[lo]!
+  const t = length > 1e-9 ? (target - cumulative[lo]!) / length : 1
+  return { point: { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, angle: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI, segment: lo }
+}
+
+/**
+ * The anchor to move so that the object's place on the path at a progress changes (D197): the
+ * nearer end of the span there when it lies within reach, else a new anchor to put in at that place.
+ */
+export function anchorAtProgress(frame: PathFrame, progress: number, reach: number): { index: number; insert: Point | null } {
+  const { point, segment } = alongFrame(frame, progress)
+  const span = frame.spans[Math.min(segment + 1, frame.spans.length - 1)] ?? 0
+  let best: number | null = null
+  let bestDistance = reach
+  for (const i of [span, span + 1]) {
+    const anchor = frame.anchors[i]
+    if (!anchor) continue
+    const d = Math.hypot(anchor.x - point.x, anchor.y - point.y)
+    if (d <= bestDistance) {
+      bestDistance = d
+      best = i
+    }
+  }
+  return best !== null ? { index: best, insert: null } : { index: span + 1, insert: point }
+}
+
+/** Where a path puts its object at a progress, and the direction of travel there in degrees (D192). */
+export function pathPointAt(model: SceneModel, action: Action, progress: number, time: number): { point: Point; angle: number } | null {
+  const shape = pathShape(model, action, time)
+  if (!shape) return null
+  if (shape.kind === 'points') {
+    const frame = pathFrame(model, action, time)
+    if (!frame) return null
+    const { point, angle } = alongFrame(frame, progress)
+    return { point, angle }
+  }
+  const point = shape.at(progress)
+  if (!point) return null
+  const step = 1e-3
+  const a = shape.at(Math.max(0, progress - step))
+  const b = shape.at(Math.min(1, progress + step))
+  const shift = pathShift(action)
+  return { point: { x: point.x + shift.x, y: point.y + shift.y }, angle: a && b ? (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI : 0 }
+}
+
+/** The point a fraction of the way along a polyline, by distance, and the direction there in degrees. */
+export function pointAlong(points: Point[], fraction: number): { point: Point; angle: number } {
+  if (points.length === 1) return { point: points[0]!, angle: 0 }
+  const lengths: number[] = []
+  let total = 0
+  for (let i = 1; i < points.length; i++) {
+    const len = Math.hypot(points[i]!.x - points[i - 1]!.x, points[i]!.y - points[i - 1]!.y)
+    lengths.push(len)
+    total += len
+  }
+  let target = Math.max(0, Math.min(1, fraction)) * total
+  for (let i = 0; i < lengths.length; i++) {
+    const len = lengths[i]!
+    const a = points[i]!
+    const b = points[i + 1]!
+    if (target <= len || i === lengths.length - 1) {
+      const t = len > 1e-9 ? Math.max(0, Math.min(1, target / len)) : 1
+      return { point: { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, angle: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI }
+    }
+    target -= len
+  }
+  return { point: points[points.length - 1]!, angle: 0 }
+}
+
+function pathValue(model: SceneModel, obj: SceneObject, action: Action, attr: string, time: number): AttrValue {
+  const at = pathPointAt(model, action, progressAt(action, time), time)
+  if (!at) return baseValue(model, obj, attr, time)
+  if (attr === 'x') return at.point.x
+  if (attr === 'y') return at.point.y
+  return at.angle
 }
 
 /** Eased progress of an action at a time: 0 before it starts, 1 once it has ended. */
@@ -183,13 +460,97 @@ export function valueAt(model: SceneModel, obj: SceneObject, attr: string, time:
   if (relative.length > 0 && typeof value === 'number') {
     let sum = value
     for (const segment of relative) {
-      if (segment.action.start > time) break
+      if (segment.action.start > time) continue
+      if (segment.action.verb === 'path') {
+        // A relative path's shape is changes from where the object is, added on top of whatever else moves it (D196).
+        const at = pathPointAt(model, segment.action, progressAt(segment.action, time), time)
+        if (at) sum += attr === 'x' ? at.point.x : attr === 'y' ? at.point.y : at.angle
+        continue
+      }
       const delta = resolveSource(model, segment.to, time, 0)
       if (typeof delta === 'number') sum += delta * progressAt(segment.action, time)
     }
     value = sum
   }
   return value
+}
+
+/** Drop what the sampler has worked out for a model, for when its actions' times change under it. */
+export function forgetSampling(model: SceneModel): void {
+  cache.delete(model)
+}
+
+/** A stretch of time during which an object is doing something (D212). */
+export interface Stretch {
+  start: number
+  end: number
+}
+
+/**
+ * When an object is in a state (D212), frame by frame from when it begins to a frame past its
+ * last animation, or to when it is removed: moving, or moving a way, by its position changing
+ * between one frame and the next; still, by its not changing; turning, a way, by its rotation;
+ * growing and shrinking, by its drawn size; visible and hidden, by its opacity; fading in and
+ * out, by its opacity changing. Each run of frames is one stretch.
+ */
+export function stateStretches(model: SceneModel, obj: SceneObject, name: StateName, direction: StateDirection | undefined, fps: number): Stretch[] {
+  const dt = 1 / fps
+  const from = obj.at
+  const own = obj.actions.filter((a) => !a.overridden)
+  const last = Math.max(from, ...own.map((a) => a.end)) + dt
+  const to = obj.until !== null ? Math.min(obj.until, last) : last
+  const eps = 1e-4
+  const rotation = (t: number): number => numValue(valueAt(model, obj, 'rotation', t))
+  const size = (t: number): number => {
+    const scale = numValue(valueAt(model, obj, 'scale', t))
+    if (attrSchema(obj.className, 'width')) return scale * (numValue(valueAt(model, obj, 'width', t)) + numValue(valueAt(model, obj, 'height', t)))
+    if (attrSchema(obj.className, 'fontSize')) return scale * numValue(valueAt(model, obj, 'fontSize', t))
+    return scale
+  }
+  const holds = (t: number): boolean => {
+    if (!existsAt(model, obj, t)) return false
+    switch (name) {
+      case 'moving':
+      case 'still': {
+        const a = positionAt(model, obj, t)
+        const b = positionAt(model, obj, t + dt)
+        const dx = b.x - a.x
+        const dy = b.y - a.y
+        const moving = direction === 'left' ? dx < -eps : direction === 'right' ? dx > eps : direction === 'up' ? dy > eps : direction === 'down' ? dy < -eps : Math.hypot(dx, dy) > eps
+        return name === 'moving' ? moving : !moving
+      }
+      case 'turning': {
+        const d = rotation(t + dt) - rotation(t)
+        return direction === 'clockwise' ? d < -eps : direction === 'counterclockwise' ? d > eps : Math.abs(d) > eps
+      }
+      case 'growing':
+        return size(t + dt) - size(t) > eps
+      case 'shrinking':
+        return size(t) - size(t + dt) > eps
+      case 'visible':
+        return opacityAt(model, obj, t) > 0.0005
+      case 'hidden':
+        return opacityAt(model, obj, t) <= 0.0005
+      case 'fadingIn':
+        return opacityAt(model, obj, t + dt) - opacityAt(model, obj, t) > eps
+      case 'fadingOut':
+        return opacityAt(model, obj, t) - opacityAt(model, obj, t + dt) > eps
+    }
+  }
+  const stretches: Stretch[] = []
+  let open: number | null = null
+  const steps = Math.max(0, Math.round((to - from) / dt))
+  for (let k = 0; k <= steps; k++) {
+    const t = from + k * dt
+    const on = t < to && holds(t)
+    if (on && open === null) open = t
+    if (!on && open !== null) {
+      stretches.push({ start: open, end: t })
+      open = null
+    }
+  }
+  if (open !== null) stretches.push({ start: open, end: to })
+  return stretches
 }
 
 /** Where an object's own values put it at a time, before any group carries it. */
@@ -233,7 +594,7 @@ function scaledAbout(m: Motion, c: Point, factor: number): Motion {
 
 /** The actions of a group that move, turn, or scale it, in start order. */
 function groupActions(group: SceneObject): Action[] {
-  return group.actions.filter((a) => !a.overridden && ('rotation' in a.changes || 'scale' in a.changes || 'x' in a.changes || 'y' in a.changes)).sort(byStart)
+  return group.actions.filter((a) => !a.overridden && ('rotation' in a.changes || 'scale' in a.changes || 'x' in a.changes || 'y' in a.changes)).sort((a, b) => a.start - b.start || a.id - b.id)
 }
 
 /** The value a group's attribute has reached when one of its actions begins: its base, plus what every earlier action had done by then. */
@@ -471,14 +832,13 @@ export function shownValue(model: SceneModel, obj: SceneObject, attr: string, ti
   return valueAt(model, obj, attr, time)
 }
 
-/** The action a value written for an attribute goes to at a time: the latest started one that names it, or null for the declaration (D102, D122). */
+/** The action a value written for an attribute goes to at a time: the one that has a say then, as the sampler sees it (D102, D122, D210), or null for the declaration. */
 export function definingAction(obj: SceneObject, attr: string, time: number): Action | null {
-  let found: Action | null = null
-  for (const action of obj.actions) {
-    if (action.overridden || !(attr in action.changes) || action.start >= time) continue
-    if (!found || byStart(found, action) < 0) found = action
-  }
-  return found
+  const items = obj.actions
+    .filter((a) => !a.overridden && attr in a.changes)
+    .sort(byStack)
+    .map((action) => ({ action }))
+  return topActionAt(items, time, true)?.action ?? null
 }
 
 /**

@@ -15,14 +15,23 @@ export type AttrSource = AttrValue | AttrFn
  */
 export interface TimeRef {
   readonly __timeRef: true
-  kind: 'start' | 'end' | 'progress' | 'objectStart' | 'objectEnd' | 'forward'
+  kind: 'start' | 'end' | 'progress' | 'objectStart' | 'objectEnd' | 'forward' | 'state'
   actions: Action[]
   fraction?: number
-  /** For `objectStart` and `objectEnd`: when the object begins or is removed (D138). */
+  /** For `objectStart`, `objectEnd`, and `state`: the object (D138, D212). */
   object?: SceneObject
   /** For `forward`: a name declared further down and which of its times, looked up once the script has run (D148). */
   forward?: { name: string; part: 'start' | 'end' | 'progress' }
+  /** For `state`: what the object is doing, which stretch of it, counted from 1 or the last, and which moment of that stretch (D212). */
+  state?: { name: StateName; direction?: StateDirection; index: number | 'last'; part: 'start' | 'end' | 'progress' }
 }
+
+/** What an object can be doing, worked out from its animations frame by frame (D212). */
+export type StateName = 'moving' | 'still' | 'turning' | 'growing' | 'shrinking' | 'visible' | 'hidden' | 'fadingIn' | 'fadingOut'
+export const STATE_NAMES: readonly StateName[] = ['moving', 'still', 'turning', 'growing', 'shrinking', 'visible', 'hidden', 'fadingIn', 'fadingOut']
+/** The ways `moving` and `turning` can go. */
+export type StateDirection = 'left' | 'right' | 'up' | 'down' | 'clockwise' | 'counterclockwise'
+export const STATE_DIRECTIONS: Readonly<Partial<Record<StateName, readonly StateDirection[]>>> = { moving: ['left', 'right', 'up', 'down'], turning: ['clockwise', 'counterclockwise'] }
 
 /** One `key: value` line inside a block, with where it lives in the source. */
 export interface PropInfo {
@@ -62,6 +71,8 @@ export interface ActionInfo extends BlockInfo {
   className?: string
   verb: string
   name?: string
+  /** The verb as written when that was an old name for `verb`, such as `scale` for a resize (D211). */
+  alias?: string
 }
 
 export interface Timing {
@@ -71,7 +82,8 @@ export interface Timing {
   until?: number | TimeRef
   easeIn?: number
   easeOut?: number
-  ease?: string
+  /** A named curve, or a function of the progress written in the code (D175). */
+  ease?: string | ((progress: number) => number)
   /** Values are changes from where the object is when the action starts (D51). */
   relative?: boolean
 }

@@ -18,8 +18,8 @@ export interface ProjectSettings {
 export type ObjectKind = 'Rect' | 'Circle' | 'Text'
 export const OBJECT_KINDS: ObjectKind[] = ['Rect', 'Circle', 'Text']
 
-/** What a click in the preview does: select, or add an object of the chosen kind, until the tool is put away (D163). */
-export type Tool = 'select' | 'add'
+/** The preview's tool (D203): Select, the default, acts on objects and on the selected path's points; Object places one of the chosen kind per click (D163); Path starts a path on an object, draws points, and moves the path and its points. A tool stays until put away. */
+export type Tool = 'select' | 'object' | 'path'
 
 /**
  * What the preview's handles do to the selection (D86). `all` shows every handle: the body
@@ -82,6 +82,13 @@ export interface ActionRef {
   index: number
 }
 
+/** What the links dialog is about: an object, or one of its actions, and the attribute to start on (D172, D182). */
+export interface LinksTarget {
+  object: string
+  index?: number
+  key?: string
+}
+
 /** What is selected, as one value, so a history step can carry it (D90). */
 export interface SelectionState {
   selection: string[]
@@ -125,8 +132,6 @@ const DEFAULTS_KEY = 'quick-animator.showDefaults'
 const SNAP_KEY = 'quick-animator.previewSnap'
 const COLLIDE_KEY = 'quick-animator.collide'
 const PUSH_KEY = 'quick-animator.push'
-const STICKY_KEY = 'quick-animator.sticky'
-const TIMELINE_VIEW_KEY = 'quick-animator.timelineView'
 const PREFS_KEY = 'quick-animator.prefs'
 
 /** App preferences (D145). */
@@ -163,6 +168,7 @@ const PIN_KEY = 'quick-animator.pin'
 const CHAIN_KEY = 'quick-animator.chain'
 const FRAME_SNAP_KEY = 'quick-animator.frameSnap'
 const ANCHOR_KEY = 'quick-animator.anchor'
+const SHOW_PATHS_KEY = 'quick-animator.showPaths'
 
 function loadChoice<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   try {
@@ -293,7 +299,6 @@ interface State {
   /** Dragged objects shove what they meet along instead of stopping (D136). */
   push: boolean
   /** What a drag pushed stays where it was shoved; off, it springs back when the drag retreats (D136). */
-  sticky: boolean
   /** The objects in this project that drags pass through, by name (D136). */
   soft: string[]
   /** The objects in this project that nothing pushes, by name (D136). */
@@ -302,9 +307,12 @@ interface State {
   /** Whether the animations made while Shift is held follow one another instead of all starting at the playhead (D127). */
   chain: boolean
   /** The timeline shows objects as clips, or one row per object (D139). */
-  timelineView: 'objects' | 'list'
+  /** The links dialog's subject: an object, or one of its actions by index (D172). */
+  linksDialog: LinksTarget | null
   /** The pane the pointer last went down in: it decides what the arrow keys move (D141). */
   activePane: 'preview' | 'timeline' | 'objects' | 'code' | 'now' | null
+  /** Whether the pointer is over the timeline, so Shift held there previews the selected animation as it does over the preview (D180). */
+  hoverTimeline: boolean
   anchor: Anchor
   clipboard: Clip | null
   /** Objects and class groups whose rows are folded, per pane (D98). */
@@ -318,8 +326,16 @@ interface State {
   model: SceneModel | null
   error: SceneError | null
   tool: Tool
+  /** With the Path tool: edit a path's points, or move whole paths (D208). */
+  pathMode: 'edit' | 'move'
+  /** Show the selected object's paths without one being selected (D209); persisted. */
+  showPaths: boolean
+  /** Paths hidden for now, while the Path tool is on, as object:index (D209). */
+  hiddenPaths: string[]
   /** The kind of object the Add tool places (D163). */
   addKind: ObjectKind
+  /** The points of the selected path that are picked: placed, clicked, or boxed; a drag of one moves them all and Delete removes them (D194, D198). */
+  pathPoints: number[]
   contextMenu: ContextMenuState | null
   dialog: DialogState | null
   /** Show unset attributes as ghost lines in the code pane (D35). */
@@ -350,12 +366,13 @@ interface State {
   setPreviewSnap: (snap: Partial<PreviewSnap>) => void
   setCollide: (on: boolean) => void
   setPush: (on: boolean) => void
-  setSticky: (on: boolean) => void
   setSoft: (name: string, soft: boolean) => void
   setAnchored: (name: string, anchored: boolean) => void
   setPin: (pin: Pin) => void
   setChain: (chain: boolean) => void
-  setTimelineView: (view: 'objects' | 'list') => void
+  openLinksDialog: (target: LinksTarget) => void
+  closeLinksDialog: () => void
+  setHoverTimeline: (over: boolean) => void
   setActivePane: (pane: 'preview' | 'timeline' | 'objects' | 'code' | 'now' | null) => void
   setAnchor: (anchor: Anchor) => void
   setClipboard: (clip: Clip | null) => void
@@ -365,6 +382,10 @@ interface State {
   openClassesDialog: (names: string[]) => void
   closeClassesDialog: () => void
   setTool: (tool: Tool) => void
+  setPathMode: (mode: 'edit' | 'move') => void
+  toggleShowPaths: () => void
+  setPathHidden: (key: string, hidden: boolean) => void
+  setPathPoints: (indices: number[]) => void
   setAddKind: (kind: ObjectKind) => void
   openMenu: (menu: ContextMenuState) => void
   closeMenu: () => void
@@ -384,7 +405,7 @@ function createAppStore() {
       const s = get()
       const before: SelectionState = { selection: s.selection, selectedActions: s.selectedActions }
       if (sameSelection(before, after)) return
-      set({ selection: after.selection, selectedActions: after.selectedActions, selectedAction: after.selectedActions[0] ?? null })
+      set({ selection: after.selection, selectedActions: after.selectedActions, selectedAction: after.selectedActions[0] ?? null, pathPoints: [] })
       if (!applying) selectionSink?.(before, after)
     }
     const objectsOf = (refs: ActionRef[]): string[] => [...new Set(refs.map((r) => r.object))]
@@ -413,13 +434,13 @@ function createAppStore() {
       previewSnap: loadPreviewSnap(),
       collide: loadChoice<'on' | 'off'>(COLLIDE_KEY, ['on', 'off'], 'off') === 'on',
       push: loadChoice<'on' | 'off'>(PUSH_KEY, ['on', 'off'], 'off') === 'on',
-      sticky: loadChoice<'on' | 'off'>(STICKY_KEY, ['on', 'off'], 'off') === 'on',
       soft: [],
       anchored: [],
       pin: loadChoice<Pin>(PIN_KEY, ['start', 'end'], 'start'),
       chain: loadChoice<'on' | 'off'>(CHAIN_KEY, ['on', 'off'], 'off') === 'on',
-      timelineView: loadChoice<'objects' | 'list'>(TIMELINE_VIEW_KEY, ['objects', 'list'], 'objects'),
+      linksDialog: null,
       activePane: null,
+      hoverTimeline: false,
       anchor: loadChoice<Anchor>(ANCHOR_KEY, ['edge', 'center'], 'edge'),
       clipboard: null,
       collapsed: { objects: {}, timeline: {} },
@@ -429,7 +450,11 @@ function createAppStore() {
       model: null,
       error: null,
       tool: 'select',
+      pathMode: 'edit',
+      showPaths: loadChoice<'on' | 'off'>(SHOW_PATHS_KEY, ['on', 'off'], 'on') === 'on',
+      hiddenPaths: [],
       addKind: 'Rect',
+      pathPoints: [],
       contextMenu: null,
       dialog: null,
       showDefaults: loadShowDefaults(),
@@ -505,10 +530,6 @@ function createAppStore() {
         saveChoice(PUSH_KEY, push ? 'on' : 'off')
         set({ push })
       },
-      setSticky: (sticky) => {
-        saveChoice(STICKY_KEY, sticky ? 'on' : 'off')
-        set({ sticky })
-      },
       setSoft: (name, soft) =>
         set((s) => {
           const next = soft ? [...new Set([...s.soft, name])] : s.soft.filter((n) => n !== name)
@@ -529,11 +550,10 @@ function createAppStore() {
         saveChoice(CHAIN_KEY, chain ? 'on' : 'off')
         set({ chain })
       },
-      setTimelineView: (timelineView) => {
-        saveChoice(TIMELINE_VIEW_KEY, timelineView)
-        set({ timelineView })
-      },
+      openLinksDialog: (linksDialog) => set({ linksDialog, contextMenu: null }),
+      closeLinksDialog: () => set({ linksDialog: null }),
       setActivePane: (activePane) => set((s) => (s.activePane === activePane ? s : { activePane })),
+      setHoverTimeline: (hoverTimeline) => set((s) => (s.hoverTimeline === hoverTimeline ? s : { hoverTimeline })),
       setAnchor: (anchor) => {
         saveChoice(ANCHOR_KEY, anchor)
         set({ anchor })
@@ -549,7 +569,15 @@ function createAppStore() {
       setAllCollapsed: (pane, keys) => set((s) => ({ collapsed: { ...s.collapsed, [pane]: keys ? Object.fromEntries(keys.map((k) => [k, true as const])) : {} } })),
       openClassesDialog: (classesDialog) => set({ classesDialog, contextMenu: null }),
       closeClassesDialog: () => set((s) => (s.classesDialog ? { classesDialog: null } : s)),
-      setTool: (tool) => set({ tool }),
+      setTool: (tool) => set((s) => ({ tool, hiddenPaths: tool === 'path' ? s.hiddenPaths : [] })),
+      setPathMode: (pathMode) => set({ pathMode }),
+      toggleShowPaths: () =>
+        set((s) => {
+          saveChoice(SHOW_PATHS_KEY, s.showPaths ? 'off' : 'on')
+          return { showPaths: !s.showPaths }
+        }),
+      setPathHidden: (key, hidden) => set((s) => ({ hiddenPaths: hidden ? [...new Set([...s.hiddenPaths, key])] : s.hiddenPaths.filter((k) => k !== key) })),
+      setPathPoints: (pathPoints) => set({ pathPoints }),
       setAddKind: (addKind) => set({ addKind }),
       openMenu: (contextMenu) => set({ contextMenu }),
       closeMenu: () => set((s) => (s.contextMenu ? { contextMenu: null } : s)),

@@ -32,7 +32,7 @@ export function playbackEndFor(model: SceneModel | null, settings: ProjectSettin
  * the text into the editor when it did not come from there, and saves when it did.
  */
 export function commitSource(source: string, origin: SourceOrigin): void {
-  const { model, error } = evaluateScene(source)
+  const { model, error } = evaluateScene(source, useStore.getState().settings.fps)
   useStore.setState((s) => {
     const next = model ?? s.model
     return { source, model: next, error, contentEnd: contentEndFor(next), playbackEnd: playbackEndFor(next, s.settings) }

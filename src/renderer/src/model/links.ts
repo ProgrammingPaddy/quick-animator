@@ -62,7 +62,7 @@ export function dependentsByTarget(model: SceneModel): Map<string, string[]> {
     out.set(key, list)
   }
   const keysOf = (ref: TimeRef): string[] => {
-    if (ref.kind === 'objectStart' || ref.kind === 'objectEnd') return ref.object ? [`object:${ref.object.name}`] : []
+    if (ref.kind === 'objectStart' || ref.kind === 'objectEnd' || ref.kind === 'state') return ref.object ? [`object:${ref.object.name}`] : []
     if (ref.kind === 'forward') {
       const name = ref.forward?.name
       if (!name) return []
@@ -77,6 +77,15 @@ export function dependentsByTarget(model: SceneModel): Map<string, string[]> {
     return ref.actions.map((a) => `action:${a.id}`)
   }
   const partOf = (ref: TimeRef): string => {
+    if (ref.kind === 'state' && ref.state) {
+      // "when it stops moving right, the 2nd time" (D212).
+      const s = ref.state
+      const what = `${s.name === 'fadingIn' ? 'fading in' : s.name === 'fadingOut' ? 'fading out' : s.name}${s.direction ? ` ${s.direction}` : ''}`
+      const which = s.index === 'last' ? ', the last time' : s.index > 1 ? `, time ${s.index}` : ''
+      if (s.part === 'start') return `when it starts ${what}${which}`
+      if (s.part === 'end') return `when it stops ${what}${which}`
+      return `${Math.round((ref.fraction ?? 0) * 100)}% into ${what}${which}`
+    }
     const part = ref.kind === 'forward' ? ref.forward?.part : ref.kind === 'objectStart' ? 'start' : ref.kind === 'objectEnd' ? 'end' : ref.kind
     if (part === 'start') return 'its start'
     if (part === 'end') return 'its end'

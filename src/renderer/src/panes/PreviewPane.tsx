@@ -5,12 +5,12 @@ import { NumberField } from '../components/NumberField'
 import { ScrollBar } from '../components/ScrollBar'
 import { groupMembers } from '../model/groups'
 import { GROUP } from '../model/registry'
-import { shownValue } from '../model/sample'
+import { pathFrame, pathHolds, positionAt, shownValue, type PathFrame, type Point } from '../model/sample'
 import type { SceneModel, SceneObject } from '../model/types'
 import { newProject, pickProject } from '../project/controller'
 import { DEFAULT_EASE_FRACTION, easingFor } from '../model/easing'
-import { addObject, adjustDurations, appendPushedMove, beginTimed, createGroup, deleteActions, deleteObjects, duplicateObjects, inProgressActions, jumpToObject, lastActionIndex, overrideClassAction, requestClasses, requestRename, resizeAttrs, resizedValues, setActionDestination, setActionTiming, setAttrsAtMany, ungroup } from '../project/operations'
-import { makeMover, outlineOf, walk, type Mover, type Pushing } from '../preview/collide'
+import { addObject, addPath, adjustDurations, appendPushedMove, beginTimed, createGroup, deleteActions, deleteObjects, duplicateObjects, inProgressActions, insertPathPoints, jumpToObject, lastActionIndex, overrideClassAction, pathDragTarget, pathEditable, removePathPoints, requestClasses, requestRename, resizeAttrs, resizedValues, setActionDestination, setActionTiming, setAttrsAtMany, setPathPoints, setPathSmooth, ungroup } from '../project/operations'
+import { makeMover, outlineOf, resetMover, walk, type Mover, type Pushing } from '../preview/collide'
 import { SceneRenderer, type Frame, type GuideLine, type Handle } from '../preview/SceneRenderer'
 import { Viewport } from '../preview/Viewport'
 import { OBJECT_KINDS, TRANSFORM_MODES, useStore, type ActionRef, type TransformMode } from '../state/store'
@@ -24,6 +24,62 @@ const MODE_TIP: Record<TransformMode, string> = {
   resize: 'Corners resize both sides, edges resize one; hold Alt to keep the proportions. Shift makes it an animation.',
 }
 const BASE_ATTRS = ['x', 'y', 'rotation', 'scale', 'width', 'height', 'radius', 'fontSize']
+
+/** The index of the point within `radius` of a place, the nearest when several are, or null. */
+function nearestPoint(points: Point[], at: Point, radius: number): number | null {
+  let best: number | null = null
+  let bestDistance = radius
+  for (let i = 0; i < points.length; i++) {
+    const d = Math.hypot(points[i]!.x - at.x, points[i]!.y - at.y)
+    if (d <= bestDistance) {
+      bestDistance = d
+      best = i
+    }
+  }
+  return best
+}
+
+function distanceToSegment(p: Point, a: Point, b: Point): number {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const length2 = dx * dx + dy * dy
+  const t = length2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / length2)) : 0
+  return Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t))
+}
+
+/** The index of the segment, from point i to point i + 1, within `radius` of a place, or null. */
+function nearestSegment(points: Point[], at: Point, radius: number): number | null {
+  let best: number | null = null
+  let bestDistance = radius
+  for (let i = 0; i + 1 < points.length; i++) {
+    const d = distanceToSegment(at, points[i]!, points[i + 1]!)
+    if (d <= bestDistance) {
+      bestDistance = d
+      best = i
+    }
+  }
+  return best
+}
+
+/** A drawn line kept as its corners: the points that bend it by more than the tolerance (D194). */
+function simplify(points: Point[], tolerance: number): Point[] {
+  if (points.length < 3) return points
+  const first = points[0]!
+  const last = points[points.length - 1]!
+  let farthest = 0
+  let index = 0
+  for (let i = 1; i < points.length - 1; i++) {
+    const d = distanceToSegment(points[i]!, first, last)
+    if (d > farthest) {
+      farthest = d
+      index = i
+    }
+  }
+  if (farthest <= tolerance) return [first, last]
+  return [...simplify(points.slice(0, index + 1), tolerance).slice(0, -1), ...simplify(points.slice(index), tolerance)]
+}
+
+type MenuItems = Parameters<typeof showMenu>[1]
 
 interface Drag {
   /** `plain`: edit the values at the playhead. `timed`: Shift, make an action. `destination`: the selected action's end follows. */
@@ -61,6 +117,8 @@ interface Drag {
   frameBox: Box
   /** The dragged outlines and everyone else's, moved along as the drag goes, for collision; null for turns and resizes (D136). */
   movers: { dragged: Mover; obstacles: Mover[] } | null
+  /** How far the dragged thing's place at the time being edited is from where its animation starts: an animation's push sweeps from the start (D206). */
+  sweepOrigin: Point
   /** The pointer's last angle around the gizmo center, and the turn so far, in radians; turns add up past a full circle (D105). */
   lastAngle: number
   turned: number
@@ -205,7 +263,7 @@ export function PreviewPane() {
    * change before the animation exists. With `editing`, an animation was selected when Shift was
    * held: the playhead shows its end, a drag sets its end state, and nothing new is chained (D157).
    */
-  const gestureRef = useRef<{ restore: number; from: number; duration: number; editing?: boolean } | null>(null)
+  const gestureRef = useRef<{ restore: number; from: number; duration: number; editing?: boolean; editEnd?: 'start' | 'end' } | null>(null)
   /** Whether the pointer has moved over the pane since anything else took the focus, so Shift held here starts a gesture and Shift typed elsewhere does not. */
   const hoverRef = useRef(false)
   /** The turn plain drags have given the box's axes since the selection was made; the box stays turned until it changes (D116). */
@@ -213,6 +271,10 @@ export function PreviewPane() {
   const paintRef = useRef<() => void>(() => undefined)
   const [altDown, setAltDown] = useState(false)
   const [dragging, setDragging] = useState<'aspect' | null>(null)
+  /** The paths shown right now (D194, D209): the selected one, with its line and anchors and whether its points can be edited, and the others, lines only. */
+  const pathRef = useRef<{ primary: { ref: ActionRef; frame: PathFrame; editable: boolean } | null; others: { ref: ActionRef; frame: PathFrame }[] } | null>(null)
+  /** A line being drawn for the selected path, in pane pixels, until the pointer is let go (D194). */
+  const [sketch, setSketch] = useState<{ x: number; y: number }[] | null>(null)
   const [marquee, setMarquee] = useState<Marquee | null>(null)
   const [zoom, setZoom] = useState(1)
   const [, bump] = useReducer((n: number) => n + 1, 0)
@@ -222,22 +284,25 @@ export function PreviewPane() {
   const project = useStore((s) => s.project)
   const model = useStore((s) => s.model)
   const selection = useStore((s) => s.selection)
+  const selectedActions = useStore((s) => s.selectedActions)
   const transformMode = useStore((s) => s.transformMode)
   const previewSnap = useStore((s) => s.previewSnap)
   const collide = useStore((s) => s.collide)
   const push = useStore((s) => s.push)
-  const sticky = useStore((s) => s.sticky)
   const pin = useStore((s) => s.pin)
   const chain = useStore((s) => s.chain)
   const anchor = useStore((s) => s.anchor)
   const setTool = useStore((s) => s.setTool)
   const addKind = useStore((s) => s.addKind)
+  const pathMode = useStore((s) => s.pathMode)
+  const showPaths = useStore((s) => s.showPaths)
+  const setPathMode = useStore((s) => s.setPathMode)
+  const toggleShowPaths = useStore((s) => s.toggleShowPaths)
   const setAddKind = useStore((s) => s.setAddKind)
   const setTransformMode = useStore((s) => s.setTransformMode)
   const setPreviewSnap = useStore((s) => s.setPreviewSnap)
   const setCollide = useStore((s) => s.setCollide)
   const setPush = useStore((s) => s.setPush)
-  const setSticky = useStore((s) => s.setSticky)
   const setPin = useStore((s) => s.setPin)
   const setChain = useStore((s) => s.setChain)
   const setAnchor = useStore((s) => s.setAnchor)
@@ -257,6 +322,32 @@ export function PreviewPane() {
       const s = useStore.getState()
       // While Shift looks ahead, whatever was alive where the gesture began stays drawn (D138).
       renderer.update(s.model, s.time, s.selection, s.transformMode, 1 / viewport.zoom, axesRef.current, gestureRef.current?.restore, s.anchored)
+      // The selected path, or the first path of the selected object, shows its shape; with the path itself selected and its points written out, each point wears a handle (D192, D194).
+      // Which paths show (D205, D209): with the Path tool, every object's, but for those hidden for now; otherwise the selected object's when Paths is on; and the selected path always. The selected path carries the handles.
+      const found: { ref: ActionRef; frame: PathFrame; selected: boolean }[] = []
+      if (s.model) {
+        const ref = s.selectedActions.length === 1 ? s.selectedActions[0] : undefined
+        const selectedObject = s.selection.length === 1 ? s.model.objects.find((o) => o.name === s.selection[0]) : undefined
+        const inPathTool = s.tool === 'path'
+        const sources = inPathTool ? s.model.objects : selectedObject && s.showPaths ? [selectedObject] : ref ? s.model.objects.filter((o) => o.name === ref.object) : []
+        for (const o of sources) {
+          for (let index = 0; index < o.actions.length; index++) {
+            const action = o.actions[index]!
+            if (action.verb !== 'path' || action.overridden) continue
+            const selected = !!ref && ref.object === o.name && ref.index === index
+            if (!selected && (inPathTool ? s.hiddenPaths.includes(`${o.name}:${index}`) : !s.showPaths)) continue
+            const frame = pathFrame(s.model, action, s.time)
+            if (!frame || frame.curve.length === 0) continue
+            found.push({ ref: { object: o.name, index }, frame, selected })
+          }
+        }
+      }
+      const lead = found.find((p) => p.selected)
+      const primary = lead ? { ref: lead.ref, frame: lead.frame, editable: pathEditable(lead.ref) } : null
+      const others = found.filter((p) => !p.selected).map((p) => ({ ref: p.ref, frame: p.frame }))
+      pathRef.current = primary || others.length > 0 ? { primary, others } : null
+      renderer.setPath(primary ? primary.frame.curve : null, 1 / viewport.zoom, primary?.editable ? primary.frame.anchors : null, s.pathPoints)
+      renderer.setOtherPaths(others.map((o) => o.frame.curve), 1 / viewport.zoom)
       viewport.render()
     }
     paintRef.current = paint
@@ -335,20 +426,23 @@ export function PreviewPane() {
       }
       // Shift held over the pane, with Starts at playhead: look ahead to the proposed animation's end
       // before anything is dragged, so what is dragged is what is written (D103).
-      if (e.key !== 'Shift' || e.repeat || !hoverRef.current || gestureRef.current || dragRef.current) return
+      if (e.key !== 'Shift' || e.repeat || gestureRef.current || dragRef.current) return
       if (e.target instanceof Element && e.target.closest('input, textarea')) return
       const s = useStore.getState()
-      if (!s.model) return
+      // Over the preview, or over the timeline with an animation selected (D180).
+      if (!s.model || (!hoverRef.current && !s.hoverTimeline)) return
       // With an animation selected, Shift jumps to its end: what is dragged then is its end state, and nothing new is made (D157).
       const picked = s.selectedActions.find((r) => s.selection.includes(r.object)) ?? s.selectedActions[0]
       const editing = picked ? s.model.objects.find((o) => o.name === picked.object)?.actions[picked.index] : undefined
       if (editing) {
         if (e.target instanceof Element && e.target.closest('.cm-editor')) (document.activeElement as HTMLElement | null)?.blur()
-        gestureRef.current = { restore: s.time, from: editing.start, duration: editing.end - editing.start, editing: true }
-        s.setTime(editing.end)
+        // Shift previews the end the pin does not name: the end with Starts at playhead, the start with Ends at playhead (D187).
+        const editEnd = s.pin === 'end' ? 'start' : 'end'
+        gestureRef.current = { restore: s.time, from: editing.start, duration: editing.end - editing.start, editing: true, editEnd }
+        s.setTime(editEnd === 'end' ? editing.end : editing.start)
         return
       }
-      if (s.pin !== 'start') return
+      if (!hoverRef.current || s.pin !== 'start') return
       // The code pane may still hold the focus from an earlier click; the pointer being here says what Shift is for.
       if (e.target instanceof Element && e.target.closest('.cm-editor')) (document.activeElement as HTMLElement | null)?.blur()
       gestureRef.current = { restore: s.time, from: s.time, duration: 1 }
@@ -412,6 +506,171 @@ export function PreviewPane() {
     el.addEventListener('pointercancel', onUp)
   }
 
+  /** A place on the grid when the grid is on (D91). */
+  const gridded = (w: Point): Point => {
+    const snap = useStore.getState().previewSnap
+    if (!snap.on || snap.grid <= 0) return w
+    return { x: Math.round(w.x / snap.grid) * snap.grid, y: Math.round(w.y / snap.grid) * snap.grid }
+  }
+
+  /** The line of a path as it stands now, by its reference. */
+  const frameOf = (ref: ActionRef): PathFrame | null => {
+    const s = useStore.getState()
+    const action = s.model?.objects.find((o) => o.name === ref.object)?.actions[ref.index]
+    return s.model && action ? pathFrame(s.model, action, s.time) : null
+  }
+
+  /**
+   * Draw for a path (D194, D199): a stroke from `from` adds the corners of the drawn line after
+   * the last anchor and makes the path smooth; a press that does not move adds one corner where
+   * it lands when `clickAdds`, else nothing. A path started on an object draws from the object's
+   * own place, its first anchor.
+   */
+  const beginStroke = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, from: Point, clickAdds: boolean) => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const bounds = host.getBoundingClientRect()
+    const samples: Point[] = [from]
+    const pane: { x: number; y: number }[] = [{ x: e.clientX - bounds.left, y: e.clientY - bounds.top }]
+    let moved = false
+    capture(
+      host,
+      e.pointerId,
+      (ev) => {
+        if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 4) return
+        moved = true
+        samples.push(viewport.toWorld(ev.clientX - bounds.left, ev.clientY - bounds.top))
+        pane.push({ x: ev.clientX - bounds.left, y: ev.clientY - bounds.top })
+        setSketch([...pane])
+      },
+      () => {
+        setSketch(null)
+        if (!moved && !clickAdds) return
+        const frame = frameOf(ref)
+        const count = frame?.anchors.length ?? 0
+        const points = moved ? simplify(samples, 4 / viewport.zoom) : [gridded(from)]
+        // A line drawn from the last anchor goes on from it rather than doubling it.
+        const last = frame?.anchors[count - 1]
+        if (last && points.length > 1 && Math.hypot(points[0]!.x - last.x, points[0]!.y - last.y) < 4 / viewport.zoom) points.shift()
+        if (points.length === 0) return
+        beginGesture()
+        insertPathPoints(ref, count, points)
+        // A drawn line is a curve: the path turns smooth, once (D199).
+        const action = useStore.getState().model?.objects.find((o) => o.name === ref.object)?.actions[ref.index]
+        if (moved && action && action.changes['smooth'] !== true) setPathSmooth(ref, true)
+        endGesture()
+        useStore.getState().setPathPoints([count + points.length - 1])
+      },
+    )
+  }
+
+  /**
+   * Move a whole path with the Path tool (D203): the drag carries every anchor by how far the
+   * pointer goes, as one undo step; a press that does not move puts a point at `insertAt`
+   * instead, when there is one.
+   */
+  const beginPathMove = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, world: Point, insertAt: number | null) => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const bounds = host.getBoundingClientRect()
+    const starts = frameOf(ref)?.anchors ?? []
+    let dragged = false
+    capture(
+      host,
+      e.pointerId,
+      (ev) => {
+        if (!dragged) {
+          if (Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 3) return
+          dragged = true
+          beginGesture()
+        }
+        const now = viewport.toWorld(ev.clientX - bounds.left, ev.clientY - bounds.top)
+        const dx = now.x - world.x
+        const dy = now.y - world.y
+        setPathPoints(ref, starts.map((p, index) => ({ index, world: gridded({ x: p.x + dx, y: p.y + dy }) })))
+      },
+      () => {
+        if (dragged) endGesture()
+        else if (insertAt !== null) {
+          insertPathPoints(ref, insertAt, [gridded(world)])
+          useStore.getState().setPathPoints([insertAt])
+        }
+      },
+    )
+  }
+
+  /**
+   * Edit a path's points (D194, D197, D198): drag the anchor `point`, with every other picked
+   * anchor when it is one of them; or put a new anchor in at `insertAt`, where the pointer is,
+   * and drag it. A drag moves by how far the pointer goes, so an object dragged by its body
+   * carries its anchor along, and it is one undo step. With `toggle`, a click adds the anchor to
+   * the picked ones or takes it out, and nothing moves.
+   */
+  const beginPathEdit = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, world: Point, point: number | null, insertAt: number | null, toggle: boolean) => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const bounds = host.getBoundingClientRect()
+    const s = useStore.getState()
+    let indices: number[]
+    if (point !== null) {
+      if (toggle) {
+        // Ctrl: into the picked anchors or out of them, and no drag.
+        s.setPathPoints(s.pathPoints.includes(point) ? s.pathPoints.filter((i) => i !== point) : [...s.pathPoints, point])
+        return
+      }
+      beginGesture()
+      indices = s.pathPoints.includes(point) ? s.pathPoints : [point]
+    } else if (insertAt !== null) {
+      // A click on the line between two anchors puts a new anchor there, which the drag then carries.
+      beginGesture()
+      insertPathPoints(ref, insertAt, [gridded(world)])
+      indices = [insertAt]
+    } else return
+    useStore.getState().setPathPoints(indices)
+    const frame0 = frameOf(ref)
+    const starts = indices.map((i) => frame0?.anchors[i] ?? world)
+    let dragged = false
+    capture(
+      host,
+      e.pointerId,
+      (ev) => {
+        if (!dragged && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 3) return
+        dragged = true
+        const now = viewport.toWorld(ev.clientX - bounds.left, ev.clientY - bounds.top)
+        const dx = now.x - world.x
+        const dy = now.y - world.y
+        setPathPoints(ref, indices.map((index, k) => ({ index, world: gridded({ x: starts[k]!.x + dx, y: starts[k]!.y + dy }) })))
+      },
+      () => endGesture(),
+    )
+  }
+
+  /** Edit path for each path an object has, and Add path (D194). */
+  const pathItems = (name: string): MenuItems => {
+    const s = useStore.getState()
+    const obj = s.model?.objects.find((o) => o.name === name)
+    const paths = obj ? obj.actions.map((a, index) => ({ a, index })).filter(({ a }) => a.verb === 'path' && !a.classAction && !a.overridden) : []
+    // Like a click on its clip: the path is selected and the playhead at its start, where its handles can be dragged (D157).
+    const edit = (index: number) => {
+      const fresh = useStore.getState()
+      const action = fresh.model?.objects.find((o) => o.name === name)?.actions[index]
+      fresh.selectAction(name, index)
+      if (action) fresh.setTime(action.start)
+      fresh.setTool('select')
+    }
+    const items: MenuItems = []
+    if (paths.length === 1) items.push({ label: 'Edit path', run: () => edit(paths[0]!.index) })
+    else if (paths.length > 1) items.push({ label: 'Edit path', children: paths.map(({ a, index }) => ({ label: `at ${formatTime(a.start, s.settings.fps)}`, run: () => edit(index) })) })
+    items.push({
+      label: 'Add path',
+      run: () => {
+        // One point, where the object is; the Path tool adds the rest.
+        if (addPath(name, useStore.getState().time) !== null) useStore.getState().setTool('path')
+      },
+    })
+    return items
+  }
+
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     const host = e.currentTarget
     const viewport = viewportRef.current
@@ -439,8 +698,8 @@ export function PreviewPane() {
     const { renderer } = located
     const store = useStore.getState()
 
-    // The Add tool places one object per click and stays on (D163).
-    if (store.tool === 'add') {
+    // The Object tool places one object per click and stays on (D163, D203).
+    if (store.tool === 'object') {
       addObject(store.addKind, located.world.x, located.world.y)
       return
     }
@@ -451,6 +710,77 @@ export function PreviewPane() {
     if (!e.shiftKey && gestureRef.current) {
       store.setTime(gestureRef.current.restore)
       gestureRef.current = null
+    }
+
+    // A path under the pointer comes first (D194, D203, D208): a point of it or its line. With Select, only the selected path answers; with the Path tool, any path shown, which the press picks.
+    const shown = pathRef.current
+    const pathAction = store.selectedActions.length === 1 ? store.selectedActions[0]! : null
+    const pathTool = store.tool === 'path'
+    const pixel = 1 / viewport.zoom
+    const candidates = [...(shown?.primary ? [shown.primary] : []), ...(pathTool ? (shown?.others ?? []) : [])]
+    let hitPath: { ref: ActionRef; frame: PathFrame; point: number | null; segment: number | null } | null = null
+    for (const p of candidates) {
+      const point = nearestPoint(p.frame.anchors, located.world, 8 * pixel)
+      const segment = point === null ? nearestSegment(p.frame.curve, located.world, 6 * pixel) : null
+      if (point !== null || segment !== null) {
+        hitPath = { ref: p.ref, frame: p.frame, point, segment }
+        break
+      }
+    }
+    if (hitPath && !e.shiftKey) {
+      const ctrlHeld = e.ctrlKey || e.metaKey
+      const isSelected = !!pathAction && pathAction.object === hitPath.ref.object && pathAction.index === hitPath.ref.index
+      if (!isSelected) store.selectAction(hitPath.ref.object, hitPath.ref.index)
+      if (pathEditable(hitPath.ref)) {
+        if (pathTool && store.pathMode === 'move') {
+          // Move path: any point or the line carries the whole path (D208).
+          beginPathMove(host, e, hitPath.ref, located.world, null)
+          return
+        }
+        if (hitPath.point !== null) {
+          beginPathEdit(host, e, hitPath.ref, located.world, hitPath.point, null, ctrlHeld)
+          return
+        }
+        if (!ctrlHeld) {
+          // A click on the line puts a point there and drags it.
+          beginPathEdit(host, e, hitPath.ref, located.world, null, (hitPath.frame.spans[hitPath.segment! + 1] ?? 0) + 1, false)
+          return
+        }
+      }
+      return
+    }
+    // The Path tool elsewhere (D203, D208): on an object, its path, the one that owns its place at the playhead or else its first, is picked, or, with none, one starts where the object is and the same press draws on from it; on empty space with a path in hand, a corner or a drawn line; with one object selected and no path in hand, its path starts and the press is its second point.
+    if (pathTool) {
+      const editing = store.pathMode === 'edit'
+      if (located.hit) {
+        const owner = model.objects.find((o) => o.name === located.hit)
+        if (!owner) return
+        const paths = owner.actions.map((a, index) => ({ a, index })).filter(({ a }) => a.verb === 'path' && !a.classAction && !a.overridden)
+        if (paths.length > 0) {
+          const holding = pathHolds(owner, 'x', store.time)
+          const pick = paths.find(({ a }) => a === holding) ?? paths[0]!
+          if (!(pathAction && pathAction.object === owner.name && pathAction.index === pick.index)) store.selectAction(owner.name, pick.index)
+          return
+        }
+        if (!editing) return
+        const index = addPath(owner.name, store.time)
+        if (index !== null) beginStroke(host, e, { object: owner.name, index }, positionAt(useStore.getState().model ?? model, owner, store.time), false)
+        return
+      }
+      if (!editing) return
+      if (pathAction && shown?.primary?.editable) {
+        beginStroke(host, e, pathAction, located.world, true)
+        return
+      }
+      if (!pathAction && store.selection.length === 1) {
+        const name = store.selection[0]!
+        const index = addPath(name, store.time)
+        if (index !== null) {
+          insertPathPoints({ object: name, index }, 1, [gridded(located.world)])
+          beginStroke(host, e, { object: name, index }, located.world, false)
+        }
+      }
+      return
     }
 
     const mode = store.transformMode
@@ -483,13 +813,21 @@ export function PreviewPane() {
         },
         () => {
           const s = useStore.getState()
+          // With a path selected, the box picks its points, and a click on empty space lets them go first (D198).
+          const pointsMode = !!pathRef.current?.primary?.editable && s.selectedActions.length === 1
           if (!moved || !rect) {
-            if (!extend) s.select([])
+            if (pointsMode && s.pathPoints.length > 0) s.setPathPoints([])
+            else if (!extend) s.select([])
           } else {
             const a = viewport.toWorld(Math.min(rect.x0, rect.x1), Math.min(rect.y0, rect.y1))
             const b = viewport.toWorld(Math.max(rect.x0, rect.x1), Math.max(rect.y0, rect.y1))
-            const names = renderer.objectsIn({ left: a.x, right: b.x, top: a.y, bottom: b.y })
-            s.select(extend ? [...s.selection, ...names.filter((n) => !s.selection.includes(n))] : names)
+            if (pointsMode) {
+              const inside = pathRef.current!.primary!.frame.anchors.map((p, i) => (p.x >= a.x && p.x <= b.x && p.y >= b.y && p.y <= a.y ? i : -1)).filter((i) => i >= 0)
+              s.setPathPoints(extend ? [...new Set([...s.pathPoints, ...inside])] : inside)
+            } else {
+              const names = renderer.objectsIn({ left: a.x, right: b.x, top: a.y, bottom: b.y })
+              s.select(extend ? [...s.selection, ...names.filter((n) => !s.selection.includes(n))] : names)
+            }
           }
           setMarquee(null)
         },
@@ -515,6 +853,18 @@ export function PreviewPane() {
     /** What the gesture is about: positions, the angle, or the size. A match here makes a selected action the target. */
     const primaryAttrs = (obj: SceneObject): string[] => (op === 'move' ? ['x', 'y'] : op === 'rotate' ? ['rotation'] : resizeAttrs(obj.className))
 
+    // Moving an object that a path places moves the path (D197, D205), as a drag during a move edits the move: the first anchor at the path's start, the last anywhere after, with the playhead taken to the path's end while it runs. The path selected, or merely owning the place; with Shift, only the selected path.
+    const selectedRef = store.selectedActions.find((r) => r.object === subject.name)
+    const pathSelected = selectedRef && subject.actions[selectedRef.index]?.verb === 'path' ? selectedRef.index : null
+    if (op === 'move' && objects.length === 1 && !isGroup && !(e.ctrlKey || e.metaKey) && (!e.shiftKey || pathSelected !== null)) {
+      const target = pathDragTarget(subject.name, pathSelected, store.time)
+      if (target) {
+        if (target.showTime !== null) store.setTime(target.showTime)
+        beginPathEdit(host, e, target.ref, located.world, target.index, null, false)
+        return
+      }
+    }
+
     let kind: Drag['kind'] = e.shiftKey ? 'timed' : 'plain'
     let actionIndex = -1
     let derived = false
@@ -525,15 +875,30 @@ export function PreviewPane() {
     const selected = store.selectedActions.find((r) => r.object === subject.name)
     const selectedAction = selected ? subject.actions[selected.index] : undefined
     const matches = objects.length === 1 && !!selectedAction && primaryAttrs(subject).some((a) => a in selectedAction.changes)
-    if (matches && e.shiftKey) {
-      // Shift with the animation selected: the drag sets its end state, and makes nothing new.
+    const previewing = gestureRef.current?.editing ? gestureRef.current : null
+    if (previewing && selectedAction && objects.length === 1 && e.shiftKey && selectedAction.verb !== 'path') {
+      // Shift held on the selected animation previews one of its ends: any drag sets that end's state, whatever the animation changes so far (D157, D188).
+      if (previewing.editEnd === 'start') editAt = selectedAction.start
+      else {
+        kind = 'destination'
+        actionIndex = selected!.index
+        derived = !!selectedAction.classAction
+        editAt = selectedAction.end
+      }
+    } else if (matches && e.shiftKey && !gestureRef.current) {
+      // Shift given to the pointer alone, with a matching animation selected: its end state.
       kind = 'destination'
       actionIndex = selected!.index
       derived = !!selectedAction!.classAction
       editAt = selectedAction!.end
-    } else if (matches) {
-      // The animation selected: a plain drag sets its start state, what the object is as it begins.
-      editAt = selectedAction!.start
+    } else if (matches && !e.shiftKey) {
+      // The animation selected: a plain drag sets the state at the end the pin names (D157, D187).
+      if (store.pin === 'end') {
+        kind = 'destination'
+        actionIndex = selected!.index
+        derived = !!selectedAction!.classAction
+        editAt = selectedAction!.end
+      } else editAt = selectedAction!.start
     } else if (!e.shiftKey && objects.length === 1) {
       // Dragging something mid-animation edits that animation's end state, and shows it (D102).
       const running = inProgressActions([subject.name], [...primaryAttrs(subject), ...(op === 'resize' ? ['x', 'y'] : [])], store.time)
@@ -570,6 +935,16 @@ export function PreviewPane() {
     const box0Frame = op === 'move' ? renderer.boxAround(targets.map((o) => o.name)) : null
     const others: { name: string; box: Box }[] = []
     let movers: Drag['movers'] = null
+    // An animation's push comes from its straight line (D206): the dragged outline sweeps from where the animation starts, which for an end being edited is not where the object shows now.
+    let sweepOrigin: Point = { x: 0, y: 0 }
+    if (kind === 'destination' && actionIndex >= 0 && !isGroup) {
+      const action = subject.actions[actionIndex]
+      const b = base.get(subject.name)
+      if (action && b) {
+        const at = positionAt(model, subject, action.start)
+        sweepOrigin = { x: b['x']! - at.x, y: b['y']! - at.y }
+      }
+    }
     if (op === 'move') {
       const draggedPolys: Mover['polys'] = []
       const obstacles: Mover[] = []
@@ -578,7 +953,7 @@ export function PreviewPane() {
         const f = renderer.frameOf(o.name)
         if (!f) continue
         if (dragged.has(o.name)) {
-          draggedPolys.push(outlineOf(o, f))
+          draggedPolys.push(outlineOf(o, { ...f, x: f.x - sweepOrigin.x, y: f.y - sweepOrigin.y }))
           continue
         }
         others.push({ name: o.name, box: toBox(f) })
@@ -610,6 +985,7 @@ export function PreviewPane() {
       others,
       frameBox: viewport.frameRect(),
       movers,
+      sweepOrigin,
       lastAngle: angle0,
       turned: 0,
       local0: toLocal(frame, located.world),
@@ -768,11 +1144,18 @@ export function PreviewPane() {
               guides.push({ y: sy.at })
             } else if (snap.on) ddy = snapTo(ty, snap.grid) - primaryBase['y']!
             if (live.collide && drag.movers) {
-              // Outlines collide (D136): the dragged thing walks toward the pointer and stops or pushes; only a plain drag pushes, an animation never moves other things.
-              const pushing: Pushing = live.push ? (live.sticky ? 'sticky' : 'stateless') : 'off'
-              walk(drag.movers.dragged, { x: ddx, y: ddy }, drag.movers.obstacles, pushing)
-              ddx = drag.movers.dragged.shift.x
-              ddy = drag.movers.dragged.shift.y
+              // Outlines collide (D136): the dragged thing walks toward the pointer and stops or pushes.
+              const pushing: Pushing = live.push ? 'on' : 'off'
+              if (drag.kind === 'plain') walk(drag.movers.dragged, { x: ddx, y: ddy }, drag.movers.obstacles, pushing)
+              else {
+                // An animation moves in a straight line from where it starts to where it ends, and that line is what meets and pushes: the sweep starts over from the start each time (D206).
+                resetMover(drag.movers.dragged)
+                for (const o of drag.movers.obstacles) resetMover(o)
+                const target = { x: ddx + drag.sweepOrigin.x, y: ddy + drag.sweepOrigin.y }
+                walk(drag.movers.dragged, target, drag.movers.obstacles, pushing, Math.max(4, Math.hypot(target.x, target.y) / 200))
+              }
+              ddx = drag.movers.dragged.shift.x - drag.sweepOrigin.x
+              ddy = drag.movers.dragged.shift.y - drag.sweepOrigin.y
               pushed.push(...drag.movers.obstacles.filter((o) => Math.abs(o.shift.x) > 1e-9 || Math.abs(o.shift.y) > 1e-9))
             }
           } else if (snap.on) {
@@ -910,6 +1293,47 @@ export function PreviewPane() {
       return
     }
     const { world, hit } = located
+    // The selected path's points and line (D194): delete the point under the pointer, or add one on the line there, or after the last one.
+    const shown = pathRef.current
+    const pathAction = useStore.getState().selectedActions.length === 1 ? useStore.getState().selectedActions[0]! : null
+    const st = useStore.getState()
+    const inPathTool = st.tool === 'path'
+    const pixel = 1 / located.viewport.zoom
+    // A shown path that is not the selected one (D209): the Path tool can pick it or hide it for now.
+    for (const other of inPathTool ? (shown?.others ?? []) : []) {
+      if (nearestPoint(other.frame.anchors, world, 8 * pixel) === null && nearestSegment(other.frame.curve, world, 6 * pixel) === null) continue
+      showMenu(e, [
+        { label: 'Edit path', run: () => st.selectAction(other.ref.object, other.ref.index) },
+        { label: 'Hide path', run: () => st.setPathHidden(`${other.ref.object}:${other.ref.index}`, true) },
+      ])
+      return
+    }
+    if (shown?.primary?.editable && pathAction) {
+      const { anchors, curve, spans } = shown.primary.frame
+      const action = st.model?.objects.find((o) => o.name === pathAction.object)?.actions[pathAction.index]
+      const smooth = action?.changes['smooth'] === true
+      const smoothItem = { label: smooth ? 'Straight lines' : 'Smooth curve', run: () => setPathSmooth(pathAction, !smooth) }
+      const hideItems: MenuItems = inPathTool ? [{ label: 'Hide path', run: () => st.setPathHidden(`${pathAction.object}:${pathAction.index}`, true) }] : []
+      const point = nearestPoint(anchors, world, 8 * pixel)
+      if (point !== null && anchors.length > 1) {
+        const picked = st.pathPoints.includes(point) && st.pathPoints.length > 1 ? st.pathPoints : [point]
+        showMenu(e, [smoothItem, ...hideItems, { label: picked.length > 1 ? `Delete ${picked.length} points` : 'Delete point', run: () => removePathPoints(pathAction, picked), danger: true }])
+        return
+      }
+      const segment = point === null ? nearestSegment(curve, world, 6 * pixel) : null
+      if (segment !== null) {
+        showMenu(e, [{ label: 'Add point here', run: () => insertPathPoints(pathAction, (spans[segment + 1] ?? 0) + 1, [world]) }, smoothItem, ...hideItems])
+        return
+      }
+      if (!hit) {
+        showMenu(e, [
+          { label: 'Add point here', run: () => insertPathPoints(pathAction, anchors.length, [world]) },
+          smoothItem,
+          { label: 'Add', children: OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, world.x, world.y) })) },
+        ])
+        return
+      }
+    }
     if (hit) {
       const s = useStore.getState()
       const group = s.model ? groupOf(s.model, s.selection) : null
@@ -928,6 +1352,8 @@ export function PreviewPane() {
       showMenu(e, [
         { label: 'Jump to code', run: () => jumpToObject(hit) },
         ...(many ? [] : [{ label: 'Rename', run: () => requestRename({ object: hit }) }]),
+        ...(many ? [] : pathItems(hit)),
+        ...(s.hiddenPaths.some((k) => k.startsWith(`${hit}:`)) ? [{ label: 'Show paths', run: () => s.hiddenPaths.filter((k) => k.startsWith(`${hit}:`)).forEach((k) => s.setPathHidden(k, false)) }] : []),
         { label: 'Classes', run: () => requestClasses(targets) },
         {
           label: targets.every((n) => s.anchored.includes(n)) ? 'Unanchor' : 'Anchor',
@@ -969,10 +1395,12 @@ export function PreviewPane() {
   }
   const stop = (e: ReactPointerEvent) => e.stopPropagation()
   const selectedGroup = model ? groupOf(model, selection) : null
+  // A path whose points are written out offers the Draw tool (D194).
+  const pathSelected = selectedActions.length === 1 && !!model && model.objects.find((o) => o.name === selectedActions[0]!.object)?.actions[selectedActions[0]!.index]?.verb === 'path' && pathEditable(selectedActions[0]!)
 
   return (
     <div
-      className={`preview${tool === 'add' ? ' placing' : ''} mode-${transformMode}`}
+      className={`preview${tool === 'object' ? ' placing' : tool === 'path' ? ' drawing' : ''} mode-${transformMode}`}
       ref={hostRef}
       onPointerDown={onPointerDown}
       onPointerMove={() => (hoverRef.current = true)}
@@ -984,11 +1412,40 @@ export function PreviewPane() {
       {marquee && (
         <div className="preview-marquee" style={{ left: Math.min(marquee.x0, marquee.x1), top: Math.min(marquee.y0, marquee.y1), width: Math.abs(marquee.x1 - marquee.x0), height: Math.abs(marquee.y1 - marquee.y0) }} />
       )}
-      <div className="preview-toolbar" onPointerDown={stop}>
-        <button className={tool === 'add' ? 'active' : ''} onClick={() => setTool(tool === 'add' ? 'select' : 'add')} title="Add object: pick a kind, then click where each one goes. The tool stays on until clicked again, or Escape." aria-pressed={tool === 'add'}>
-          Add object
+      {sketch && sketch.length > 1 && (
+        <svg className="preview-sketch">
+          <polyline points={sketch.map((p) => `${p.x},${p.y}`).join(' ')} />
+        </svg>
+      )}
+      <div className="preview-palette" onPointerDown={stop} role="group" aria-label="Tool">
+        <button className={tool === 'select' ? 'active' : ''} onClick={() => setTool('select')} title="Select: click and drag objects, and the points of the selected path." aria-pressed={tool === 'select'} aria-label="Select">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path d="M6 3l12 10h-6l3.5 7-2.5 1.2-3.5-7L6 18z" fill="currentColor" />
+          </svg>
         </button>
-        {tool === 'add' && (
+        <button className={tool === 'object' ? 'active' : ''} onClick={() => setTool(tool === 'object' ? 'select' : 'object')} title="Object: pick a kind, then click where each one goes. The tool stays on until clicked again, or Escape." aria-pressed={tool === 'object'} aria-label="Object">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <rect x="3" y="4" width="9" height="9" rx="1" fill="none" stroke="currentColor" strokeWidth="1.8" />
+            <circle cx="9" cy="16.5" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+            <path d="M18 9v8M14 13h8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        </button>
+        <button
+          className={tool === 'path' ? 'active' : ''}
+          onClick={() => setTool(tool === 'path' ? 'select' : 'path')}
+          title="Path: click an object to start its path where it is, or to pick the path it has. Edit and Move path on the top bar say what a drag does. The tool stays on until clicked again, or Escape."
+          aria-pressed={tool === 'path'}
+          aria-label="Path"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path d="M4 18c3-10 7-10 10-5s5 5 7-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            <circle cx="4" cy="18" r="2" fill="currentColor" />
+            <circle cx="21" cy="9" r="2" fill="currentColor" />
+          </svg>
+        </button>
+      </div>
+      <div className="preview-toolbar" onPointerDown={stop}>
+        {tool === 'object' && (
           <div className="preview-modes" role="group" aria-label="Kind of object to add">
             {OBJECT_KINDS.map((k) => (
               <button key={k} className={addKind === k ? 'active' : ''} onClick={() => setAddKind(k)} title={`Each click adds a ${k}`} aria-pressed={addKind === k}>
@@ -997,8 +1454,17 @@ export function PreviewPane() {
             ))}
           </div>
         )}
-        {tool === 'add' && <span className="hint">Click to place</span>}
-        {selection.length > 0 && (
+        {tool === 'path' && (
+          <div className="preview-modes" role="group" aria-label="Path tool mode">
+            <button className={pathMode === 'edit' ? 'active' : ''} onClick={() => setPathMode('edit')} title="Edit: click an object to start or pick its path; click for corners, drag to draw; drag a point to move it; click the line to add one." aria-pressed={pathMode === 'edit'}>
+              Edit
+            </button>
+            <button className={pathMode === 'move' ? 'active' : ''} onClick={() => setPathMode('move')} title="Move path: drag any point or the line of a path to carry the whole path." aria-pressed={pathMode === 'move'}>
+              Move path
+            </button>
+          </div>
+        )}
+        {tool === 'select' && selection.length > 0 && (
           <>
             <div className="preview-modes" role="group" aria-label="Drag mode">
               {TRANSFORM_MODES.map((m) => (
@@ -1016,7 +1482,15 @@ export function PreviewPane() {
             </button>
             <button
               className="preview-toggle"
-              onClick={() => setPin(pin === 'start' ? 'end' : 'start')}
+              onClick={() => {
+                const next = pin === 'start' ? 'end' : 'start'
+                setPin(next)
+                // With an animation selected, the playhead goes to the end the pin names (D187).
+                const s = useStore.getState()
+                const ref = s.selectedActions.find((r) => s.selection.includes(r.object)) ?? s.selectedActions[0]
+                const action = ref ? s.model?.objects.find((o) => o.name === ref.object)?.actions[ref.index] : undefined
+                if (action) s.setTime(next === 'end' ? action.end : action.start)
+              }}
               title={pin === 'start' ? 'A Shift-drag makes an animation that starts at the playhead and runs on from it; Shift and the wheel move its end. Click to make animations end at the playhead instead.' : 'A Shift-drag makes an animation that ends at the playhead, arriving at what you drag; Shift and the wheel move its start. Click to make animations start at the playhead instead.'}
             >
               {pin === 'start' ? 'Starts at playhead' : 'Ends at playhead'}
@@ -1041,6 +1515,9 @@ export function PreviewPane() {
         </button>
         {previewSnap.on && <NumberField label="Grid, in pixels" value={previewSnap.grid} unit="px" onChange={(grid) => setPreviewSnap({ grid })} />}
         {previewSnap.on && <NumberField label="Angle step, in degrees" value={previewSnap.angle} unit={'°'} onChange={(angle) => setPreviewSnap({ angle })} />}
+        <button className={showPaths ? 'on' : ''} onClick={toggleShowPaths} title={showPaths ? "The selected object's paths show. Click to show a path only while it is selected; the Path tool shows every path regardless." : "A path shows only while it is selected. Click to show the selected object's paths too; the Path tool shows every path regardless."} aria-pressed={showPaths}>
+          Paths
+        </button>
         <button className={previewSnap.edges ? 'on' : ''} onClick={() => setPreviewSnap({ edges: !previewSnap.edges })} title={previewSnap.edges ? 'A dragged box aligns its edges and center to other objects and the frame, with guides. Click to stop aligning.' : 'Dragged boxes do not align to others. Click to align edges and centers to other objects and the frame.'} aria-pressed={previewSnap.edges}>
           Edges
         </button>
@@ -1050,11 +1527,6 @@ export function PreviewPane() {
         {collide && (
           <button className={push ? 'on' : ''} onClick={() => setPush(!push)} title={push ? 'A dragged object shoves what it meets along, chains included, until something anchored stops it; an animation never pushes. Click to stop at objects instead.' : 'Dragged objects stop at what they meet. Click to make them push it along.'} aria-pressed={push}>
             Push
-          </button>
-        )}
-        {collide && push && (
-          <button className={sticky ? 'on' : ''} onClick={() => setSticky(!sticky)} title={sticky ? 'What a drag pushes stays where it was shoved. Click to have it spring back when the drag retreats.' : 'What a drag pushes springs back when the drag retreats: things make room for the dragged object where it is. Click to have them stay where they were shoved.'} aria-pressed={sticky}>
-            Sticky
           </button>
         )}
         <button onClick={() => viewportRef.current?.setZoom(1)} title="Actual size">
@@ -1069,6 +1541,9 @@ export function PreviewPane() {
         <span className="dim">
           {settings.width} x {settings.height}
         </span>
+        {tool === 'object' && <span className="hint">Click to place</span>}
+        {tool === 'path' && pathMode === 'move' && <span className="hint">Drag any point or line of a path to move the whole path</span>}
+        {tool === 'path' && pathMode === 'edit' && <span className="hint">{pathSelected ? 'Click for a corner, drag to draw; drag a point to move it' : selection.length === 1 ? 'Click the object to start its path, or click where the path goes' : 'Click an object, or a path'}</span>}
         {selectedGroup && model ? (
           <span className="dim">
             {selectedGroup.name}: {groupMembers(model, selectedGroup.name).length} objects

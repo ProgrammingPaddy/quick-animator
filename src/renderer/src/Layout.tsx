@@ -4,11 +4,12 @@ import { TitleBar } from './components/TitleBar'
 import { CodePane } from './panes/CodePane'
 import { NowPane } from './panes/NowPane'
 import { ObjectPane } from './panes/ObjectPane'
+import { PresetsPane } from './panes/PresetsPane'
 import { PreviewPane } from './panes/PreviewPane'
 import { TimelinePane } from './panes/TimelinePane'
 
-/** The resizable edges: the left column, the right column, the timeline, and the Now pane. */
-type Side = 'left' | 'right' | 'bottom' | 'now'
+/** The resizable edges: the left column, the right column, the timeline, the Now pane, and the presets under the objects (D217). */
+type Side = 'left' | 'right' | 'bottom' | 'now' | 'presets'
 
 interface LayoutState {
   size: Record<Side, number>
@@ -19,10 +20,10 @@ const STORAGE_KEY = 'quick-animator.layout.v1'
 /** Width or height of a collapsed pane's strip, in pixels. */
 const STRIP = 26
 const GUTTER = 4
-const MIN: Record<Side | 'center' | 'code', number> = { left: 180, right: 320, bottom: 140, now: 120, center: 360, code: 200 }
+const MIN: Record<Side | 'center' | 'code' | 'objects', number> = { left: 180, right: 320, bottom: 140, now: 120, presets: 90, center: 360, code: 200, objects: 160 }
 const DEFAULT: LayoutState = {
-  size: { left: 260, right: 520, bottom: 280, now: 220 },
-  collapsed: { left: false, right: false, bottom: false, now: false },
+  size: { left: 260, right: 520, bottom: 280, now: 220, presets: 250 },
+  collapsed: { left: false, right: false, bottom: false, now: false, presets: false },
 }
 
 function loadLayout(): LayoutState {
@@ -85,6 +86,8 @@ export function Layout() {
         if (bottomOverflow > 0 && !s.collapsed.bottom) next.bottom = Math.max(MIN.bottom, next.bottom - bottomOverflow)
         const nowOverflow = ext('now') + GUTTER + MIN.code - height
         if (nowOverflow > 0 && !s.collapsed.now) next.now = Math.max(MIN.now, next.now - nowOverflow)
+        const presetsOverflow = ext('presets') + GUTTER + MIN.objects - height
+        if (presetsOverflow > 0 && !s.collapsed.presets) next.presets = Math.max(MIN.presets, next.presets - presetsOverflow)
         const changed = (Object.keys(next) as Side[]).some((k) => next[k] !== s.size[k])
         return changed ? { ...s, size: next } : s
       })
@@ -106,7 +109,9 @@ export function Layout() {
         ? bounds.height - MIN.center - GUTTER
         : side === 'now'
           ? bounds.height - MIN.code - GUTTER
-          : bounds.width - extent(side === 'left' ? 'right' : 'left') - MIN.center - GUTTER * 2
+          : side === 'presets'
+            ? bounds.height - MIN.objects - GUTTER
+            : bounds.width - extent(side === 'left' ? 'right' : 'left') - MIN.center - GUTTER * 2
 
     const gutter = e.currentTarget
     try {
@@ -138,6 +143,7 @@ export function Layout() {
     '--col-right': `${extent('right')}px`,
     '--row-bottom': `${extent('bottom')}px`,
     '--row-now': `${extent('now')}px`,
+    '--row-presets': `${extent('presets')}px`,
   } as CSSProperties
 
   const gutterClass = (axis: 'v' | 'h', side: Side) => `gutter ${axis}${layout.collapsed[side] ? ' disabled' : ''}`
@@ -146,9 +152,21 @@ export function Layout() {
     <div className="app">
       <TitleBar />
     <div className="layout" ref={rootRef} style={style}>
-      <Pane title="Objects" side="left" collapsed={layout.collapsed.left} onToggle={() => toggle('left')}>
-        <ObjectPane />
-      </Pane>
+      {layout.collapsed.left ? (
+        <Pane title="Objects" side="left" collapsed onToggle={() => toggle('left')}>
+          <ObjectPane />
+        </Pane>
+      ) : (
+        <div className="column left">
+          <Pane title="Objects" side="left" collapsed={false} onToggle={() => toggle('left')}>
+            <ObjectPane />
+          </Pane>
+          <div className={gutterClass('h', 'presets')} onPointerDown={beginDrag('presets')} />
+          <Pane title="Presets" side="presets" collapsed={layout.collapsed.presets} onToggle={() => toggle('presets')}>
+            <PresetsPane />
+          </Pane>
+        </div>
+      )}
       <div className={gutterClass('v', 'left')} onPointerDown={beginDrag('left')} />
       <div className="column center">
         <Pane title="Preview" side="center" collapsed={false}>
