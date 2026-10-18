@@ -8,14 +8,27 @@ export interface LinkInfo {
   key: string
   /** The reference as written, or for a value link the expression after the arrow. */
   text: string
-  kind: 'time' | 'value'
+  /** A time reference, a value that follows something, or a value that is code of its own, such as a shape from a formula or a custom ease (D226). */
+  kind: 'time' | 'value' | 'code'
 }
 
 const TIME_KEYS = ['at', 'until', 'delay', 'duration']
+/** A list of numbers, such as a path's points or an offset, written out: a literal, not code. */
+const NUMBER_LIST = /^\[[\s\d.,+\-[\]]*\]$/
+const VALUE_LINK = /^\(\s*\)\s*=>\s*/
 
+/** The marks a block earns: its time references, its values that follow something, and its values that are code (D169, D226). */
 function stmtLinks(stmt: BlockInfo | null | undefined): LinkInfo[] {
   if (!stmt) return []
-  return stmt.props.filter((p) => TIME_KEYS.includes(p.key) && p.kind !== 'literal').map((p) => ({ key: p.key, text: p.raw.trim(), kind: 'time' as const }))
+  const out: LinkInfo[] = []
+  for (const p of stmt.props) {
+    if (p.kind === 'literal' || p.kind === 'range' || p.key === 'overrides') continue
+    const raw = p.raw.trim()
+    if (TIME_KEYS.includes(p.key)) out.push({ key: p.key, text: raw, kind: 'time' })
+    else if (p.kind === 'function' && VALUE_LINK.test(raw)) out.push({ key: p.key, text: raw.replace(VALUE_LINK, ''), kind: 'value' })
+    else if (!NUMBER_LIST.test(raw)) out.push({ key: p.key, text: raw, kind: 'code' })
+  }
+  return out
 }
 
 /** An action's time links, from its own statement or the class statement it follows. */
@@ -32,9 +45,11 @@ export function objectLinks(obj: SceneObject): LinkInfo[] {
   if (!obj.decl) return []
   const out: LinkInfo[] = []
   for (const p of obj.decl.props) {
-    if (p.kind === 'literal') continue
-    if (p.key === 'at' || p.key === 'until') out.push({ key: p.key, text: p.raw.trim(), kind: 'time' })
-    else if (p.kind === 'function') out.push({ key: p.key, text: p.raw.replace(/^\(\s*\)\s*=>\s*/, '').trim(), kind: 'value' })
+    if (p.kind === 'literal' || p.kind === 'range') continue
+    const raw = p.raw.trim()
+    if (p.key === 'at' || p.key === 'until') out.push({ key: p.key, text: raw, kind: 'time' })
+    else if (p.kind === 'function' && VALUE_LINK.test(raw)) out.push({ key: p.key, text: raw.replace(VALUE_LINK, ''), kind: 'value' })
+    else if (!NUMBER_LIST.test(raw) && p.key !== 'class' && p.key !== 'members') out.push({ key: p.key, text: raw, kind: 'code' })
   }
   return out
 }

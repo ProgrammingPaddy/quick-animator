@@ -40,7 +40,9 @@ export interface PropInfo {
   range: Range
   valueRange: Range
   raw: string
-  kind: 'literal' | 'function' | 'other'
+  kind: 'literal' | 'function' | 'range' | 'other'
+  /** For a range, `[from, to]`: where each of the two numbers lives (D221). */
+  parts?: [Range, Range]
 }
 
 /** A `{ ... }` block of attributes in the source and the statement that holds it. */
@@ -126,6 +128,8 @@ export interface Action {
   verb: Verb
   name: string | null
   changes: Record<string, AttrSource>
+  /** Where the action begins from, for each attribute written as a range `[from, to]`, instead of where the object is (D221). */
+  from: Record<string, AttrSource>
   timing: Timing
   /** Resolved, in seconds. */
   start: number

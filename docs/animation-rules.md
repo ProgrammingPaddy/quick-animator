@@ -137,6 +137,28 @@ Timing keys, allowed in every action block:
 - `relative`: `true` makes the values changes from where the object is when the action starts. Omitted: `false`.
 - `overrides`: the name of a class action this action replaces for its object. See Classes.
 
+A number can be written as a range, `[from, to]`: the action begins from the first number
+instead of from where the object is, and goes to the second. The start holds before the action
+as the end holds after it: an absolute action holds its start from the object's beginning until
+it begins, so long as no other action on that attribute has the say, and a relative one adds its
+start until it begins. With `relative: true` both numbers are changes from where the object is,
+which is how something arrives from off the frame at its own place without naming a place: it
+waits there until it comes. A path's pairs are points, never ranges.
+
+```js
+title.fade({
+  opacity: [0, 1],
+  duration: 0.3,
+})
+
+title.move({
+  x: [-1060, 0],
+  relative: true,
+  duration: 0.6,
+  easeIn: 0,
+})
+```
+
 ## Paths
 
 `path` takes an object along a shape over time, with the usual timing and easing: the shape says
@@ -171,6 +193,38 @@ moon.path({
   ease: 'linear',
 })
 ```
+
+A shape relative to the object follows the object wherever it is put. An orbit, with its
+center and radius in one place:
+
+```js
+orbit = moon.path({
+  shape: (p, center = [-200, 0], radius = 200) => [center[0] + radius * Math.cos(p * 2 * Math.PI), center[1] + radius * Math.sin(p * 2 * Math.PI)],
+  relative: true,
+  duration: 3,
+  ease: 'linear',
+  orient: true,
+})
+```
+
+Code the app writes declares nothing it need not: no `const` or `let` where a plain assignment or
+a parameter with a default does, as above, where the numbers to tune are the parameters.
+
+A straight arrival from off the frame is a move, not a path: see the range under Actions.
+
+The preview draws every path as the line the object actually travels: a relative path from
+where the object is, a move under a path in the line, a relative change over a path in the line,
+and a path on a member of a group where the group puts it. Its points sit where the object is as
+it reaches each, and dragging one writes the change against whatever else moves the object at
+that moment. A path whose shape is code is drawn dashed and has no points to drag; Move path
+carries it by writing its `offset`. A path started from the GUI begins where the absolute actions
+put the object, so a relative change running then, an orbit say, goes on adding and the object
+stays put.
+
+An easing that rises and falls makes one action go and come back: `ease: (p) => Math.sin(p * Math.PI)`
+on `resize({ scale: 0.2, relative: true })` is a pulse. After an action ends, its attribute holds
+the value the easing reached at the end: the target for the usual easings, and for one that
+falls back, where it fell back to.
 
 ## Relative and overlapping actions
 
@@ -326,8 +380,8 @@ no name. The Selected pane takes code in any field and shows what a link comes t
 
 ## What the GUI can edit
 
-Literal numbers and strings in the cast and in action blocks, the points of a path's shape, and
-the trailing number of a link.
+Literal numbers and strings in the cast and in action blocks, the two numbers of a range, the
+points of a path's shape, and the trailing number of a link.
 Anything else, such as loops, helper functions, or computed values, runs and shows, but is marked
 "code" and is not editable from the GUI. The app never reformats your lines; it replaces one
 literal, adds one line, or removes one statement together with the comment lines directly above
@@ -338,7 +392,16 @@ in the file; pushing moves only what a drag actually touches. An animation writt
 playhead and lasts as long as the app's preferences say. Deleting an object's last fade from the
 GUI also removes the `opacity` written in its declaration, so it is back at 1. The Object tool
 and the Add menus write a declaration with the kind's starting attributes, at the playhead; the
-Path tool writes a path, one point per line, and moves its points as the drags say.
+Path tool writes a path, one point per line, and moves its points as the drags say. A preset
+writes one named animation at the end of the file, an arrival as a relative move written as a
+range and a fade in as an opacity range, and touches nothing else. A preset of the user's own,
+saved by right-click, is an animation's block without its place in time, an object's declaration
+and animations without its place and its life, a group with everything it carries, or a class's
+statements, written back as they were and named after the preset. A drag of an object puts it where the pointer is whatever is placed on it: a move's
+end, a path's point, the start an action was given, or the declaration, whichever has the say at
+that moment. A value that is code of its own, a shape from a formula or a custom ease, is marked
+with a small ƒ in the timeline and the objects pane, and a path drawn from code is dashed; the
+code pane is where they change.
 
 ## Rendering
 

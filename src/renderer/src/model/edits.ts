@@ -21,9 +21,18 @@ export function formatValue(value: AttrValue): string {
   return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
 }
 
-/** Set one attribute in a block: replace its literal, or add a line when it is not there. */
+/** Set one attribute in a block: replace its literal, or add a line when it is not there. A number given to a range, `[from, to]`, replaces the `to` (D221). */
 export function setProp(source: string, block: BlockInfo, key: string, value: AttrValue): TextEdit {
+  const prop = block.props.find((p) => p.key === key)
+  if (prop?.parts && typeof value === 'number') return { from: prop.parts[1].from, to: prop.parts[1].to, insert: formatValue(value) }
   return setPropText(source, block, key, formatValue(value))
+}
+
+/** Set where a ranged attribute begins from, the `from` of `[from, to]`; null when the attribute is not written as a range (D221). */
+export function setPropFrom(block: BlockInfo, key: string, value: number): TextEdit | null {
+  const prop = block.props.find((p) => p.key === key)
+  if (!prop?.parts) return null
+  return { from: prop.parts[0].from, to: prop.parts[0].to, insert: formatValue(value) }
 }
 
 /** Set a property to code as written, such as a time reference `slide.end` (D170). */

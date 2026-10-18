@@ -5,23 +5,25 @@ import { NumberField } from '../components/NumberField'
 import { ScrollBar } from '../components/ScrollBar'
 import { groupMembers } from '../model/groups'
 import { GROUP } from '../model/registry'
-import { pathFrame, pathHolds, positionAt, shownValue, type PathFrame, type Point } from '../model/sample'
+import { pathHolds, positionAt, shownValue, travelFrame, type PathFrame, type Point } from '../model/sample'
 import type { SceneModel, SceneObject } from '../model/types'
 import { newProject, pickProject } from '../project/controller'
-import { DEFAULT_EASE_FRACTION, easingFor } from '../model/easing'
-import { addObject, addPath, adjustDurations, appendPushedMove, beginTimed, createGroup, deleteActions, deleteObjects, duplicateObjects, inProgressActions, insertPathPoints, jumpToObject, lastActionIndex, overrideClassAction, pathDragTarget, pathEditable, removePathPoints, requestClasses, requestRename, resizeAttrs, resizedValues, setActionDestination, setActionTiming, setAttrsAtMany, setPathPoints, setPathSmooth, ungroup } from '../project/operations'
+import { DEFAULT_EASE_FRACTION, easingFor, unease } from '../model/easing'
+import { addObject, addPath, adjustDurations, appendPushedMove, beginTimed, createGroup, deleteActions, deleteObjects, duplicateObjects, inProgressActions, insertPathPoints, jumpToObject, lastActionIndex, overrideClassAction, pathDragTarget, pathEditable, pathOffset, removePathPoints, requestClasses, requestRename, resizeAttrs, resizedValues, setActionDestination, setActionTiming, setAttrsAtMany, setPathPoints, setPathShift, setPathSmooth, ungroup } from '../project/operations'
+import { requestSavePreset } from '../project/userPresets'
 import { makeMover, outlineOf, resetMover, walk, type Mover, type Pushing } from '../preview/collide'
 import { SceneRenderer, type Frame, type GuideLine, type Handle } from '../preview/SceneRenderer'
 import { Viewport } from '../preview/Viewport'
+import { dropTargets } from '../state/dropTargets'
 import { OBJECT_KINDS, TRANSFORM_MODES, useStore, type ActionRef, type TransformMode } from '../state/store'
 import { formatTime } from '../state/time'
 
 const MODE_LABEL: Record<TransformMode, string> = { all: 'Transform', move: 'Move', rotate: 'Rotate', resize: 'Resize' }
 const MODE_TIP: Record<TransformMode, string> = {
-  all: 'Every handle: drag the body to move, a corner or an edge to resize, the handle above to rotate. Shift makes the drag an animation.',
-  move: 'Dragging moves. Shift makes it an animation.',
-  rotate: 'Dragging turns the selection around the center of its box. Shift makes it an animation.',
-  resize: 'Corners resize both sides, edges resize one; hold Alt to keep the proportions. Shift makes it an animation.',
+  all: 'Move, resize, and rotate by the handles; Shift animates',
+  move: 'Drag to move; Shift animates',
+  rotate: 'Drag to turn; Shift animates',
+  resize: 'Drag corners or edges; Alt keeps proportions; Shift animates',
 }
 const BASE_ATTRS = ['x', 'y', 'rotation', 'scale', 'width', 'height', 'radius', 'fontSize']
 
@@ -210,18 +212,6 @@ function groupOf(model: SceneModel, selection: string[]): SceneObject | null {
 }
 
 /** Where the playhead rests after a Shift gesture: where it was, or in Chain mode the end of the chain (D103, D127). */
-/** The progress at which an easing has come a fraction of the way: its inverse, by bisection, since an easing only climbs. */
-function unease(ease: (progress: number) => number, fraction: number): number {
-  let lo = 0
-  let hi = 1
-  for (let i = 0; i < 24; i++) {
-    const mid = (lo + hi) / 2
-    if (ease(mid) < fraction) lo = mid
-    else hi = mid
-  }
-  return (lo + hi) / 2
-}
-
 function restingTime(gesture: { restore: number; from: number; editing?: boolean }): number {
   const s = useStore.getState()
   if (gesture.editing) return gesture.restore
@@ -336,7 +326,8 @@ export function PreviewPane() {
             if (action.verb !== 'path' || action.overridden) continue
             const selected = !!ref && ref.object === o.name && ref.index === index
             if (!selected && (inPathTool ? s.hiddenPaths.includes(`${o.name}:${index}`) : !s.showPaths)) continue
-            const frame = pathFrame(s.model, action, s.time)
+            // The line the object actually travels, whatever else moves it (D223).
+            const frame = travelFrame(s.model, o, action)
             if (!frame || frame.curve.length === 0) continue
             found.push({ ref: { object: o.name, index }, frame, selected })
           }
@@ -346,11 +337,27 @@ export function PreviewPane() {
       const primary = lead ? { ref: lead.ref, frame: lead.frame, editable: pathEditable(lead.ref) } : null
       const others = found.filter((p) => !p.selected).map((p) => ({ ref: p.ref, frame: p.frame }))
       pathRef.current = primary || others.length > 0 ? { primary, others } : null
-      renderer.setPath(primary ? primary.frame.curve : null, 1 / viewport.zoom, primary?.editable ? primary.frame.anchors : null, s.pathPoints)
-      renderer.setOtherPaths(others.map((o) => o.frame.curve), 1 / viewport.zoom)
+      // A path whose shape is code has no points to drag and is drawn dashed to say so (D226).
+      renderer.setPath(primary ? primary.frame.curve : null, 1 / viewport.zoom, primary?.editable ? primary.frame.anchors : null, s.pathPoints, !!primary && !primary.editable)
+      renderer.setOtherPaths(
+        others.map((o) => ({ points: o.frame.curve, dashed: !pathEditable(o.ref) })),
+        1 / viewport.zoom,
+      )
       viewport.render()
     }
     paintRef.current = paint
+    // Where a dragged preset lands in the preview, and the middle of the view for one dropped on the timeline (D219).
+    dropTargets.preview = (clientX, clientY) => {
+      const bounds = host.getBoundingClientRect()
+      const inside = clientX >= bounds.left && clientX <= bounds.right && clientY >= bounds.top && clientY <= bounds.bottom
+      const paneX = clientX - bounds.left
+      const paneY = clientY - bounds.top
+      return { inside, world: viewport.toWorld(paneX, paneY), hit: inside ? renderer.pick(viewport.camera, viewport.toNdc(paneX, paneY)) : null, zoom: viewport.zoom }
+    }
+    dropTargets.previewCenter = () => {
+      const v = viewport.viewRect()
+      return { x: (v.left + v.right) / 2, y: (v.top + v.bottom) / 2 }
+    }
     viewport.onChange = () => {
       setZoom(viewport.zoom)
       paint()
@@ -466,6 +473,8 @@ export function PreviewPane() {
       document.removeEventListener('focusin', onFocusIn)
       unsubscribe()
       observer.disconnect()
+      delete dropTargets.preview
+      delete dropTargets.previewCenter
       viewport.dispose()
       viewportRef.current = null
       rendererRef.current = null
@@ -513,11 +522,12 @@ export function PreviewPane() {
     return { x: Math.round(w.x / snap.grid) * snap.grid, y: Math.round(w.y / snap.grid) * snap.grid }
   }
 
-  /** The line of a path as it stands now, by its reference. */
+  /** The line an object travels along a path as it stands now, by the path's reference (D223). */
   const frameOf = (ref: ActionRef): PathFrame | null => {
     const s = useStore.getState()
-    const action = s.model?.objects.find((o) => o.name === ref.object)?.actions[ref.index]
-    return s.model && action ? pathFrame(s.model, action, s.time) : null
+    const obj = s.model?.objects.find((o) => o.name === ref.object)
+    const action = obj?.actions[ref.index]
+    return s.model && obj && action ? travelFrame(s.model, obj, action) : null
   }
 
   /**
@@ -600,13 +610,42 @@ export function PreviewPane() {
   }
 
   /**
+   * Move a whole path whose shape is code, a function or a link, with the Path tool (D223): the
+   * drag carries it by how far the pointer goes, written into its `offset`, as one undo step.
+   */
+  const beginPathShift = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, world: Point) => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const bounds = host.getBoundingClientRect()
+    const base = pathOffset(ref)
+    let dragged = false
+    capture(
+      host,
+      e.pointerId,
+      (ev) => {
+        if (!dragged) {
+          if (Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 3) return
+          dragged = true
+          beginGesture()
+        }
+        setPathShift(ref, base, world, viewport.toWorld(ev.clientX - bounds.left, ev.clientY - bounds.top))
+      },
+      () => {
+        if (dragged) endGesture()
+      },
+    )
+  }
+
+  /**
    * Edit a path's points (D194, D197, D198): drag the anchor `point`, with every other picked
    * anchor when it is one of them; or put a new anchor in at `insertAt`, where the pointer is,
    * and drag it. A drag moves by how far the pointer goes, so an object dragged by its body
    * carries its anchor along, and it is one undo step. With `toggle`, a click adds the anchor to
-   * the picked ones or takes it out, and nothing moves.
+   * the picked ones or takes it out, and nothing moves. With `follow`, the anchor goes to the
+   * pointer rather than by how far it went: for an object pressed mid-path and shown at the
+   * path's end, which then lands where the pointer is, as a move's end does (D102, D205).
    */
-  const beginPathEdit = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, world: Point, point: number | null, insertAt: number | null, toggle: boolean) => {
+  const beginPathEdit = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, world: Point, point: number | null, insertAt: number | null, toggle: boolean, follow = false) => {
     const viewport = viewportRef.current
     if (!viewport) return
     const bounds = host.getBoundingClientRect()
@@ -628,7 +667,7 @@ export function PreviewPane() {
     } else return
     useStore.getState().setPathPoints(indices)
     const frame0 = frameOf(ref)
-    const starts = indices.map((i) => frame0?.anchors[i] ?? world)
+    const starts = indices.map((i) => (follow ? world : (frame0?.anchors[i] ?? world)))
     let dragged = false
     capture(
       host,
@@ -731,12 +770,13 @@ export function PreviewPane() {
       const ctrlHeld = e.ctrlKey || e.metaKey
       const isSelected = !!pathAction && pathAction.object === hitPath.ref.object && pathAction.index === hitPath.ref.index
       if (!isSelected) store.selectAction(hitPath.ref.object, hitPath.ref.index)
+      if (pathTool && store.pathMode === 'move') {
+        // Move path: any point or the line carries the whole path (D208), a shape that is code by its offset (D223).
+        if (pathEditable(hitPath.ref)) beginPathMove(host, e, hitPath.ref, located.world, null)
+        else beginPathShift(host, e, hitPath.ref, located.world)
+        return
+      }
       if (pathEditable(hitPath.ref)) {
-        if (pathTool && store.pathMode === 'move') {
-          // Move path: any point or the line carries the whole path (D208).
-          beginPathMove(host, e, hitPath.ref, located.world, null)
-          return
-        }
         if (hitPath.point !== null) {
           beginPathEdit(host, e, hitPath.ref, located.world, hitPath.point, null, ctrlHeld)
           return
@@ -860,7 +900,7 @@ export function PreviewPane() {
       const target = pathDragTarget(subject.name, pathSelected, store.time)
       if (target) {
         if (target.showTime !== null) store.setTime(target.showTime)
-        beginPathEdit(host, e, target.ref, located.world, target.index, null, false)
+        beginPathEdit(host, e, target.ref, located.world, target.index, null, false, true)
         return
       }
     }
@@ -1341,6 +1381,7 @@ export function PreviewPane() {
         showMenu(e, [
           { label: 'Jump to code', run: () => jumpToObject(group.name) },
           { label: 'Rename', run: () => requestRename({ object: group.name }) },
+          { label: 'Save as preset', run: () => requestSavePreset({ object: group.name }) },
           { label: 'Select', keyword: hit, run: () => s.select([hit]) },
           { label: 'Ungroup', keyword: group.name, run: () => ungroup(group.name) },
         ])
@@ -1353,6 +1394,7 @@ export function PreviewPane() {
         { label: 'Jump to code', run: () => jumpToObject(hit) },
         ...(many ? [] : [{ label: 'Rename', run: () => requestRename({ object: hit }) }]),
         ...(many ? [] : pathItems(hit)),
+        ...(many ? [] : [{ label: 'Save as preset', run: () => requestSavePreset({ object: hit }) }]),
         ...(s.hiddenPaths.some((k) => k.startsWith(`${hit}:`)) ? [{ label: 'Show paths', run: () => s.hiddenPaths.filter((k) => k.startsWith(`${hit}:`)).forEach((k) => s.setPathHidden(k, false)) }] : []),
         { label: 'Classes', run: () => requestClasses(targets) },
         {
@@ -1395,8 +1437,10 @@ export function PreviewPane() {
   }
   const stop = (e: ReactPointerEvent) => e.stopPropagation()
   const selectedGroup = model ? groupOf(model, selection) : null
-  // A path whose points are written out offers the Draw tool (D194).
-  const pathSelected = selectedActions.length === 1 && !!model && model.objects.find((o) => o.name === selectedActions[0]!.object)?.actions[selectedActions[0]!.index]?.verb === 'path' && pathEditable(selectedActions[0]!)
+  // A path whose points are written out offers the Draw tool (D194); one whose shape is code says so instead (D226).
+  const selectedIsPath = selectedActions.length === 1 && !!model && model.objects.find((o) => o.name === selectedActions[0]!.object)?.actions[selectedActions[0]!.index]?.verb === 'path'
+  const pathSelected = selectedIsPath && pathEditable(selectedActions[0]!)
+  const codePathSelected = selectedIsPath && !pathSelected
 
   return (
     <div
@@ -1418,12 +1462,12 @@ export function PreviewPane() {
         </svg>
       )}
       <div className="preview-palette" onPointerDown={stop} role="group" aria-label="Tool">
-        <button className={tool === 'select' ? 'active' : ''} onClick={() => setTool('select')} title="Select: click and drag objects, and the points of the selected path." aria-pressed={tool === 'select'} aria-label="Select">
+        <button className={tool === 'select' ? 'active' : ''} onClick={() => setTool('select')} title="Select" aria-pressed={tool === 'select'} aria-label="Select">
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
             <path d="M6 3l12 10h-6l3.5 7-2.5 1.2-3.5-7L6 18z" fill="currentColor" />
           </svg>
         </button>
-        <button className={tool === 'object' ? 'active' : ''} onClick={() => setTool(tool === 'object' ? 'select' : 'object')} title="Object: pick a kind, then click where each one goes. The tool stays on until clicked again, or Escape." aria-pressed={tool === 'object'} aria-label="Object">
+        <button className={tool === 'object' ? 'active' : ''} onClick={() => setTool(tool === 'object' ? 'select' : 'object')} title="Object: click to place one (Escape to leave)" aria-pressed={tool === 'object'} aria-label="Object">
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
             <rect x="3" y="4" width="9" height="9" rx="1" fill="none" stroke="currentColor" strokeWidth="1.8" />
             <circle cx="9" cy="16.5" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
@@ -1433,7 +1477,7 @@ export function PreviewPane() {
         <button
           className={tool === 'path' ? 'active' : ''}
           onClick={() => setTool(tool === 'path' ? 'select' : 'path')}
-          title="Path: click an object to start its path where it is, or to pick the path it has. Edit and Move path on the top bar say what a drag does. The tool stays on until clicked again, or Escape."
+          title="Path: click an object, then draw (Escape to leave)"
           aria-pressed={tool === 'path'}
           aria-label="Path"
         >
@@ -1456,10 +1500,10 @@ export function PreviewPane() {
         )}
         {tool === 'path' && (
           <div className="preview-modes" role="group" aria-label="Path tool mode">
-            <button className={pathMode === 'edit' ? 'active' : ''} onClick={() => setPathMode('edit')} title="Edit: click an object to start or pick its path; click for corners, drag to draw; drag a point to move it; click the line to add one." aria-pressed={pathMode === 'edit'}>
+            <button className={pathMode === 'edit' ? 'active' : ''} onClick={() => setPathMode('edit')} title="Edit the points" aria-pressed={pathMode === 'edit'}>
               Edit
             </button>
-            <button className={pathMode === 'move' ? 'active' : ''} onClick={() => setPathMode('move')} title="Move path: drag any point or the line of a path to carry the whole path." aria-pressed={pathMode === 'move'}>
+            <button className={pathMode === 'move' ? 'active' : ''} onClick={() => setPathMode('move')} title="Move the whole path" aria-pressed={pathMode === 'move'}>
               Move path
             </button>
           </div>
@@ -1468,7 +1512,7 @@ export function PreviewPane() {
           <>
             <div className="preview-modes" role="group" aria-label="Drag mode">
               {TRANSFORM_MODES.map((m) => (
-                <button key={m} className={transformMode === m ? 'active' : ''} onClick={() => setTransformMode(m)} title={`${MODE_TIP[m]} Clicking the selected object cycles the modes.`} aria-pressed={transformMode === m}>
+                <button key={m} className={transformMode === m ? 'active' : ''} onClick={() => setTransformMode(m)} title={MODE_TIP[m]} aria-pressed={transformMode === m}>
                   {MODE_LABEL[m]}
                 </button>
               ))}
@@ -1476,7 +1520,7 @@ export function PreviewPane() {
             <button
               className="preview-toggle"
               onClick={() => setAnchor(anchor === 'edge' ? 'center' : 'edge')}
-              title={anchor === 'edge' ? 'Resizing keeps the far side in place. Click to resize from the center instead.' : 'Resizing keeps the center in place. Click to keep the far side instead.'}
+              title={anchor === 'edge' ? 'Resizing keeps the far side' : 'Resizing keeps the center'}
             >
               {anchor === 'edge' ? 'Edge' : 'Center'}
             </button>
@@ -1491,7 +1535,7 @@ export function PreviewPane() {
                 const action = ref ? s.model?.objects.find((o) => o.name === ref.object)?.actions[ref.index] : undefined
                 if (action) s.setTime(next === 'end' ? action.end : action.start)
               }}
-              title={pin === 'start' ? 'A Shift-drag makes an animation that starts at the playhead and runs on from it; Shift and the wheel move its end. Click to make animations end at the playhead instead.' : 'A Shift-drag makes an animation that ends at the playhead, arriving at what you drag; Shift and the wheel move its start. Click to make animations start at the playhead instead.'}
+              title={pin === 'start' ? 'Shift-drags start at the playhead' : 'Shift-drags end at the playhead'}
             >
               {pin === 'start' ? 'Starts at playhead' : 'Ends at playhead'}
             </button>
@@ -1499,7 +1543,7 @@ export function PreviewPane() {
               <button
                 className={`preview-toggle${chain ? ' on' : ''}`}
                 onClick={() => setChain(!chain)}
-                title={chain ? 'While Shift is held, each animation follows the one before it, and the playhead rests at the end of the chain. Click to start them all at the playhead instead.' : 'While Shift is held, each animation starts at the playhead, stacked. Click to chain them one after another instead.'}
+                title={chain ? 'Shift-drags follow one another' : 'Shift-drags all start at the playhead'}
                 aria-pressed={chain}
               >
                 Chain
@@ -1510,22 +1554,22 @@ export function PreviewPane() {
         )}
       </div>
       <div className="preview-tools" onPointerDown={stop}>
-        <button className={previewSnap.on ? 'on' : ''} onClick={() => setPreviewSnap({ on: !previewSnap.on })} title={previewSnap.on ? 'Drags snap positions and sizes to the grid and angles to the step. Click for free placement.' : 'Drags place freely. Click to snap positions and sizes to a grid and angles to a step.'} aria-pressed={previewSnap.on}>
+        <button className={previewSnap.on ? 'on' : ''} onClick={() => setPreviewSnap({ on: !previewSnap.on })} title={previewSnap.on ? 'Snapping to the grid' : 'Free placement'} aria-pressed={previewSnap.on}>
           Grid
         </button>
         {previewSnap.on && <NumberField label="Grid, in pixels" value={previewSnap.grid} unit="px" onChange={(grid) => setPreviewSnap({ grid })} />}
         {previewSnap.on && <NumberField label="Angle step, in degrees" value={previewSnap.angle} unit={'°'} onChange={(angle) => setPreviewSnap({ angle })} />}
-        <button className={showPaths ? 'on' : ''} onClick={toggleShowPaths} title={showPaths ? "The selected object's paths show. Click to show a path only while it is selected; the Path tool shows every path regardless." : "A path shows only while it is selected. Click to show the selected object's paths too; the Path tool shows every path regardless."} aria-pressed={showPaths}>
+        <button className={showPaths ? 'on' : ''} onClick={toggleShowPaths} title={showPaths ? "Showing the selected object's paths" : 'Showing a path only while it is selected'} aria-pressed={showPaths}>
           Paths
         </button>
-        <button className={previewSnap.edges ? 'on' : ''} onClick={() => setPreviewSnap({ edges: !previewSnap.edges })} title={previewSnap.edges ? 'A dragged box aligns its edges and center to other objects and the frame, with guides. Click to stop aligning.' : 'Dragged boxes do not align to others. Click to align edges and centers to other objects and the frame.'} aria-pressed={previewSnap.edges}>
+        <button className={previewSnap.edges ? 'on' : ''} onClick={() => setPreviewSnap({ edges: !previewSnap.edges })} title={previewSnap.edges ? 'Aligning to edges and centers' : 'Not aligning to other objects'} aria-pressed={previewSnap.edges}>
           Edges
         </button>
-        <button className={collide ? 'on' : ''} onClick={() => setCollide(!collide)} title={collide ? 'Dragged objects stop at the outlines of other objects and slide along them; right-click an object to anchor it or to enable passthrough on it. Click to let objects overlap.' : 'Dragged objects pass over others. Click to make them stop at each other.'} aria-pressed={collide}>
+        <button className={collide ? 'on' : ''} onClick={() => setCollide(!collide)} title={collide ? 'Objects collide' : 'Objects pass through each other'} aria-pressed={collide}>
           Collide
         </button>
         {collide && (
-          <button className={push ? 'on' : ''} onClick={() => setPush(!push)} title={push ? 'A dragged object shoves what it meets along, chains included, until something anchored stops it; an animation never pushes. Click to stop at objects instead.' : 'Dragged objects stop at what they meet. Click to make them push it along.'} aria-pressed={push}>
+          <button className={push ? 'on' : ''} onClick={() => setPush(!push)} title={push ? 'Dragged objects push others' : 'Dragged objects stop at others'} aria-pressed={push}>
             Push
           </button>
         )}
@@ -1543,7 +1587,8 @@ export function PreviewPane() {
         </span>
         {tool === 'object' && <span className="hint">Click to place</span>}
         {tool === 'path' && pathMode === 'move' && <span className="hint">Drag any point or line of a path to move the whole path</span>}
-        {tool === 'path' && pathMode === 'edit' && <span className="hint">{pathSelected ? 'Click for a corner, drag to draw; drag a point to move it' : selection.length === 1 ? 'Click the object to start its path, or click where the path goes' : 'Click an object, or a path'}</span>}
+        {tool === 'path' && pathMode === 'edit' && <span className="hint">{pathSelected ? 'Click for a corner, drag to draw' : codePathSelected ? 'Shape is code: edit it in the code pane' : selection.length === 1 ? 'Click the object, or where the path goes' : 'Click an object, or a path'}</span>}
+        {tool === 'select' && codePathSelected && <span className="hint">Shape is code: edit it in the code pane</span>}
         {selectedGroup && model ? (
           <span className="dim">
             {selectedGroup.name}: {groupMembers(model, selectedGroup.name).length} objects

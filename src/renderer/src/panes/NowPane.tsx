@@ -6,7 +6,7 @@ import { actionLinks, objectLinks } from '../model/links'
 import { EASE_NAMES, GROUP, PIVOT_PARAMS, schemaOf, type AttrSchema, type AttrType, type AttrValue } from '../model/registry'
 import { basePivot, definingAction, isVisibleAt, pathShape, valueAt } from '../model/sample'
 import type { Action, SceneModel, SceneObject } from '../model/types'
-import { bakeActionProp, bakeObjectProp, canEdit, frameSeconds, roundSeconds, setActionProp, setAttrsAt, setLifetime, setObjectProp } from '../project/operations'
+import { bakeActionProp, bakeObjectProp, canEdit, frameSeconds, roundSeconds, setActionFrom, setActionProp, setAttrsAt, setLifetime, setObjectProp } from '../project/operations'
 import { useStore } from '../state/store'
 import { timecode } from '../state/time'
 
@@ -285,7 +285,7 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks }: { model: S
             const status = link
               ? 'linked'
               : defining
-                ? `${defining.name ? `${defining.name} ` : ''}${defining.verb}${defining.timing.relative ? ' (relative)' : ''}${defining.end > time ? ', in progress' : ', done'}`
+                ? `${defining.name ? `${defining.name} ` : ''}${defining.verb}${defining.timing.relative ? ' (relative)' : ''}${defining.start > time ? ', holds its start' : defining.end > time ? ', in progress' : ', done'}`
                 : attr.name in obj.attrs
                   ? ''
                   : 'default'
@@ -455,6 +455,24 @@ function ActionView({ model, obj, action, index, fps, editable, openLinks }: { m
                 </Row>
               )
             }
+            const from = action.from[key]
+            if (typeof from === 'number' && typeof value === 'number') {
+              // Written as a range, `[from, to]`: where it begins and where it goes, each its own number (D221).
+              const write = (part: 'from' | 'to') => (text: string) => {
+                const n = parse(text)
+                if (n !== null) part === 'from' ? setActionFrom(ref, key, n) : setActionProp(ref, key, n)
+                else if (text.trim() && part === 'to') setActionProp(ref, key, text.trim(), true)
+              }
+              return (
+                <Row key={key} name={label} status={action.timing.relative ? 'from, to: changes' : 'from, to'} onLink={locked ? undefined : () => openLinks(key)} linkTitle={`Link ${key} to something else`}>
+                  <span className="now-control now-range">
+                    <Commit value={formatValue(from)} type="number" step={stepFor(key)} disabled={locked} title={`Where ${key} begins, instead of where the object is`} onCommit={write('from')} />
+                    <span className="dim">→</span>
+                    <Commit value={formatValue(value)} type="number" step={stepFor(key)} disabled={locked} title={`Where ${key} ends`} onCommit={write('to')} />
+                  </span>
+                </Row>
+              )
+            }
             return (
               <Row key={key} name={label} status={isPivot ? 'pivot' : ''} onLink={locked ? undefined : () => openLinks(key)} linkTitle={`Link ${key} to something else`}>
                 <Field type={type} name={key} value={value as AttrValue} model={model} disabled={locked} doc={attr?.doc} range={RANGES[key]} step={stepFor(key)} onValue={(v) => setActionProp(ref, key, v)} onCode={(text) => setActionProp(ref, key, text, true)} />
@@ -486,7 +504,7 @@ function ActionView({ model, obj, action, index, fps, editable, openLinks }: { m
                   else if (mode === CUSTOM) setActionProp(ref, 'ease', '(p) => p * p', true)
                   else setActionProp(ref, 'ease', mode)
                 }}
-                title="The curve of the motion: ramps at each end, a named curve, or a function of your own"
+                title="Ramps, a named curve, or a function"
               >
                 <option value={RAMPS}>ramps</option>
                 {EASE_NAMES.map((name) => (

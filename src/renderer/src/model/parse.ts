@@ -79,6 +79,26 @@ export interface ParseResult {
   error: ParseError | null
 }
 
+function isNumberLiteral(value: Node): boolean {
+  if (value.type === 'Literal') return typeof (value as Literal).value === 'number'
+  if (value.type === 'UnaryExpression') {
+    const u = value as UnaryExpression
+    return (u.operator === '-' || u.operator === '+') && u.argument.type === 'Literal' && typeof (u.argument as Literal).value === 'number'
+  }
+  return false
+}
+
+/** The two numbers of a range value, `[from, to]`, or null (D221). */
+function rangeParts(value: Node): [Range, Range] | null {
+  if (value.type !== 'ArrayExpression') return null
+  const elements = (value as unknown as { elements: (Node | null)[] }).elements
+  if (elements.length !== 2 || !elements[0] || !elements[1] || !isNumberLiteral(elements[0]) || !isNumberLiteral(elements[1])) return null
+  return [
+    { from: elements[0].start, to: elements[0].end },
+    { from: elements[1].start, to: elements[1].end },
+  ]
+}
+
 function propKind(value: Node): PropInfo['kind'] {
   if (value.type === 'Literal') return 'literal'
   if (value.type === 'UnaryExpression') {
@@ -86,6 +106,7 @@ function propKind(value: Node): PropInfo['kind'] {
     if ((u.operator === '-' || u.operator === '+') && u.argument.type === 'Literal') return 'literal'
   }
   if (value.type === 'ArrowFunctionExpression' || value.type === 'FunctionExpression') return 'function'
+  if (rangeParts(value)) return 'range'
   return 'other'
 }
 
@@ -103,12 +124,15 @@ function blockInfo(source: string, stmt: Node, block: ObjectExpression, keywordR
     const property = node as Property
     const key = propKey(property)
     if (key === null) continue
+    const kind = propKind(property.value)
+    const parts = kind === 'range' ? rangeParts(property.value) : null
     props.push({
       key,
       range: { from: property.start, to: property.end },
       valueRange: { from: property.value.start, to: property.value.end },
       raw: source.slice(property.value.start, property.value.end),
-      kind: propKind(property.value),
+      kind,
+      ...(parts ? { parts } : {}),
     })
   }
   const first = block.properties[0]

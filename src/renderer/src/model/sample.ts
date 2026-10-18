@@ -1,5 +1,5 @@
 import { attrSchema, defaultFor, GROUP, type AttrType, type AttrValue } from './registry'
-import { easingFor, type Easing } from './easing'
+import { easingFor, unease, type Easing } from './easing'
 import type { Action, AttrSource, SceneModel, SceneObject, StateDirection, StateName } from './types'
 
 /**
@@ -14,6 +14,8 @@ export const textMeasurer: { current: ((text: string, fontSize: number, font: st
 interface Segment {
   action: Action
   to: AttrSource
+  /** Where the action begins from, when written as a range (D221). */
+  from?: AttrSource
   ease: Easing
 }
 
@@ -72,6 +74,8 @@ interface Cache {
   starts: Map<string, number>
   /** A group's motion at the time it was last asked for. */
   motions: Map<number, { time: number; motion: Motion; shift: Point }>
+  /** The line an object travels during each of its paths, by action id (D223). */
+  travels: Map<number, PathFrame | null>
 }
 
 const cache = new WeakMap<SceneModel, Cache>()
@@ -79,7 +83,7 @@ const cache = new WeakMap<SceneModel, Cache>()
 function cacheFor(model: SceneModel): Cache {
   let c = cache.get(model)
   if (!c) {
-    c = { segments: new Map(), containers: new Map(), pivots: new Map(), basePivots: new Map(), starts: new Map(), motions: new Map() }
+    c = { segments: new Map(), containers: new Map(), pivots: new Map(), basePivots: new Map(), starts: new Map(), motions: new Map(), travels: new Map() }
     cache.set(model, c)
   }
   return c
@@ -117,7 +121,7 @@ function segmentsFor(model: SceneModel, obj: SceneObject, attr: string): Segment
     segments = { absolute: [], relative: [] }
     const sorted = obj.actions.filter((a) => (attr in a.changes || (a.verb === 'path' && pathDrives(a, attr))) && !a.overridden).sort(byStack)
     for (const action of sorted) {
-      const segment: Segment = { action, to: action.changes[attr]!, ease: easingFor(action.timing, action.end - action.start) }
+      const segment: Segment = { action, to: action.changes[attr]!, from: action.from[attr], ease: easingFor(action.timing, action.end - action.start) }
       if (action.timing.relative && type === 'number') segments.relative.push(segment)
       else segments.absolute.push(segment)
     }
@@ -192,15 +196,26 @@ function evalAbsolute(model: SceneModel, obj: SceneObject, attr: string, segment
     else if (ended < 0 || a.end >= segments[ended]!.action.end) ended = i
   }
   const index = running >= 0 ? running : ended
-  if (index < 0) return baseValue(model, obj, attr, time)
+  if (index < 0) {
+    // Nothing has begun: the next action given a start of its own holds that start, as it holds its end after it (D221).
+    let pending: Segment | null = null
+    for (let i = 0; i < count; i++) {
+      const s = segments[i]!
+      if (s.from !== undefined && (!pending || s.action.start < pending.action.start)) pending = s
+    }
+    return pending ? resolveSource(model, pending.from!, time, fallbackFor(obj, attr)) : baseValue(model, obj, attr, time)
+  }
   const segment = segments[index]!
   const action = segment.action
   // A path puts the object on its shape by the eased progress (D192).
   if (action.verb === 'path') return pathValue(model, obj, action, attr, time)
   const to = resolveSource(model, segment.to, time, fallbackFor(obj, attr))
-  if (running < 0) return to
-  const from = evalAbsolute(model, obj, attr, segments, index, action.start, type)
-  return interpolate(from, to, segment.ease((time - action.start) / (action.end - action.start)), type)
+  // After its end, an action holds the value its easing reached (D220): the target for any usual easing, elsewhere for one that falls back, as a pulse does.
+  const progress = running < 0 ? segment.ease(1) : segment.ease((time - action.start) / (action.end - action.start))
+  if (running < 0 && progress === 1) return to
+  // From where it was written to begin (D221), else from what the segments below show as it begins.
+  const from = segment.from !== undefined ? resolveSource(model, segment.from, time, fallbackFor(obj, attr)) : evalAbsolute(model, obj, attr, segments, index, action.start, type)
+  return interpolate(from, to, progress, type)
 }
 
 /** Which attributes a path drives: the position, and the rotation when it orients along the shape (D192). */
@@ -412,6 +427,129 @@ export function pathPointAt(model: SceneModel, action: Action, progress: number,
   return { point: { x: point.x + shift.x, y: point.y + shift.y }, angle: a && b ? (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI : 0 }
 }
 
+/** The curve index of a path's anchor: the frame has one point per span between anchors, or a fixed number when smooth, so the anchors sit evenly along it. */
+function anchorCurveIndex(frame: PathFrame, index: number): number {
+  const n = frame.anchors.length
+  return n < 2 ? 0 : Math.round((index * (frame.curve.length - 1)) / (n - 1))
+}
+
+/** When an object on a path reaches each of the path's anchors (D223): the time at which the easing has brought it the anchor's share of the way along the curve, by distance. */
+function anchorTimes(action: Action, frame: PathFrame): number[] {
+  const span = action.end - action.start
+  const total = frame.cumulative[frame.cumulative.length - 1] ?? 0
+  const ease = easingFor(action.timing, span)
+  return frame.anchors.map((_, i) => {
+    if (frame.anchors.length < 2 || total <= 0 || span <= 0) return action.start
+    const fraction = frame.cumulative[anchorCurveIndex(frame, i)]! / total
+    return action.start + unease(ease, fraction) * span
+  })
+}
+
+/** When an object on a path reaches one of the path's anchors, by the anchor's index (D223); the path's start when it has no such anchor. */
+export function anchorTime(model: SceneModel, action: Action, index: number): number {
+  const frame = pathFrame(model, action, action.start)
+  return frame ? (anchorTimes(action, frame)[index] ?? action.start) : action.start
+}
+
+/** What else puts an object where it is during a path, at a time (D196, D223, D225): its position with the path's own point taken off; under a relative path what the path adds to, under an absolute one the relative changes added on top. */
+function underPath(model: SceneModel, obj: SceneObject, action: Action, time: number): Point {
+  const own = positionAt(model, obj, time)
+  const at = pathPointAt(model, action, progressAt(action, time), time)
+  return at ? { x: own.x - at.point.x, y: own.y - at.point.y } : own
+}
+
+/** A point of an object's own space carried through its groups to where it is drawn, at a time (D124). */
+function carried(model: SceneModel, obj: SceneObject, time: number, point: Point): Point {
+  let pose: Pose = { x: point.x, y: point.y, rotation: 0, scale: 1 }
+  for (const g of containers(model, obj)) pose = carry(model, g, time, pose)
+  return { x: pose.x, y: pose.y }
+}
+
+/** A drawn point taken back through an object's groups into its own space, at a time: the inverse of `carried`. */
+function uncarried(model: SceneModel, obj: SceneObject, time: number, point: Point): Point {
+  let p = point
+  for (const g of [...containers(model, obj)].reverse()) {
+    const { motion, shift } = groupMotion(model, g, time)
+    const x = p.x - shift.x - motion.dx
+    const y = p.y - shift.y - motion.dy
+    const s = motion.s === 0 ? 1 : motion.s
+    p = { x: (motion.cos * x + motion.sin * y) / s, y: (-motion.sin * x + motion.cos * y) / s }
+  }
+  return p
+}
+
+/**
+ * The line an object actually travels during a path (D223): where it is drawn, sampled over the
+ * path's span with its anchors where the object is when it reaches each, so a relative path shows
+ * from where the object is, a move under a path shows in the line, and a path on a member of a
+ * group shows where the group puts it. Each point of the curve is tagged with the span of anchors
+ * the object is on there, as the path's own line is. Null when the path has no shape. Kept per
+ * model, since it does not depend on the time shown.
+ */
+export function travelFrame(model: SceneModel, obj: SceneObject, action: Action): PathFrame | null {
+  const c = cacheFor(model)
+  const known = c.travels.get(action.id)
+  if (known !== undefined) return known
+  const frame = buildTravel(model, obj, action)
+  c.travels.set(action.id, frame)
+  return frame
+}
+
+/** How many points a second of travel is drawn with, and the most a path is drawn with. */
+const TRAVEL_RATE = 60
+const TRAVEL_MAX = 900
+
+function buildTravel(model: SceneModel, obj: SceneObject, action: Action): PathFrame | null {
+  const shape = pathFrame(model, action, action.start)
+  if (!shape) return null
+  const span = Math.max(0, action.end - action.start)
+  const times = anchorTimes(action, shape)
+  // Each anchor where the object is as it reaches it: under a relative path, what else moves the object then, with the anchor's change on top (D196).
+  const anchors = shape.anchors.map((a, i) => {
+    const t = times[i]!
+    const under = underPath(model, obj, action, t)
+    return carried(model, obj, t, { x: under.x + a.x, y: under.y + a.y })
+  })
+  const drawnAt = (t: number): Point => {
+    const pose = worldPose(model, obj, t)
+    return { x: pose.x, y: pose.y }
+  }
+  if (span <= 0) {
+    const only = anchors[0] ?? drawnAt(action.start)
+    return framed(anchors, [only], [0])
+  }
+  // Sampled evenly in time, for whatever else moves the object, and at the moment each point of the shape's own line is reached, so the line keeps the shape's resolution however the easing hurries, and passes through the anchors.
+  const steps = Math.min(TRAVEL_MAX, Math.max(1, Math.round(span * TRAVEL_RATE)))
+  const sampleTimes = new Set<number>()
+  for (let k = 0; k <= steps; k++) sampleTimes.add(action.start + (span * k) / steps)
+  for (const t of times) sampleTimes.add(t)
+  const total = shape.cumulative[shape.cumulative.length - 1] ?? 0
+  if (total > 0) {
+    const ease = easingFor(action.timing, span)
+    for (const length of shape.cumulative) sampleTimes.add(action.start + unease(ease, length / total) * span)
+  }
+  const curve: Point[] = []
+  const spans: number[] = []
+  for (const t of [...sampleTimes].sort((a, b) => a - b)) {
+    curve.push(drawnAt(t))
+    const { segment } = alongFrame(shape, progressAt(action, t))
+    spans.push(shape.spans[Math.min(segment + 1, shape.spans.length - 1)] ?? 0)
+  }
+  return framed(anchors, curve, spans)
+}
+
+/**
+ * Where a point of a path's shape is written for a place in the scene (D223): the place taken
+ * back through the object's groups at the time the object is there, what lay under a relative
+ * path then taken off, and `offset` taken off. The inverse of how the travelled line is drawn.
+ */
+export function rawFromWorld(model: SceneModel, obj: SceneObject, action: Action, time: number, world: Point): Point {
+  const local = uncarried(model, obj, time, world)
+  const shift = pathShift(action)
+  const under = underPath(model, obj, action, time)
+  return { x: local.x - shift.x - under.x, y: local.y - shift.y - under.y }
+}
+
 /** The point a fraction of the way along a polyline, by distance, and the direction there in degrees. */
 export function pointAlong(points: Point[], fraction: number): { point: Point; angle: number } {
   if (points.length === 1) return { point: points[0]!, angle: 0 }
@@ -444,11 +582,20 @@ function pathValue(model: SceneModel, obj: SceneObject, action: Action, attr: st
   return at.angle
 }
 
-/** Eased progress of an action at a time: 0 before it starts, 1 once it has ended. */
+/** Eased progress of an action at a time: 0 before it starts, and once it has ended, what its easing reaches at 1, which is 1 for any usual easing (D220). */
 export function progressAt(action: Action, time: number): number {
   if (time <= action.start) return 0
-  if (time >= action.end || action.end <= action.start) return 1
-  return easingFor(action.timing, action.end - action.start)((time - action.start) / (action.end - action.start))
+  const ease = easingFor(action.timing, action.end - action.start)
+  if (time >= action.end || action.end <= action.start) return ease(1)
+  return ease((time - action.start) / (action.end - action.start))
+}
+
+/** What the absolute actions alone give an attribute at a time, before any relative change is added: where a new absolute action must begin for the object to stay put (D210, D225). */
+export function absoluteAt(model: SceneModel, obj: SceneObject, attr: string, time: number): number {
+  const schema = attrSchema(obj.className, attr)
+  if (!schema) return 0
+  const { absolute } = segmentsFor(model, obj, attr)
+  return numValue(evalAbsolute(model, obj, attr, absolute, absolute.length, time, schema.type))
 }
 
 /** The value of an attribute at a time, with every action and link applied: the latest absolute action, then every relative change on top (D53). */
@@ -460,15 +607,22 @@ export function valueAt(model: SceneModel, obj: SceneObject, attr: string, time:
   if (relative.length > 0 && typeof value === 'number') {
     let sum = value
     for (const segment of relative) {
-      if (segment.action.start > time) continue
+      if (segment.action.start > time) {
+        // A relative change given a start of its own adds that start until it begins (D221).
+        const from = segment.from !== undefined ? resolveSource(model, segment.from, time, 0) : 0
+        if (typeof from === 'number') sum += from
+        continue
+      }
       if (segment.action.verb === 'path') {
         // A relative path's shape is changes from where the object is, added on top of whatever else moves it (D196).
         const at = pathPointAt(model, segment.action, progressAt(segment.action, time), time)
         if (at) sum += attr === 'x' ? at.point.x : attr === 'y' ? at.point.y : at.angle
         continue
       }
-      const delta = resolveSource(model, segment.to, time, 0)
-      if (typeof delta === 'number') sum += delta * progressAt(segment.action, time)
+      const to = resolveSource(model, segment.to, time, 0)
+      const from = segment.from !== undefined ? resolveSource(model, segment.from, time, 0) : 0
+      // A relative change runs from its own start, when written as a range, else from nothing, to its value (D221).
+      if (typeof to === 'number' && typeof from === 'number') sum += from + (to - from) * progressAt(segment.action, time)
     }
     value = sum
   }
@@ -832,22 +986,38 @@ export function shownValue(model: SceneModel, obj: SceneObject, attr: string, ti
   return valueAt(model, obj, attr, time)
 }
 
+/** Whether a value written for an attribute at a time goes to an action's own start, the `from` of a range `[from, to]` (D221): the action is at its start, and was given one. */
+export function writesFrom(action: Action, attr: string, time: number): boolean {
+  return action.from[attr] !== undefined && time <= action.start
+}
+
 /** The action a value written for an attribute goes to at a time: the one that has a say then, as the sampler sees it (D102, D122, D210), or null for the declaration. */
 export function definingAction(obj: SceneObject, attr: string, time: number): Action | null {
   const items = obj.actions
     .filter((a) => !a.overridden && attr in a.changes)
     .sort(byStack)
     .map((action) => ({ action }))
-  return topActionAt(items, time, true)?.action ?? null
+  const begun = topActionAt(items, time, false)?.action ?? null
+  if (!begun) {
+    // Nothing has begun: the next absolute action given a start of its own holds that start, which is what shows and what a write goes to (D221).
+    let pending: Action | null = null
+    for (const { action } of items) if (!action.timing.relative && action.from[attr] !== undefined && (!pending || action.start < pending.start)) pending = action
+    return pending
+  }
+  const top = topActionAt(items, time, true)?.action ?? null
+  // At its very start an absolute action shows what lies below, unless it was given a start of its own, which is then what shows and what a write goes to (D221).
+  if (begun !== top && !begun.timing.relative && writesFrom(begun, attr, time)) return begun
+  return top
 }
 
 /**
  * A copy of the model in which one written value of an object differs: the declaration's
- * attribute when `action` is null, else that action's change. Nothing else is touched, so what
- * the sampler shows for the copy is what the edit would show.
+ * attribute when `action` is null, else that action's change, or with `part` its own start
+ * (D221). Nothing else is touched, so what the sampler shows for the copy is what the edit
+ * would show.
  */
-export function withWritten(model: SceneModel, obj: SceneObject, action: Action | null, attr: string, value: number): [SceneModel, SceneObject] {
-  const actions = action ? obj.actions.map((a) => (a.id === action.id ? { ...a, changes: { ...a.changes, [attr]: value } } : a)) : obj.actions
+export function withWritten(model: SceneModel, obj: SceneObject, action: Action | null, attr: string, value: number, part: 'to' | 'from' = 'to'): [SceneModel, SceneObject] {
+  const actions = action ? obj.actions.map((a) => (a.id === action.id ? (part === 'from' ? { ...a, from: { ...a.from, [attr]: value } } : { ...a, changes: { ...a.changes, [attr]: value } }) : a)) : obj.actions
   const attrs = action ? obj.attrs : { ...obj.attrs, [attr]: value }
   const patched: SceneObject = { ...obj, attrs, actions }
   return [{ ...model, objects: model.objects.map((o) => (o === obj ? patched : o)) }, patched]
@@ -855,6 +1025,7 @@ export function withWritten(model: SceneModel, obj: SceneObject, action: Action 
 
 /** The value an attribute's definer holds now, as written; any number serves as a starting point when it holds none yet. */
 export function currentWritten(model: SceneModel, obj: SceneObject, action: Action | null, attr: string, time: number): number {
+  if (action && writesFrom(action, attr, time)) return num(model, action.from[attr], time)
   if (action && attr in action.changes) return num(model, action.changes[attr], time)
   const v = action ? valueAt(model, obj, attr, time) : baseValue(model, obj, attr, time)
   return typeof v === 'number' ? v : 0
@@ -876,7 +1047,10 @@ export function writtenValues(model: SceneModel, obj: SceneObject, time: number,
   const probe = (patch: Record<string, number>): [SceneModel, SceneObject] => {
     let m = model
     let o = obj
-    for (const [attr, value] of Object.entries(patch)) [m, o] = withWritten(m, o, definers[attr] ?? null, attr, value)
+    for (const [attr, value] of Object.entries(patch)) {
+      const definer = definers[attr] ?? null
+      ;[m, o] = withWritten(m, o, definer, attr, value, definer && writesFrom(definer, attr, time) ? 'from' : 'to')
+    }
     return [m, o]
   }
   for (const [attr, target] of Object.entries(shown)) {

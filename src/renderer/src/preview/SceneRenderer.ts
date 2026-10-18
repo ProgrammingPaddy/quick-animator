@@ -234,7 +234,38 @@ const pathMaterial = new THREE.MeshBasicMaterial({ color: 0x86efac, depthTest: f
 const POINT_PX = 7
 const ACTIVE_POINT_PX = 10
 
-/** The line of a selected path, its start as a dot and its end as a diamond (D192), and a handle on each point when the points can be edited (D194). */
+/** How long a dash and a gap are, in pixels, on the line of a path whose shape is code (D226). */
+const DASH_PX = 9
+const GAP_PX = 5
+
+/** A polyline cut into dashes by distance along it: the pieces to draw. */
+function dashes(points: { x: number; y: number }[], on: number, off: number): [{ x: number; y: number }, { x: number; y: number }][] {
+  const out: [{ x: number; y: number }, { x: number; y: number }][] = []
+  let drawing = true
+  let phase = 0
+  for (let i = 0; i + 1 < points.length; i++) {
+    const a = points[i]!
+    const b = points[i + 1]!
+    const length = Math.hypot(b.x - a.x, b.y - a.y)
+    if (length === 0) continue
+    const at = (t: number) => ({ x: a.x + ((b.x - a.x) * t) / length, y: a.y + ((b.y - a.y) * t) / length })
+    let t = 0
+    while (t < length) {
+      const span = drawing ? on : off
+      const step = Math.min(span - phase, length - t)
+      if (drawing) out.push([at(t), at(t + step)])
+      t += step
+      phase += step
+      if (phase >= span - 1e-9) {
+        drawing = !drawing
+        phase = 0
+      }
+    }
+  }
+  return out
+}
+
+/** The line of a selected path, its start as a dot and its end as a diamond (D192), and a handle on each point when the points can be edited (D194); dashed when the shape is code and has no points to edit (D226). */
 class PathLine {
   readonly group = new THREE.Group()
   private readonly segments: THREE.Mesh[] = []
@@ -250,7 +281,7 @@ class PathLine {
     this.group.visible = false
   }
 
-  set(points: { x: number; y: number }[], pixel: number, anchors: { x: number; y: number }[] | null = null, active: number[] = []): void {
+  set(points: { x: number; y: number }[], pixel: number, anchors: { x: number; y: number }[] | null = null, active: number[] = [], dashed = false): void {
     if (points.length === 0) {
       this.group.visible = false
       return
@@ -266,17 +297,18 @@ class PathLine {
       if (i < shown) mark.set(anchors![i]!.x, anchors![i]!.y, 0, (active.includes(i) ? ACTIVE_POINT_PX : POINT_PX) * pixel, pixel)
       else mark.hide()
     })
-    while (this.segments.length < points.length - 1) {
+    const pieces = dashed ? dashes(points, DASH_PX * pixel, GAP_PX * pixel) : points.slice(1).map((b, i) => [points[i]!, b] as [{ x: number; y: number }, { x: number; y: number }])
+    while (this.segments.length < pieces.length) {
       const mesh = new THREE.Mesh(unitPlane, pathMaterial)
       mesh.renderOrder = ORDER + 6
       this.group.add(mesh)
       this.segments.push(mesh)
     }
     this.segments.forEach((mesh, i) => {
-      const a = points[i]
-      const b = points[i + 1]
-      mesh.visible = !!a && !!b
-      if (!a || !b) return
+      const piece = pieces[i]
+      mesh.visible = !!piece
+      if (!piece) return
+      const [a, b] = piece
       const length = Math.hypot(b.x - a.x, b.y - a.y)
       mesh.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, 0.85)
       mesh.rotation.z = Math.atan2(b.y - a.y, b.x - a.x)
@@ -509,21 +541,22 @@ export class SceneRenderer {
     this.guides.set(lines, view, pixel)
   }
 
-  /** Draw a path's curve as a line with its ends marked, with a handle on each anchor when they can be edited, the picked ones larger, or nothing (D192, D194, D198). */
-  setPath(points: { x: number; y: number }[] | null, pixel: number, anchors: { x: number; y: number }[] | null = null, active: number[] = []): void {
-    if (points) this.pathLine.set(points, pixel, anchors, active)
+  /** Draw a path's curve as a line with its ends marked, with a handle on each anchor when they can be edited, the picked ones larger, or nothing (D192, D194, D198); dashed when its shape is code (D226). */
+  setPath(points: { x: number; y: number }[] | null, pixel: number, anchors: { x: number; y: number }[] | null = null, active: number[] = [], dashed = false): void {
+    if (points) this.pathLine.set(points, pixel, anchors, active, dashed)
     else this.pathLine.hide()
   }
 
-  /** The other paths of the selected object, as lines without handles (D205). */
-  setOtherPaths(curves: { x: number; y: number }[][], pixel: number): void {
+  /** The other paths shown, as lines without handles (D205), each dashed when its shape is code (D226). */
+  setOtherPaths(curves: { points: { x: number; y: number }[]; dashed: boolean }[], pixel: number): void {
     while (this.otherLines.length < curves.length) {
       const line = new PathLine()
       this.group.add(line.group)
       this.otherLines.push(line)
     }
     this.otherLines.forEach((line, i) => {
-      if (i < curves.length) line.set(curves[i]!, pixel)
+      const curve = curves[i]
+      if (curve) line.set(curve.points, pixel, null, [], curve.dashed)
       else line.hide()
     })
   }

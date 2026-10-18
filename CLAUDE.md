@@ -38,6 +38,9 @@ node scripts/inspect.mjs eval "window.__quickAnimator.openProject('C:/path/to/ex
 
 Use forward slashes in paths passed through the shell. In development the page exposes
 `window.__quickAnimator` with `useStore`, `openProject`, `getEditor`, and `getRenderer`.
+`node scripts/test-drags.mjs` runs the drag matrix (D224) against that instance, on a temporary
+copy of `examples/first`: every drag of an object with an animation placed on it must land where
+the pointer is. Run it after touching the sampler, the solver, paths, or the preview's drags.
 
 Two traps: the editor is created once, so after editing anything it uses (`src/renderer/src/code/`)
 reload the window (`node scripts/inspect.mjs eval "location.reload()"`) before testing; and Vite's

@@ -161,6 +161,66 @@ function savePrefs(prefs: Prefs): void {
     // A preference only.
   }
 }
+
+const USER_PRESETS_KEY = 'quick-animator.userPresets'
+
+/** One declaration in a saved object or group (D227): its source without what places it, where it was, when it lived against the preset's time base, and its own animations with their times against that base. */
+export interface PresetItem {
+  name: string
+  className: string
+  /** The declaration's properties as written, one per line and indented, without x, y, at, and until; a group keeps its x and y. */
+  props: string
+  x: number | null
+  y: number | null
+  at: number
+  until: number | null
+  actions: { text: string; name: string | null }[]
+}
+
+/** A preset of the user's own (D227): an animation's block, an object or a group with their animations, or a class's statements, kept as written, for any project. */
+export interface UserPreset {
+  id: string
+  kind: 'animation' | 'object' | 'group' | 'class'
+  label: string
+  /** An animation: its block's properties as written, one per line and indented, without what places it in time; its verb; how long it takes. */
+  propsText?: string
+  verb?: string
+  duration?: number
+  /** An object or a group: the declarations and their animations, the point they were placed around, and how big they were. */
+  items?: PresetItem[]
+  origin?: { x: number; y: number }
+  size?: { width: number; height: number }
+  /** An object: its kind, and how it looks, for its picture. A class: its name and its statements. */
+  className?: string
+  look?: { width?: number; height?: number; radius?: number; fontSize?: number; fill?: string; text?: string }
+  statements?: string[]
+}
+
+function loadUserPresets(): UserPreset[] {
+  try {
+    const raw = localStorage.getItem(USER_PRESETS_KEY)
+    const parsed = raw ? (JSON.parse(raw) as { items?: unknown }) : null
+    const items = Array.isArray(parsed?.items) ? (parsed!.items as unknown[]) : []
+    return items.filter((p): p is UserPreset => {
+      const u = p as Partial<UserPreset>
+      if (typeof u.id !== 'string' || typeof u.label !== 'string') return false
+      if (u.kind === 'animation') return typeof u.propsText === 'string' && typeof u.verb === 'string'
+      if (u.kind === 'object' || u.kind === 'group') return Array.isArray(u.items) && u.items.length > 0
+      if (u.kind === 'class') return typeof u.className === 'string' && Array.isArray(u.statements)
+      return false
+    })
+  } catch {
+    return []
+  }
+}
+
+function saveUserPresets(items: UserPreset[]): void {
+  try {
+    localStorage.setItem(USER_PRESETS_KEY, JSON.stringify({ version: 1, items }))
+  } catch {
+    // Presets only.
+  }
+}
 const SOFT_KEY = 'quick-animator.soft'
 const ANCHORED_KEY = 'quick-animator.anchored'
 const WHEEL_STEP_KEY = 'quick-animator.wheelStep'
@@ -396,6 +456,9 @@ interface State {
   setExportOpen: (open: boolean) => void
   setPrefsOpen: (open: boolean) => void
   setPrefs: (prefs: Partial<Prefs>) => void
+  /** The user's own presets (D227), kept across projects. */
+  userPresets: UserPreset[]
+  setUserPresets: (items: UserPreset[]) => void
 }
 
 function createAppStore() {
@@ -596,6 +659,11 @@ function createAppStore() {
       setHelp: (help) => set({ help }),
       setExportOpen: (exportOpen) => set({ exportOpen, contextMenu: null }),
       setPrefsOpen: (prefsOpen) => set({ prefsOpen, contextMenu: null }),
+      userPresets: loadUserPresets(),
+      setUserPresets: (items) => {
+        saveUserPresets(items)
+        set({ userPresets: items })
+      },
       setPrefs: (partial) =>
         set((s) => {
           const prefs = { ...s.prefs, ...partial }

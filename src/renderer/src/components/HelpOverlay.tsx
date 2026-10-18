@@ -53,7 +53,9 @@ const TOPICS: Topic[] = [
     title: 'Paths',
     entries: [
       ['Add path', 'The Path tool on an object without one, or right-click an object. The path begins where the object is, and a drag from there draws on.'],
-      ['Edit, Move path', 'The Path tool\'s modes. Edit: a click on empty space adds a corner after the last point, a drag draws a line, kept as its corners, which makes the path a smooth curve; drag a point to move it; click the line to add one. Move path: drag any point or the line to carry the whole path.'],
+      ['Edit, Move path', 'The Path tool\'s modes. Edit: a click on empty space adds a corner after the last point, a drag draws a line, kept as its corners, which makes the path a smooth curve; drag a point to move it; click the line to add one. Move path: drag any point or the line to carry the whole path; a shape that is code, a function or a link, is carried by its offset.'],
+      ['The line', 'Always the way the object actually goes: a relative path shows from where the object is, a move under a path shows in the line, and a path on a member of a group shows where the group puts it. Its points sit where the object is as it reaches each.'],
+      ['Dashed line', 'A path whose shape is code, a function of the progress or a link, has no points to drag and is drawn dashed; the code pane edits it, and Move path carries it. Its clip wears a small ƒ.'],
       ['Handles', 'Drag a point to move it. In Select, drag a box on empty space to pick several, Ctrl + click to add one; a drag then moves them all, and Delete removes them. Click the line between two points to add one there. Right-click a point to delete it.'],
       ['Dragging the object', 'An object a path places moves its path, as a drag during a move edits the move: at the path\'s start its first point; while it runs, the playhead goes to its end and the last point moves; after it, the last point. Shift with the path selected moves the end it previews; a resize or a turn makes its own animation over the path\'s span.'],
       ['Smooth curve, Straight lines', 'Right-click the line to choose; in the code, smooth: true. A smooth path is a curve through its points, the same curve however long the path takes.'],
@@ -67,6 +69,7 @@ const TOPICS: Topic[] = [
       ['Lanes', 'Objects, Groups, and Classes. Each object is a clip from when it begins to when it is removed, its animations and opacity inside. Clips stack by drawing order: higher up draws on top.'],
       ['Drag a clip\'s title', 'Sideways moves the object in time; up or down changes the drawing order. The clip\'s edges trim when it begins and is removed. The arrow in its corner collapses it.'],
       ['Click an animation', 'Select it and put the playhead at its start. Drag it to retime it, its edges to change its length. Ctrl + click selects several; a drag then retimes them together.'],
+      ['Marks on a clip', 'A chain mark: the timing or a value follows something. A yellow one: something follows it. A small ƒ: the value is code of its own, a shape from a formula or a custom ease; hover for the code, which the code pane edits.'],
       ['Drag an animation up or down', 'Overlapping animations stack like clips, in the order they are written: the top one running has the say, and the ones below show through when it ends. Dragging one up or down moves it in the file.'],
       ['Opacity', 'Double-click the lane to appear or disappear there; drag a fade\'s handles.'],
       ['Shift', 'With an animation selected, previews the end the pin does not name. Shift and the wheel change the selected animations\' length.'],
@@ -81,7 +84,7 @@ const TOPICS: Topic[] = [
     title: 'Selected',
     entries: [
       ['An object', 'Every attribute with a control by type: numbers with a step, sliders for opacity and scale, a color well, checkboxes; and when it begins and is removed.'],
-      ['An animation', 'What it changes, then its timing: start, duration or end, delay, ease as ramps, a named curve, or a function of your own, and relative.'],
+      ['An animation', 'What it changes, then its timing: start, duration or end, delay, ease as ramps, a named curve, or a function of your own, and relative. A value written as a range, x: [-200, 0], shows as two fields, where it begins and where it goes.'],
       ['Free text', 'Any field takes code. A number field given arithmetic over the scene, such as box.x + 20, or a text field naming something in the scene, becomes a link; a time field given slide.end becomes a time reference. A plain word or number stays as it is.'],
       ['Link, bake', 'A linked value shows its code and what it comes to. The link button opens Edit links; the bake icon keeps the current value and drops the link.'],
     ],
@@ -98,14 +101,19 @@ const TOPICS: Topic[] = [
   {
     title: 'Presets',
     entries: [
-      ['Animations', 'Under the objects. Each applies to the selected objects at the playhead and writes ordinary animations: fade and pop in and out, slide in from each side, bounce in, snap in, spin, pulse, orbit.'],
-      ['Objects', 'Adds a kind at the middle of the frame, beginning at the playhead.'],
+      ['Animations', 'Under the objects: a list of clips, each named after what it does, with its variations under the name. Click one to apply it to the selected objects at its place, the first frame of each, or the last for fade out and pop out. Drag it onto a clip in the timeline to apply it at that time, or onto an object in the preview: at the playhead when that is inside the object\'s life, a fade out ending there, else at its place.'],
+      ['Search', 'The box at the top filters the lists by name, by verb, and by a preset\'s variations.'],
+      ['Play mark', 'Hover or click it to watch the preset on a sample object.'],
+      ['Objects', 'Each a picture of what it adds. Click to add it at the middle of the view at the playhead; drag it into the preview, where it becomes the object at the preview\'s scale and lands where dropped, or onto the timeline, where it becomes its clip and is added at that time.'],
+      ['What they write', 'One named animation at the end of the file. An arrival is a move relative to the object from a distance away, written as a range, x: [-1060, 0]; a fade in is opacity: [0, 1]. The start holds until the animation begins, so the object waits off the frame or invisible. Nothing else in the file changes.'],
+      ['Yours', 'Right-click an animation, an object, a group, or a class and choose Save as preset: it is kept with the app, for every project, under Yours. An animation keeps its block without its place in time; an object keeps its declaration and its animations without its place and its life; a group keeps everything it carries; a class keeps its statements, and goes onto the selected object or the one it is dropped on. Right-click one under Yours to delete it.'],
+      ['Categories', 'Click a category\'s name to fold or unfold it.'],
     ],
   },
   {
     title: 'Links',
     entries: [
-      ['Edit links', 'Right-click an animation or an object. The left lists what of it can follow something: its start and end, or when it begins and is removed, then each attribute. The right lists objects, groups, classes, and animations, searchable; each opens to what it offers: start, halfway, end, or a value.'],
+      ['Edit links', 'Right-click an animation or an object. The left lists what of it can follow something: its start and end, then each attribute. The right lists objects, groups, classes, and animations, searchable; each opens to its moments, start, halfway, and end, and its attributes. What fits the chosen slot links at once; the rest is dimmed and switches to the slot it fits. Every tooltip reads the same way: x follows a.x + 20, start follows slide.end.'],
       ['Unlink', 'Puts back what the link replaced, or the default when nothing had been written.'],
       ['States', 'Open an object in the links dialog: under "while", what it does, moving and its directions, turning clockwise or not, growing, shrinking, visible, hidden, fading in and out, each with its stretches to start or stop at. In the code: box.moving.end, box.moving.right[2].start, box.visible.last.end.'],
       ['In the code', 'A time reference such as slide.end, or a value link such as x: () => box.x + 20. Clips and rows wear a chain mark for each.'],

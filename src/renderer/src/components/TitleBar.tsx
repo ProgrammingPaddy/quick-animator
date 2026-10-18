@@ -29,7 +29,7 @@ export function TitleBar() {
             </button>
           </>
         )}
-        <button onClick={() => setPrefsOpen(true)} title="Preferences: how long new objects last, and how long the final frame holds (Ctrl+,)">
+        <button onClick={() => setPrefsOpen(true)} title="Preferences (Ctrl+,)">
           Preferences
         </button>
         <button onClick={editorUndo} title="Undo (Ctrl+Z)">

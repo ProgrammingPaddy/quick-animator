@@ -760,9 +760,11 @@ button.icon:hover {
   pointer-events: none;
 }
 
+/* A clip's name and marks take the clip's own text color, dark on a light clip, a little faded (D229). */
 .clip .ident {
   margin-right: 5px;
-  color: rgba(255, 255, 255, 0.65);
+  color: inherit;
+  opacity: 0.7;
 }
 
 .clip.selected {
@@ -1915,6 +1917,11 @@ button.chevron:hover {
 }
 
 /* The Selected pane's controls (D174) */
+/* A value written as a range, [from, to]: both numbers side by side (D221). */
+.now-range input {
+  width: 58px;
+}
+
 .now-control {
   display: inline-flex;
   align-items: center;
@@ -2615,6 +2622,14 @@ button.chevron:hover {
   margin-left: 5px;
 }
 
+/* A value that is code of its own wears a small italic f, in the text's own color, faint (D226, D229). */
+.link.code {
+  color: inherit;
+  font-family: var(--font-mono);
+  font-style: italic;
+  opacity: 0.55;
+}
+
 .action-row .link,
 .object-row .link {
   margin-left: 4px;
@@ -2707,52 +2722,76 @@ button.chevron:hover {
   z-index: 3;
 }
 
-/* The presets under the objects (D217). */
-.presets {
-  padding: 6px 10px 10px;
-  overflow: auto;
+/* The presets under the objects (D217, D222): a search box, then the lists, which scroll. */
+.presets-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   font-size: 12px;
+}
+
+.presets-search {
+  flex: none;
+  margin: 6px 10px 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+}
+
+.presets-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.presets-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 10px 10px;
+}
+
+.presets-empty {
+  padding: 8px 2px;
 }
 
 .presets-section + .presets-section {
   margin-top: 10px;
 }
 
+/* A category's name folds and unfolds it (owner, 2026-10-18). */
 .presets-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
   margin: 4px 0 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--fg-dim);
+  text-align: left;
+  cursor: pointer;
 }
 
-.presets-title .dim {
-  text-transform: none;
-  letter-spacing: 0;
-  margin-left: 6px;
-}
-
-.presets-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.preset {
-  padding: 3px 8px;
-  border-radius: 4px;
-  background: var(--bg-raised);
+.presets-title:hover {
   color: var(--fg);
-  font-size: 11px;
 }
 
-.preset:hover:not(:disabled) {
-  background: var(--accent);
-  color: #ffffff;
+.presets-title .caret {
+  width: 10px;
+  font-size: 9px;
 }
 
-.preset:disabled {
-  opacity: 0.45;
+.preset-card.class .ident {
+  font-family: var(--font-mono);
 }
 
 /* The ease name menu in the code pane (D216). */
@@ -2795,6 +2834,15 @@ button.chevron:hover {
   color: #ffffff;
 }
 
+/* A part that the chosen slot cannot take: dimmed, and a click switches to the slot it fits (D230). */
+.links-parts button.dimmed {
+  opacity: 0.45;
+}
+
+.links-parts button.dimmed:hover {
+  opacity: 0.8;
+}
+
 /* An object's states in the links dialog, under "while" (D212). */
 .links-groups {
   margin: 4px 0 6px 22px;
@@ -2811,4 +2859,195 @@ button.chevron:hover {
 .links-group-heads button.on {
   background: var(--accent);
   color: #ffffff;
+}
+
+/* The presets as a list of clips (D219). */
+.presets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* A row: the play mark, the name with its variations under it so neither hides the other, and the clip (D222). */
+.preset-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 96px;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+}
+
+.preset-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.preset-row .name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.preset-row select.variant {
+  width: 100%;
+  max-width: 130px;
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+}
+
+.preset-play {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  color: var(--fg-dim);
+  font-size: 9px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.preset-play:hover,
+.preset-play.on {
+  background: var(--bg-raised);
+  color: var(--fg);
+}
+
+.preset-card {
+  height: 20px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
+  opacity: 0.9;
+}
+
+.preset-card:hover {
+  opacity: 1;
+}
+
+.preset-card .ident {
+  font-family: var(--font-mono);
+  opacity: 0.85;
+}
+
+/* An object as a still picture of what it adds (D222). */
+.preset-card.object {
+  width: 44px;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  background: var(--bg-raised);
+  color: var(--fg);
+}
+
+.object-image {
+  display: block;
+  flex: none;
+}
+
+.object-image.text {
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.preset-ghost {
+  position: fixed;
+  z-index: 120;
+  pointer-events: none;
+  height: 20px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+  transition:
+    width 280ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    height 280ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* An object's ghost: its card; over the preview the object itself at the preview's scale; over the timeline the clip it will be (D222). */
+.preset-ghost.object {
+  justify-content: center;
+  padding: 0;
+  border-radius: 6px;
+  background: var(--bg-raised);
+  color: var(--fg);
+}
+
+.preset-ghost.object.over-preview {
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  opacity: 0.85;
+}
+
+.preset-ghost.object.over-timeline {
+  align-items: stretch;
+  border-radius: 5px;
+  background: rgba(59, 130, 246, 0.14);
+  border: 1px solid rgba(59, 130, 246, 0.55);
+  color: #ffffff;
+  font-family: var(--font);
+}
+
+.ghost-clip {
+  display: block;
+  width: 100%;
+}
+
+.ghost-clip-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 16px;
+  padding: 0 8px;
+  background: rgba(59, 130, 246, 0.4);
+  font-size: 11px;
+}
+
+.ghost-clip-title .name {
+  font-weight: 600;
+}
+
+.ghost-clip-title .kind {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.preset-preview {
+  position: fixed;
+  z-index: 110;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+}
+
+.preset-preview canvas {
+  display: block;
+  border-radius: 4px;
+  background: #1c1c1c;
+}
+
+.preset-preview .caption {
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--fg-dim);
 }

@@ -122,11 +122,12 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
     progress: (fraction: number) => timeRef({ kind: 'progress', actions: own, fraction }),
   })
 
-  const readBlock = (owner: string, verb: Verb, className: string, args: unknown[]): { timing: Timing; changes: Record<string, AttrSource>; overrides: unknown } => {
+  const readBlock = (owner: string, verb: Verb, className: string, args: unknown[]): { timing: Timing; changes: Record<string, AttrSource>; from: Record<string, AttrSource>; overrides: unknown } => {
     const props = args.length > 0 ? args[args.length - 1] : {}
     if (typeof props !== 'object' || props === null) throw new Error(`${owner}.${verb}() expects a block of attributes`)
     const timing: Timing = {}
     const changes: Record<string, AttrSource> = {}
+    const from: Record<string, AttrSource> = {}
     let overrides: unknown
     const allowed = VERB_ATTRS[verb]
     for (const [key, value] of Object.entries(props as Record<string, unknown>)) {
@@ -153,13 +154,19 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
         warn(`${verb} does not change "${key}"; use to()`)
         continue
       }
+      // A range, `[from, to]`: the action begins from the first instead of where the object is (D221). A path's pairs are points, never ranges.
+      if (verb !== 'path' && Array.isArray(value) && value.length === 2 && typeof value[0] === 'number' && typeof value[1] === 'number') {
+        from[key] = value[0]
+        changes[key] = value[1]
+        continue
+      }
       changes[key] = value as AttrSource
     }
-    return { timing, changes, overrides }
+    return { timing, changes, from, overrides }
   }
 
-  const makeAction = (obj: SceneObject, verb: Verb, block: { timing: Timing; changes: Record<string, AttrSource> }, classAction: ClassAction | null): Action => {
-    const action: Action = { id: actions.length, object: obj, verb, name: null, changes: block.changes, timing: block.timing, start: 0, end: 0, stmt: null, codeDriven: false, classAction, overrides: null, overridden: false }
+  const makeAction = (obj: SceneObject, verb: Verb, block: { timing: Timing; changes: Record<string, AttrSource>; from: Record<string, AttrSource> }, classAction: ClassAction | null): Action => {
+    const action: Action = { id: actions.length, object: obj, verb, name: null, changes: block.changes, from: block.from, timing: block.timing, start: 0, end: 0, stmt: null, codeDriven: false, classAction, overrides: null, overridden: false }
     actions.push(action)
     obj.actions.push(action)
     return action

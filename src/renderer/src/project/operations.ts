@@ -1,13 +1,13 @@
 import { applyEdits, beginGesture, endGesture, foldShapes, scrollToPos } from '../code/editor'
 import { findDependents, type Dependent } from '../model/dependents'
-import { appendStatement, blockText, formatNumber, insertDeclaration, moveStatementEdits, removeProp, removeStatements, setProp, setPropText, type TextEdit } from '../model/edits'
+import { appendStatement, blockText, formatNumber, insertDeclaration, moveStatementEdits, removeProp, removeStatements, setProp, setPropFrom, setPropText, type TextEdit } from '../model/edits'
 import { isMember } from '../model/evaluate'
 import { memberRef, normalizeSelection } from '../model/groups'
 import { classes, GROUP, TIMING_KEY_NAMES, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
-import { memberBox, pathFrame, pathHolds, pathShift, positionAt, type Point } from '../model/sample'
+import { absoluteAt, anchorTime, memberBox, pathFrame, pathHolds, pathShift, positionAt, rawFromWorld, travelFrame, type Point } from '../model/sample'
 import { insertPointsEdit, pointText, removePointEdit, setPointEdit, shapeLiteral, type ShapeLiteral } from '../model/pathEdits'
-import { identifierEdits, nameProblem, replaceIdentifiers } from '../model/rename'
-import { currentWritten, definingAction, shownValue, valueAt, withWritten, writtenValues } from '../model/sample'
+import { identifierEdits, nameProblem, renameMembers, replaceIdentifiers } from '../model/rename'
+import { currentWritten, definingAction, shownValue, valueAt, withWritten, writesFrom, writtenValues } from '../model/sample'
 import type { Action, ActionInfo, BlockInfo, ClassAction, Range, SceneModel, SceneObject } from '../model/types'
 import { useStore, type ActionRef, type Clip, type ClipAction, type ClipObject, type Pin, type SelectionState, type ObjectKind } from '../state/store'
 
@@ -53,7 +53,14 @@ function takenNames(model: SceneModel): Set<string> {
   return taken
 }
 
-function uniqueName(base: string, from = 1): string {
+/** A name not in use yet: the base itself, else the base with the first free number from 2 (D219). */
+export function freeName(base: string): string {
+  const { model } = state()
+  const taken = model ? takenNames(model) : new Set<string>()
+  return taken.has(base) ? uniqueName(base, 2) : base
+}
+
+export function uniqueName(base: string, from = 1): string {
   const { model } = state()
   const taken = model ? takenNames(model) : new Set<string>()
   let n = from
@@ -138,9 +145,12 @@ export function addObject(className: ObjectKind, x: number, y: number, at = stat
  * it gets it as its change, written directly (D102), otherwise the declaration gets it. Returns
  * null when locked: a linked value, a class action, or code the GUI cannot edit.
  */
-function writeTo(source: string, obj: SceneObject, definer: Action | null, attr: string, value: number): TextEdit | null {
+function writeTo(source: string, obj: SceneObject, definer: Action | null, attr: string, value: number, time: number): TextEdit | null {
   if (definer) {
-    if (!definer.stmt || definer.classAction || typeof definer.changes[attr] !== 'number') return null
+    if (!definer.stmt || definer.classAction) return null
+    // At the start of an action given its own start, the `from` of its range is what shows and what changes (D221).
+    if (writesFrom(definer, attr, time)) return typeof definer.from[attr] === 'number' ? setPropFrom(definer.stmt, attr, roundAttr(attr, value)) : null
+    if (typeof definer.changes[attr] !== 'number') return null
     return setProp(source, definer.stmt, attr, roundAttr(attr, value))
   }
   if (!obj.decl || typeof obj.attrs[attr] === 'function') return null
@@ -160,7 +170,8 @@ export function inProgressActions(names: string[], attrs: string[], time: number
     if (!obj) continue
     for (const attr of attrs) {
       const action = definingAction(obj, attr, time)
-      if (!action?.stmt || action.classAction || time >= action.end) continue
+      // One at its own start, with a start of its own, is edited there, not at its end (D221).
+      if (!action?.stmt || action.classAction || time >= action.end || writesFrom(action, attr, time)) continue
       const index = obj.actions.indexOf(action)
       if (!refs.some((r) => r.object === name && r.index === index)) refs.push({ object: name, index })
     }
@@ -194,6 +205,7 @@ export function setAttrsAtMany(entries: { name: string; attrs: Record<string, nu
     if (!found) continue
     // A value a path owns right now cannot be written to show: the path is edited instead (D205), and the solver is kept off it.
     const attrs = Object.fromEntries(Object.entries(wanted).filter(([attr]) => !pathHolds(found, attr, time)))
+    edits.push(...heldByPathEdits(model, found, wanted, time))
     if (Object.keys(attrs).length === 0) continue
     let obj: SceneObject = found
     let probed = model
@@ -214,12 +226,40 @@ export function setAttrsAtMany(entries: { name: string; attrs: Record<string, nu
       // What is written already stays as it is; nothing to change is nothing to undo.
       const current = currentWritten(probed, obj, definers[attr] ?? null, attr, time)
       if (Math.abs(value - current) < 1e-6 || roundAttr(attr, value) === roundAttr(attr, current)) continue
-      const edit = writeTo(source, obj, definers[attr] ?? null, attr, value)
+      const edit = writeTo(source, obj, definers[attr] ?? null, attr, value, time)
       if (edit && source.slice(edit.from, edit.to) !== edit.insert) edits.push(edit)
     }
   }
   applyEdits(edits)
   return edits.length > 0
+}
+
+/**
+ * The edits for the values a path owns at a time (D205, D224): each goes into the path, along
+ * its own axis, at the anchor the object is at, the first at the path's start and the last
+ * after that, so a drag held by a move on one axis and a path on the other still lands where
+ * the pointer is. A path whose shape is code takes nothing.
+ */
+function heldByPathEdits(model: SceneModel, obj: SceneObject, wanted: Record<string, number>, time: number): TextEdit[] {
+  const byPath = new Map<Action, Record<string, number>>()
+  for (const [attr, value] of Object.entries(wanted)) {
+    if (attr !== 'x' && attr !== 'y') continue
+    const holder = pathHolds(obj, attr, time)
+    if (!holder) continue
+    byPath.set(holder, { ...(byPath.get(holder) ?? {}), [attr]: value })
+  }
+  const edits: TextEdit[] = []
+  for (const [holder, values] of byPath) {
+    const e = editableShape({ object: obj.name, index: obj.actions.indexOf(holder) })
+    const frame = travelFrame(model, obj, holder)
+    if (!e || !frame || frame.anchors.length === 0) continue
+    const anchor = time <= holder.start ? 0 : frame.anchors.length - 1
+    const world = { ...frame.anchors[anchor]!, ...values }
+    const raw = rawFromWorld(model, obj, holder, anchorTime(model, holder, anchor), world)
+    const edit = setPointEdit(e.shape, anchor, Math.round(raw.x), Math.round(raw.y))
+    if (edit && e.source.slice(edit.from, edit.to) !== edit.insert) edits.push(edit)
+  }
+  return edits
 }
 
 export function setAttrsAt(name: string, attrs: Record<string, number>, time: number): boolean {
@@ -488,7 +528,8 @@ export function addPath(name: string, time: number): number | null {
   const obj = model?.objects.find((o) => o.name === name)
   if (!model || !obj || !obj.decl) return null
   const at = roundSeconds(time)
-  const here = positionAt(model, obj, at)
+  // The path's first point is where the absolute actions put the object, so what relative changes add on top, an orbit say, goes on adding and the object stays put as the path begins (D225).
+  const here = { x: absoluteAt(model, obj, 'x', at), y: absoluteAt(model, obj, 'y', at) }
   const index = obj.actions.length
   applyEdits([appendStatement(source, pathText(`${name}.path`, [{ x: Math.round(here.x), y: Math.round(here.y) }], at, 1)), ...coverEdits(source, obj, at, at + 1)], actionSelected(name, index))
   // The points stay folded in the code until wanted (D204).
@@ -519,10 +560,20 @@ export function pathEditable(ref: ActionRef): boolean {
   return editableShape(ref) !== null
 }
 
-/** The literal a point of the scene is written as: the shift of `offset` and `relative` taken off, in whole pixels. */
-function rawPoint(e: EditableShape, world: Point): Point {
-  const shift = pathShift(e.action)
-  return { x: Math.round(world.x - shift.x), y: Math.round(world.y - shift.y) }
+/**
+ * The literal a point of the scene is written as, in whole pixels (D223): what the object's groups
+ * do to it at the time the object reaches the anchor taken back, what lies under a relative path
+ * then taken off, and `offset` taken off. The time is the anchor's, or that of the one before a
+ * point being put in.
+ */
+function rawPoint(e: EditableShape, world: Point, time: number): Point {
+  const p = rawFromWorld(e.model, e.obj, e.action, time, world)
+  return { x: Math.round(p.x), y: Math.round(p.y) }
+}
+
+/** The time at which a point put in at an index is reached: that of the anchor before it, or the path's start for the first. */
+function insertTime(e: EditableShape, index: number): number {
+  return index > 0 ? anchorTime(e.model, e.action, Math.min(index, e.shape.points.length) - 1) : e.action.start
 }
 
 /** Move several points of a path at once, each to a place in the scene (D198). */
@@ -531,11 +582,36 @@ export function setPathPoints(ref: ActionRef, entries: { index: number; world: P
   if (!e) return
   const edits: TextEdit[] = []
   for (const { index, world } of entries) {
-    const p = rawPoint(e, world)
+    const p = rawPoint(e, world, anchorTime(e.model, e.action, index))
     const edit = setPointEdit(e.shape, index, p.x, p.y)
     if (edit) edits.push(edit)
   }
   if (edits.length > 0) applyEdits(edits)
+}
+
+/** A path's `offset` as written, for a drag that carries the whole path by changing it. */
+export function pathOffset(ref: ActionRef): Point {
+  const action = findObject(ref.object)?.actions[ref.index]
+  return action ? pathShift(action) : { x: 0, y: 0 }
+}
+
+/**
+ * Carry a whole path whose shape is code, a function or a link, by how far the pointer has gone
+ * in the scene (D223): its `offset` takes the shift from what it was when the drag began, so the
+ * shape's math stays as written. An offset of nothing is taken out.
+ */
+export function setPathShift(ref: ActionRef, base: Point, from: Point, to: Point): void {
+  const { model } = state()
+  const obj = model?.objects.find((o) => o.name === ref.object)
+  const action = obj?.actions[ref.index]
+  if (!model || !obj || !action?.stmt || action.classAction || action.verb !== 'path') return
+  const a = rawFromWorld(model, obj, action, action.start, from)
+  const b = rawFromWorld(model, obj, action, action.start, to)
+  const next = { x: Math.round(base.x + b.x - a.x), y: Math.round(base.y + b.y - a.y) }
+  const current = pathShift(action)
+  if (next.x === current.x && next.y === current.y) return
+  if (next.x === 0 && next.y === 0) setActionProp(ref, 'offset', null)
+  else setActionProp(ref, 'offset', pointText(next.x, next.y), true)
 }
 
 /** Take several points out of a path, as one undo step; at least one point stays (D198). */
@@ -577,7 +653,7 @@ export function pathDragTarget(name: string, selectedIndex: number | null, time:
 export function setPathPoint(ref: ActionRef, index: number, world: Point): void {
   const e = editableShape(ref)
   if (!e) return
-  const p = rawPoint(e, world)
+  const p = rawPoint(e, world, anchorTime(e.model, e.action, index))
   const edit = setPointEdit(e.shape, index, p.x, p.y)
   if (edit) applyEdits([edit])
 }
@@ -586,7 +662,8 @@ export function setPathPoint(ref: ActionRef, index: number, world: Point): void 
 export function insertPathPoints(ref: ActionRef, index: number, worlds: Point[]): void {
   const e = editableShape(ref)
   if (!e) return
-  const edit = insertPointsEdit(e.source, e.shape, index, worlds.map((w) => rawPoint(e, w)))
+  const time = insertTime(e, index)
+  const edit = insertPointsEdit(e.source, e.shape, index, worlds.map((w) => rawPoint(e, w, time)))
   if (edit) applyEdits([edit])
 }
 
@@ -858,6 +935,15 @@ export function setActionProp(ref: ActionRef, key: string, value: AttrValue | nu
   if (asText) rememberReplaced(action.stmt, ref.object, key, ref.index)
   const edit = value === null ? removeProp(source, action.stmt, key) : asText && typeof value === 'string' ? setPropText(source, action.stmt, key, value) : setProp(source, action.stmt, key, typeof value === 'number' ? (TIMING_KEY_NAMES.has(key) ? roundSeconds(value) : roundAttr(key, value)) : value)
   if (edit) applyEdits([edit])
+}
+
+/** Set where an attribute of an action begins, the `from` of a range `[from, to]` (D221); nothing happens when the attribute is not written as a range. */
+export function setActionFrom(ref: ActionRef, key: string, value: number): void {
+  const { source, model } = state()
+  const action = model?.objects.find((o) => o.name === ref.object)?.actions[ref.index]
+  if (!model || !action?.stmt || action.classAction) return
+  const edit = setPropFrom(action.stmt, key, roundAttr(key, value))
+  if (edit && source.slice(edit.from, edit.to) !== edit.insert) applyEdits([edit])
 }
 
 /** Set, or with null remove, one attribute in an object's declaration, as written (D174). Text is written as given, and what it replaces is remembered. */
@@ -1350,7 +1436,8 @@ export function pasteClipboard(): boolean {
 function insertCopies(model: SceneModel, source: string, items: ClipObject[], afterDecl: Range | null): string[] {
   if (items.length === 0) return []
   const renames = numberedCopies(model, [...items.map((i) => i.name), ...items.flatMap((i) => i.actions.map((a) => a.name).filter((n): n is string => !!n))], 2)
-  const declTexts = items.map((i) => replaceIdentifiers(`${renames[i.name]} = ${i.className}({${i.propsText}})`, renames))
+  // A copied group lists the copies of its members (D124).
+  const declTexts = items.map((i) => renameMembers(replaceIdentifiers(`${renames[i.name]} = ${i.className}({${i.propsText}})`, renames), renames))
   const edits: TextEdit[] = [afterDecl ? { from: afterDecl.to, to: afterDecl.to, insert: `\n\n${declTexts.join('\n\n')}` } : insertDeclaration(model.lastDeclEnd, declTexts.join('\n\n'))]
   const actionTexts = items.flatMap((i) => i.actions.map((a) => replaceIdentifiers(a.text, renames)))
   if (actionTexts.length > 0) {

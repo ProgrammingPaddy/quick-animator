@@ -7,6 +7,7 @@ import { GROUP, PIVOT_PARAMS, VERB_COLORS } from '../model/registry'
 import { isVisibleAt } from '../model/sample'
 import type { Action, SceneObject } from '../model/types'
 import { addObject, deleteAction, deleteClass, deleteClassAction, deleteObjects, duplicateObjects, jumpToAction, jumpToClass, jumpToObject, materializeClassAction, overrideClassAction, removeFromClass, requestClasses, requestRename, selectClass, selectClassAction, ungroup, setLifetime } from '../project/operations'
+import { requestSavePreset } from '../project/userPresets'
 import { isActionSelected, OBJECT_KINDS, useStore } from '../state/store'
 import { timecode } from '../state/time'
 
@@ -51,13 +52,19 @@ export function ObjectPane() {
   /** Link marks, icons only, saying what in their tooltips (D169). */
   const marks = (links: { key: string; text: string; kind: string }[], referredBy: string[] | undefined) => (
     <>
-      {links.map((l) => (
-        <span key={l.key} className={`link ${l.kind}`} title={l.kind === 'value' ? `${l.key} follows ${l.text}` : `${l.key === 'at' ? 'Starts at' : l.key === 'until' ? 'Ends at' : l.key + ' is'} ${l.text}`}>
-          <LinkIcon />
-        </span>
-      ))}
+      {links.map((l) =>
+        l.kind === 'code' ? (
+          <span key={l.key} className="link code" title={`${l.key}: ${l.text.length > 80 ? `${l.text.slice(0, 79)}…` : l.text}`}>
+            ƒ
+          </span>
+        ) : (
+          <span key={l.key} className={`link ${l.kind}`} title={`${l.key === 'at' ? 'start' : l.key === 'until' ? 'end' : l.key} follows ${l.text}`}>
+            <LinkIcon />
+          </span>
+        ),
+      )}
       {referredBy && referredBy.length > 0 && (
-        <span className="link target" title={`Referred to by:\n${referredBy.join('\n')}`}>
+        <span className="link target" title={`Followed by:\n${referredBy.join('\n')}`}>
           <LinkIcon />
         </span>
       )}
@@ -119,6 +126,7 @@ export function ObjectPane() {
       showMenu(e, [
         { label: 'Jump to code', run: () => jumpToObject(obj.name) },
         { label: 'Rename', run: () => requestRename({ object: obj.name }) },
+        { label: 'Save as preset', run: () => requestSavePreset({ object: obj.name }) },
         { label: 'Ungroup', run: () => ungroup(obj.name) },
       ])
       return
@@ -130,6 +138,7 @@ export function ObjectPane() {
       ...(many ? [] : [{ label: 'Edit links', run: () => useStore.getState().openLinksDialog({ object: obj.name }) }]),
       { label: many ? `Duplicate ${targets.length} objects` : 'Duplicate', run: () => duplicateObjects(targets) },
       ...(many ? [] : [{ label: 'End at', keyword: timecode(s.time, s.settings.fps), run: () => setLifetime(obj.name, { until: useStore.getState().time }) }]),
+      ...(many || !obj.decl ? [] : [{ label: 'Save as preset', run: () => requestSavePreset({ object: obj.name }) }]),
       { label: many ? `Delete ${targets.length} objects` : 'Delete object', run: () => deleteObjects(targets), danger: true },
     ])
   }
@@ -161,6 +170,7 @@ export function ObjectPane() {
       { label: 'Jump to code', run: () => jumpToAction(obj.name, index) },
       { label: action?.name ? 'Rename' : 'Name', run: () => requestRename({ object: obj.name, index }) },
       { label: 'Edit links', run: () => useStore.getState().openLinksDialog({ object: obj.name, index }) },
+      { label: 'Save as preset', run: () => requestSavePreset({ object: obj.name, index }) },
       { label: 'Delete action', run: () => deleteAction(obj.name, index), danger: true },
     ])
   }
@@ -171,6 +181,7 @@ export function ObjectPane() {
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToClass(group.className) },
       { label: 'Select members', run: () => selectClass(group.className) },
+      { label: 'Save as preset', run: () => requestSavePreset({ className: group.className }) },
       { label: 'Delete class', run: () => deleteClass(group.className), danger: true },
     ])
   }
@@ -203,7 +214,7 @@ export function ObjectPane() {
     const active = isActive(obj)
     return (
       <li key={`${member ? 'm:' : ''}${obj.name}`} className={`object${selected ? ' selected' : ''}${member ? ' member' : ''}${active ? '' : ' inactive'}`} title={active ? undefined : 'Not on screen at the playhead'}>
-        <div className="object-row" onClick={clickObject(obj.name)} onDoubleClick={() => jumpToObject(obj.name)} onContextMenu={objectMenu(obj)} title="Click to select, Ctrl-click to add, double-click to jump to the code, right-click for more">
+        <div className="object-row" onClick={clickObject(obj.name)} onDoubleClick={() => jumpToObject(obj.name)} onContextMenu={objectMenu(obj)}>
           {obj.actions.length > 0 ? (
             <button
               className={`chevron${folded ? '' : ' open'}`}
@@ -242,7 +253,7 @@ export function ObjectPane() {
                   ? `From all('${action.classAction.className}'). Right-click to override it for this object.`
                   : action.overrides
                     ? `Overrides ${action.overrides.name} for ${obj.name}.`
-                    : 'Click to select, Ctrl-click to add, double-click to jump to the code, right-click for more'
+                    : undefined
               return (
                 <li
                   key={action.id}
@@ -274,7 +285,7 @@ export function ObjectPane() {
     const allSelected = group.members.length > 0 && group.members.every((m) => selection.includes(m.name)) && selectedActions.length === 0
     return (
       <li key={key} className={`group class-group${allSelected ? ' selected' : ''}`}>
-        <div className="object-row class-row" onClick={() => selectClass(group.className)} onDoubleClick={() => jumpToClass(group.className)} onContextMenu={classMenu(group)} title="Click to select every member, double-click to jump to the code">
+        <div className="object-row class-row" onClick={() => selectClass(group.className)} onDoubleClick={() => jumpToClass(group.className)} onContextMenu={classMenu(group)} title="Class: every member">
           <button
             className={`chevron${folded ? '' : ' open'}`}
             onClick={(e) => {
@@ -304,7 +315,7 @@ export function ObjectPane() {
                   onClick={() => selectClassAction(classAction)}
                   onDoubleClick={() => jumpToClass(group.className)}
                   onContextMenu={classAction.stmt ? classActionMenu(group, classAction.id) : undefined}
-                  title="Applies to every member. Double-click to jump to the code, right-click for more"
+                  title="Every member"
                 >
                   <span className="dot" style={{ background: VERB_COLORS[classAction.verb] }} />
                   <Idents words={classActionIdents(classAction)} />
@@ -331,7 +342,7 @@ export function ObjectPane() {
         <>
           <div className="objects-tools">
             <div className="objects-tools-row">
-              <input className="objects-search" type="search" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search objects" title="Objects whose name, kind, class, or animations contain this" />
+              <input className="objects-search" type="search" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search objects" />
               {foldable.length > 0 && (
                 <button className="small" onClick={() => setAllCollapsed('objects', anyExpanded ? foldable : null)} title={anyExpanded ? 'Fold every section, class, and action list' : 'Unfold everything'}>
                   {anyExpanded ? 'Collapse all' : 'Expand all'}
@@ -340,7 +351,7 @@ export function ObjectPane() {
             </div>
             <div className="objects-tools-row">
               <span className="dim" title="Only what is active at the playhead">Active:</span>
-              <button className={`small${activeOnly ? ' on' : ''}`} onClick={() => setActiveOnly(!activeOnly)} title={activeOnly ? 'Listing only the objects on screen at the playhead. Click to list every object; the ones not on screen are dimmed.' : 'Listing every object, the ones not on screen at the playhead dimmed. Click to list only the ones on screen.'} aria-pressed={activeOnly}>
+              <button className={`small${activeOnly ? ' on' : ''}`} onClick={() => setActiveOnly(!activeOnly)} title={activeOnly ? 'Only what is on screen at the playhead' : 'Everything; off screen dimmed'} aria-pressed={activeOnly}>
                 objects
               </button>
               <button className={`small${activeAnimations ? ' on' : ''}`} onClick={() => setActiveAnimations(!activeAnimations)} title={activeAnimations ? 'Listing only the animations running at the playhead. Click to list every animation.' : 'Listing every animation. Click to list only the ones running at the playhead.'} aria-pressed={activeAnimations}>

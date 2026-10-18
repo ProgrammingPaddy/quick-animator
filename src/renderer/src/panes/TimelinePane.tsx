@@ -51,6 +51,8 @@ import {
   setLifetime,
   type LifetimeOrigin,
 } from '../project/operations'
+import { requestSavePreset } from '../project/userPresets'
+import { dropTargets } from '../state/dropTargets'
 import { isActionSelected, OBJECT_KINDS, useStore, type ActionRef } from '../state/store'
 import { formatTime, snapToFrame, timecode } from '../state/time'
 
@@ -101,6 +103,11 @@ function tickLabel(seconds: number, step: number, fps: number): string {
   if (step >= 1) return `${Math.round(seconds)}s`
   if (step >= 0.5) return `${seconds.toFixed(1)}s`
   return timecode(seconds, fps)
+}
+
+/** How a link's key reads in a tooltip: the times by their names, anything else as is (D230). */
+export function linkWord(key: string): string {
+  return key === 'at' ? 'start' : key === 'until' ? 'end' : key
 }
 
 function clipLabel(action: Action): string {
@@ -397,6 +404,24 @@ export function TimelinePane() {
   }
 
   /** Raw time under a pointer position, not snapped. */
+  // Where a dragged preset lands on the timeline (D219): the object whose clip is under the pointer, and the time there, snapped as the playhead is.
+  useEffect(() => {
+    dropTargets.timeline = (clientX, clientY) => {
+      const grid = gridRef.current
+      const rect = grid?.getBoundingClientRect()
+      const inside = !!rect && clientX >= rect.left + HEADER_W && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
+      const el = inside ? document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('.oclip[data-object]') : null
+      const s = useStore.getState()
+      const v = viewRef.current
+      const ruler = rulerRef.current
+      const raw = ruler ? Math.max(0, v.scrollTime + (clientX - ruler.getBoundingClientRect().left) / v.pps) : 0
+      return { inside, object: el?.dataset['object'] ?? null, time: snapPlayhead(raw, s.model, v.pps, s.snap), pps: v.pps }
+    }
+    return () => {
+      delete dropTargets.timeline
+    }
+  }, [])
+
   const rawTimeAt = (clientX: number): number => {
     const ruler = rulerRef.current
     if (!ruler) return 0
@@ -820,6 +845,7 @@ export function TimelinePane() {
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToClass(node.group.className) },
       { label: 'Select members', run: () => selectClass(node.group.className) },
+      { label: 'Save as preset', run: () => requestSavePreset({ className: node.group.className }) },
       { label: 'Delete class', run: () => deleteClass(node.group.className), danger: true },
     ])
   }
@@ -852,6 +878,7 @@ export function TimelinePane() {
       { label: 'Jump to code', run: () => jumpToAction(obj.name, index) },
       { label: action?.name ? 'Rename' : 'Name', run: () => requestRename({ object: obj.name, index }) },
       { label: 'Edit links', keyword: atLink ? atLink.text : undefined, run: () => openLinksDialog({ object: obj.name, index }) },
+      { label: 'Save as preset', run: () => requestSavePreset({ object: obj.name, index }) },
       { label: 'Delete action', run: () => deleteAction(obj.name, index), danger: true },
     ])
   }
@@ -916,6 +943,7 @@ export function TimelinePane() {
             { label: 'Edit links', run: () => openLinksDialog({ object: obj.name }) },
           ]),
       { label: 'Duplicate', run: () => duplicateObjects([obj.name]) },
+      ...(!editableObject ? [] : [{ label: 'Save as preset', run: () => requestSavePreset({ object: obj.name }) }]),
       isGroup ? { label: 'Ungroup', run: () => ungroup(obj.name), danger: true } : { label: 'Delete object', run: () => deleteObjects([obj.name]), danger: true },
     ])
   }
@@ -1001,14 +1029,21 @@ export function TimelinePane() {
   /** The marks of a thing's links: what it refers to, with the text as written, and who refers to it (D169). */
   const renderLinks = (links: LinkInfo[], referredBy: string[] | undefined, short = false) => (
     <>
-      {links.map((l) => (
-        <span key={l.key} className={`link ${l.kind}`} title={`${l.kind === 'value' ? `${l.key} follows ${l.text}` : `${l.key === 'at' ? 'Starts at' : l.key === 'until' ? 'Ends at' : l.key + ' is'} ${l.text}`}: it moves with that. Right-click to change or unlink.`}>
-          <LinkIcon />
-          {!short && (l.kind === 'value' ? `${l.key} = ${l.text.length > 28 ? `${l.text.slice(0, 27)}…` : l.text}` : `${l.key === 'at' ? '' : `${l.key} `}${l.text}`)}
-        </span>
-      ))}
+      {links.map((l) =>
+        l.kind === 'code' ? (
+          // A value that is code of its own, such as a shape from a formula: a small mark, the code in the tooltip (D226).
+          <span key={l.key} className="link code" title={`${l.key}: ${l.text.length > 80 ? `${l.text.slice(0, 79)}…` : l.text}`}>
+            ƒ{!short && ` ${l.key}`}
+          </span>
+        ) : (
+          <span key={l.key} className={`link ${l.kind}`} title={`${linkWord(l.key)} follows ${l.text}`}>
+            <LinkIcon />
+            {!short && (l.kind === 'value' ? `${l.key} = ${l.text.length > 28 ? `${l.text.slice(0, 27)}…` : l.text}` : `${l.key === 'at' ? '' : `${l.key} `}${l.text}`)}
+          </span>
+        ),
+      )}
       {referredBy && referredBy.length > 0 && (
-        <span className="link target" title={`Referred to by:\n${referredBy.join('\n')}`}>
+        <span className="link target" title={`Followed by:\n${referredBy.join('\n')}`}>
           <LinkIcon />
           {!short && referredBy.length > 1 ? referredBy.length : ''}
         </span>
@@ -1050,14 +1085,14 @@ export function TimelinePane() {
     const top = dragging ? actionDrag.top : laneTop + (lanes.get(action.id) ?? 0) * (thin ? THIN_H + 1 : LANE_H)
     const span = `${timecode(action.start, fps)} to ${timecode(action.end, fps)}`
     const title = action.overridden
-      ? `all('${action.classAction!.className}').${action.verb} is switched off for ${owner.name}: its own action overrides it.`
+      ? `all('${action.classAction!.className}').${action.verb}, overridden for ${owner.name}`
       : derived
-        ? `all('${action.classAction!.className}').${action.verb}  ${span}. Drag to override it for ${owner.name} only. Ctrl-click to add it to the selection.`
+        ? `all('${action.classAction!.className}').${action.verb}  ${span}`
         : action.overrides
-          ? `${owner.name}.${action.verb}  ${span}. Overrides ${action.overrides.name} for ${owner.name}.`
+          ? `${owner.name}.${action.verb}  ${span}, overrides ${action.overrides.name}`
           : carried
-            ? `Group ${owner.name}.${action.verb}  ${span}: moves this object with the group. Drag to retime the group's animation.`
-            : `${action.name ? `${action.name} = ` : ''}${owner.name}.${action.verb}  ${span}. Ctrl-click to add it to the selection.`
+            ? `group ${owner.name}.${action.verb}  ${span}`
+            : `${action.name ? `${action.name} = ` : ''}${owner.name}.${action.verb}  ${span}`
     return (
       <div
         key={`${carried ? 'g' : ''}${action.id}`}
@@ -1127,8 +1162,8 @@ export function TimelinePane() {
       if (span.end <= start || span.start >= end) return null
       const isSelected = selectedClassActions.has(classAction)
       return [
-        <div key={`s${classAction.id}`} className={`opacity-handle start${isSelected ? ' selected' : ''}`} style={{ left: xAt(span.start) - originX, top: opacityY(valueAt(model, standIn, 'opacity', span.start)) }} onPointerDown={beginClassFadeDrag(classAction, 'start')} title="Drag sideways to lengthen or shorten this fade from its start for every member, up or down to set the opacity before it" />,
-        <div key={`e${classAction.id}`} className={`opacity-handle end${isSelected ? ' selected' : ''}`} style={{ left: xAt(span.end) - originX, top: opacityY(valueAt(model, standIn, 'opacity', span.end)) }} onPointerDown={beginClassFadeDrag(classAction, 'end')} title="Drag sideways to change how long the fade takes, up or down to change the opacity it reaches, for every member" />,
+        <div key={`s${classAction.id}`} className={`opacity-handle start${isSelected ? ' selected' : ''}`} style={{ left: xAt(span.start) - originX, top: opacityY(valueAt(model, standIn, 'opacity', span.start)) }} onPointerDown={beginClassFadeDrag(classAction, 'start')} title="Fade start: drag for length and opacity" />,
+        <div key={`e${classAction.id}`} className={`opacity-handle end${isSelected ? ' selected' : ''}`} style={{ left: xAt(span.end) - originX, top: opacityY(valueAt(model, standIn, 'opacity', span.end)) }} onPointerDown={beginClassFadeDrag(classAction, 'end')} title="Fade end: drag for length and opacity" />,
       ]
     })
 
@@ -1163,7 +1198,7 @@ export function TimelinePane() {
     const selected = allSelected || group.actions.some((a) => selectedClassActions.has(a))
     return (
       <div key={key} className={`oclip class${selected ? ' selected' : ''}${isCollapsed ? ' collapsed' : ''}`} style={{ left, top, width: clipWidth, height: classClipHeight(node, start, end, isCollapsed) }} data-class={group.className} data-start={start} data-end={end} onContextMenu={classMenu(node)}>
-        <div className="oclip-title" onPointerDown={(e) => e.stopPropagation()} onClick={() => selectClass(group.className)} onDoubleClick={() => jumpToClass(group.className)} title={`Class ${group.className}: every object with it. Click to select them, double-click to jump to the code. Its animations run on every member.`}>
+        <div className="oclip-title" onPointerDown={(e) => e.stopPropagation()} onClick={() => selectClass(group.className)} onDoubleClick={() => jumpToClass(group.className)} title={`Class ${group.className}`}>
           <button
             className="oclip-fold"
             onPointerDown={(e) => e.stopPropagation()}
@@ -1191,7 +1226,7 @@ export function TimelinePane() {
           {items.map((item) => renderClassActionClip(node, item, lanes, left, 2, isCollapsed))}
         </div>
         {standIn && !isCollapsed && (
-          <div className="oclip-opacity" style={{ height: OPACITY_H }} onDoubleClick={toggleClassExistence(group.className, standIn)} title="Opacity from the class's fades, for every member. Double-click to fade all in or out here; drag the handles of a fade.">
+          <div className="oclip-opacity" style={{ height: OPACITY_H }} onDoubleClick={toggleClassExistence(group.className, standIn)} title="Opacity, for every member">
             <OpacityLane model={model} obj={standIn} scrollTime={start} pps={view.pps} width={clipWidth} height={OPACITY_H} />
             {renderClassFadeHandles(node, standIn, left, start, end)}
           </div>
@@ -1224,7 +1259,7 @@ export function TimelinePane() {
     const isGroup = obj.className === GROUP
     const locked = !obj.decl || obj.codeDriven
     const openEnded = obj.until === null && !isGroup
-    const title = `${obj.name}  ${timecode(start, fps)} to ${openEnded ? 'the end' : timecode(end, fps)}.${locked ? '' : isGroup ? ' Drag up or down to change what draws on top.' : ' Drag to move it in time, up or down to change what draws on top; drag its edges to change when it begins or ends.'}`
+    const title = `${obj.name}  ${timecode(start, fps)} to ${openEnded ? 'the end' : timecode(end, fps)}`
     const dragging = clipDrag?.name === obj.name
     return (
       <div
@@ -1236,7 +1271,7 @@ export function TimelinePane() {
         data-end={end}
         onContextMenu={objectClipMenu(obj)}
       >
-        <div className="oclip-title" onPointerDown={beginLifetimeDrag(obj, 'move')} onDoubleClick={() => jumpToObject(obj.name)} title={`${title} Double-click to jump to the code.`}>
+        <div className="oclip-title" onPointerDown={beginLifetimeDrag(obj, 'move')} onDoubleClick={() => jumpToObject(obj.name)} title={title}>
           <button
             className="oclip-fold"
             onPointerDown={(e) => e.stopPropagation()}
@@ -1262,8 +1297,8 @@ export function TimelinePane() {
             </span>
           )}
         </div>
-        {!locked && !isGroup && <div className="oclip-edge left" onPointerDown={beginLifetimeDrag(obj, 'start')} title={`Begins at ${timecode(start, fps)}. Drag to change; the animations keep their place against it.`} />}
-        {!locked && !isGroup && <div className="oclip-edge right" onPointerDown={beginLifetimeDrag(obj, 'end')} title={openEnded ? 'Lasts to the end. Drag to remove it earlier.' : `Removed at ${timecode(end, fps)}. Drag to change.`} />}
+        {!locked && !isGroup && <div className="oclip-edge left" onPointerDown={beginLifetimeDrag(obj, 'start')} title={`Begins at ${timecode(start, fps)}`} />}
+        {!locked && !isGroup && <div className="oclip-edge right" onPointerDown={beginLifetimeDrag(obj, 'end')} title={openEnded ? 'Lasts to the end' : `Removed at ${timecode(end, fps)}`} />}
         <div
           className="oclip-body"
           style={{ height: isCollapsed ? THIN_STRIP_H : count * LANE_H + 4 }}
@@ -1285,7 +1320,7 @@ export function TimelinePane() {
                 const isSelected = isActionSelected(selectedActions, obj.name, index)
                 return [
                   <div key={`s${action.id}`} className={`opacity-handle start${isSelected ? ' selected' : ''}`} style={{ left: xAt(action.start) - left, top: opacityY(valueAt(model, obj, 'opacity', action.start)) }} onPointerDown={beginFadeDrag(obj, index, 'start')} title="Drag sideways to move this fade, up or down to set the opacity before it" />,
-                  <div key={`e${action.id}`} className={`opacity-handle end${isSelected ? ' selected' : ''}`} style={{ left: xAt(action.end) - left, top: opacityY(valueAt(model, obj, 'opacity', action.end)) }} onPointerDown={beginFadeDrag(obj, index, 'end')} title="Drag sideways to change how long the fade takes, up or down to change the opacity it reaches" />,
+                  <div key={`e${action.id}`} className={`opacity-handle end${isSelected ? ' selected' : ''}`} style={{ left: xAt(action.end) - left, top: opacityY(valueAt(model, obj, 'opacity', action.end)) }} onPointerDown={beginFadeDrag(obj, index, 'end')} title="Fade end: drag for length and opacity" />,
                 ]
               })}
           </div>
@@ -1386,7 +1421,7 @@ export function TimelinePane() {
     const groups = model.objects.filter((o) => o.className === GROUP).map(objectItem)
     const classNodes = tree ? flat(tree.roots) : []
     return [
-      lane('objects', 'Objects', 'Every object, stacked by drawing order: whatever is higher up appears on top. Drag a clip up or down to change that, sideways to move it in time. Right-click empty space to add an object there.', objects),
+      lane('objects', 'Objects', 'Stacked by drawing order, highest on top', objects),
       ...(groups.length > 0 ? [lane('groups', 'Groups', 'Every group, spanning its members, with its own animations and opacity inside. Its moves also show inside its members, labelled with its name.', groups)] : []),
       ...(classNodes.length > 0 ? [lane('classes', 'Classes', "Every class, spanning its members, with the animations written on all('name') inside: they run on every member, and show dashed inside each member's clip.", classNodes.map(classItem))] : []),
     ]
@@ -1452,7 +1487,7 @@ export function TimelinePane() {
             toggleSnap()
             e.currentTarget.blur()
           }}
-          title={snap ? 'Drags snap to whole seconds and to other actions; the ruler puts the playhead on those, on action starts and ends, or on every fifth frame. Click for free placement.' : 'Drags place freely and the ruler puts the playhead on any frame. Click to snap drags to whole seconds and other actions, and the playhead to those and every fifth frame.'}
+          title={snap ? 'Snapping to seconds, animations, and fifth frames' : 'Free placement'}
           aria-label="Snap"
           aria-pressed={snap}
         >
@@ -1470,7 +1505,7 @@ export function TimelinePane() {
         >
           Frames
         </button>
-        <NumberField label="Frames per wheel tick when Shift-scrolling over an object in the preview, lengthening or shortening the selected actions" value={wheelStep} unit="f" onChange={setWheelStep} />
+        <NumberField label="Frames per wheel tick with Shift" value={wheelStep} unit="f" onChange={setWheelStep} />
         <span className="time mono">{formatTime(time, fps)}</span>
         <span className="dim">
           {fps} fps{contentEnd !== null ? `, ends at ${timecode(contentEnd, fps)}` : ''}
@@ -1488,7 +1523,7 @@ export function TimelinePane() {
               <span>{tickLabel(t, step, fps)}</span>
             </div>
           ))}
-          {contentEnd !== null && <div className="end-marker" style={{ left: xAt(contentEnd) }} title="End of the content: the last animation or lifetime. Playback and export hold the final frame after it for as long as Preferences say." />}
+          {contentEnd !== null && <div className="end-marker" style={{ left: xAt(contentEnd) }} title="End of the content" />}
           {playheadVisible && <div className="playhead head" style={{ left: playheadX }} />}
         </div>
         <div className="tl-body" ref={bodyRef}>

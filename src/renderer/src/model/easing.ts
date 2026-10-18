@@ -49,18 +49,30 @@ export const namedEasings: Record<string, Easing> = {
 /** Default ease at each end, as a fraction of the duration. */
 export const DEFAULT_EASE_FRACTION = 0.3
 
+/** The progress at which an easing has come a fraction of the way: its inverse, by bisection, since an easing only climbs. */
+export function unease(ease: Easing, fraction: number): number {
+  let lo = 0
+  let hi = 1
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2
+    if (ease(mid) < fraction) lo = mid
+    else hi = mid
+  }
+  return (lo + hi) / 2
+}
+
 export function easingFor(timing: { ease?: string | Easing; easeIn?: number; easeOut?: number }, duration: number): Easing {
   if (typeof timing.ease === 'function') {
     // A custom curve written in the code, `ease: (p) => p * p`: whatever it returns, within 0 to 1; a throw holds the ends.
     const custom = timing.ease
     return (p) => {
-      if (p <= 0) return 0
-      if (p >= 1) return 1
+      // The ends go through the curve too, so one that falls back ends where it fell back to, and the action holds that (D220).
+      const at = Math.max(0, Math.min(1, p))
       try {
-        const v = Number(custom(p))
-        return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : p
+        const v = Number(custom(at))
+        return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : at
       } catch {
-        return p
+        return at
       }
     }
   }
