@@ -1,6 +1,6 @@
 import { app, dialog, ipcMain, type BrowserWindow } from 'electron'
 import { promises as fs, watch, type FSWatcher } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, extname, join } from 'node:path'
 import type { ProjectData, ProjectFile, ProjectSettings } from '../shared/api'
 
 const DEFAULT_SETTINGS: ProjectSettings = { width: 1920, height: 1080, fps: 60, hold: 0, background: '#1c1c1c' }
@@ -160,5 +160,19 @@ export function registerProjectIpc(getWindow: () => BrowserWindow | null, option
 
   ipcMain.handle('project:write', async (_event, path: string, file: string, source: string) => {
     await fs.writeFile(join(path, file), source)
+  })
+
+  ipcMain.handle('project:readFile', async (_event, path: string) => {
+    if (!/\.svg$/i.test(path)) throw new Error('Only an .svg can be read')
+    return fs.readFile(path, 'utf8')
+  })
+
+  ipcMain.handle('project:importSvg', async () => {
+    const win = getWindow()
+    const options: Electron.OpenDialogOptions = { title: 'Import SVG', filters: [{ name: 'SVG', extensions: ['svg'] }], properties: ['openFile'] }
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    const path = result.canceled ? undefined : result.filePaths[0]
+    if (!path) return null
+    return { name: basename(path, extname(path)), text: await fs.readFile(path, 'utf8') }
   })
 }

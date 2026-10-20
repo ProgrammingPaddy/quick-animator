@@ -71,9 +71,103 @@ Every object has these attributes, with these defaults:
 | `Rect` | `width` 200, `height` 120 |
 | `Circle` | `radius` 60; `width` and `height`, each twice the radius unless set, for an oval |
 | `Text` | `text` `'Text'`, `fontSize` 48, `font` `'Segoe UI'` |
+| `Shape` | `points` `[]`, the corners around `x, y`; `curves` `''`, SVG path data, drawn instead of the points when set; `closed` true; `smooth` false; `stroke` `'#ffffff'`, `strokeWidth` 0. See Shapes |
 | `Group` | only these: `members` `''`; `x`, `y` 0, how far the group has shifted its members; `rotation` 0 and `scale` 1, how far it has turned and scaled them; `pivotX`, `pivotY`, what its own rotation and scale pivot on, unset the center of the members' box at time zero. See Groups |
 
 An omitted attribute takes its default. An unknown attribute is reported and ignored.
+
+## Shapes
+
+A `Shape` is what SVG draws: a polygon or a line through `points` of its own, or any curve as
+`curves`. Only where its points lie against each other counts: the shape draws with the center of
+their box at its `x, y`, and turns and scales about that center, so it moves, turns, scales, and
+groups as any object and a list written anywhere means the same shape. `closed`, true unless
+written false, joins the last point to the first and fills it with `fill`; false draws an open
+line, which needs a `stroke` and a `strokeWidth` to be seen. `smooth` makes a curve through the
+points, as paths have, round and back for a closed shape. Four words on the class give lists of
+points: `Shape.rect(width, height)`, `Shape.polygon(sides, radius)`, and `Shape.star(points,
+outer, inner)`; `Shape.circle(radius)` gives curves, an exact circle.
+
+`curves` is SVG path data, the full form: `'M 0 -60 C 60 -140 160 -60 0 60 Z'`, with every
+command SVG has, absolute or relative, arcs included. Set, it is drawn instead of the points, and
+it is its own in the same way, the center of the box around its line at `x, y`. Its pieces fill
+as SVG fills a path, one inside another cut out as a hole, open pieces included; `fill: 'none'`
+draws no fill, so curves with a stroke alone are a line. The word is `curves`, not path, because
+a path here is an animation; SVG calls the same string `d`. The app writes curves as a template
+string, one command per line, which the code pane folds like a list of points; a string on one
+line reads the same.
+
+```js
+flag = Shape({
+  x: -200,
+  y: 0,
+  points: [
+    [-100, -60],
+    [100, -60],
+    [60, 60],
+    [-60, 60],
+  ],
+  smooth: true,
+  fill: '#4f8cff',
+})
+
+wire = Shape({
+  x: 200,
+  y: 0,
+  points: [[-100, -50], [0, 50], [100, -50]],
+  closed: false,
+  stroke: '#ffffff',
+  strokeWidth: 4,
+})
+
+badge = Shape({
+  points: Shape.star(5, 100, 50),
+  fill: '#f59e0b',
+})
+
+heart = Shape({
+  y: -200,
+  curves: `
+    M 0 -60
+    C 60 -140 160 -60 0 60
+    C -160 -60 -60 -140 0 -60
+    Z
+  `,
+  fill: '#ef4444',
+})
+```
+
+The Shape tool draws curves and nothing else: a click adds a corner, a drawn stroke a smooth run
+with handles, the first corner or Enter closes it into a filled polygon, Escape leaves a line, a
+stroke with `fill: 'none'`. Its Edit mode shows the points, round when smooth and square
+otherwise, and the handles of a clicked one, which drag: a smooth point keeps its handles in
+line, except while Alt is held, when the dragged one moves alone; a corner's move alone; an end
+of a line has one; and a box dragged on empty space picks several. Right-click a point for
+Smooth point, Corner point, or Straighten point; the line for Curve segment or Straighten
+segment; Shape for Smooth shape, Straighten shape, and, on a line, Close line or Open line, which
+change the outline and nothing else, a closed line staying hollow until it is given a fill. A
+points shape becomes curves when a point or a segment of it is edited. The Shape tool opens in
+Edit when a shape is selected. The GUI turns a Rect or a Circle into a
+Shape with the same look. A point edit writes that point and moves `x, y` by where the center of the box went, to a
+hundredth of a pixel, so the other points stay exactly where they are drawn; a resize scales
+them all and keeps its far side. The app writes points one per line, and the code pane folds
+them from the start, as it folds curves. Dragged things stop at the convex hull of a Shape. An SVG file
+imported, by the Import button or dropped on the preview, becomes Rects, Circles, Texts, and
+Shapes, grouped as the file groups them, named after the file and their kind, `logoRect1`, with
+ids kept, and each, groups included, with `imported: 'logo.svg'`, the file it came from, which
+the object pane shows as an I.
+
+A Shape morphs: `blob.morph({ to: Shape.star(5, 100, 50), duration: 1 })` takes its outline to
+the target's over the span, with the usual timing and easing, and holds it after, like any
+animation. `to` is curves, `'M ...'`, points, `[[x, y], ...]`, one of the Shape's words, or a
+link such as `() => other.curves`, drawn where it is written about the shape's `x, y`. The
+outlines are flattened and resampled along their length to one count, a closed target turned
+to where the points travel least, and each point travels straight; after the morph the outline
+is the target as written. Only a Shape morphs: a Rect or a Circle becomes one first, by Convert
+to shape. In the GUI, Add on a Shape offers Morph, whose target starts as the outline then and
+is shaped by the Shape tool's handles while the morph is selected; Shift with a point in the
+Shape tool, or with the resize handles in Select, writes a morph whose target is the outline as
+dragged.
 
 ## Lifetime and visibility
 
@@ -124,6 +218,7 @@ An instant appearance is the same fade over one frame, such as `duration: 0.017`
 | `resize` | `width`, `height`, `radius`, `fontSize`; or `scale`, a multiplier of the drawn size, which is how a group grows or shrinks |
 | `fade` | `opacity` |
 | `path` | `x`, `y`, and with `orient` `rotation`, along a `shape`; see Paths |
+| `morph` | a Shape's outline, to the curves or points in `to`; see Shapes |
 | `to` | any attributes |
 
 Timing keys, allowed in every action block:
@@ -172,7 +267,14 @@ shape; `relative: true` makes the points changes from where the object is, added
 whatever else moves it, so a shape that begins at `[0, 0]` starts in place. A `move` written as
 relative during a path offsets the object from the path; one written after the path, above it,
 takes the object over for its span, and the path has it back after. The GUI writes one point per
-line and edits the points one by one; a function is code.
+line and edits the points one by one; a function is code. `shape` may also be curves, SVG path
+data in the scene's space, `'M -300 0 C -200 200 200 200 300 0'`: the Path tool then shows the
+anchors with the controls of a clicked one, and the words a shape has: Smooth path, or a drawn
+stroke, writes a points path as curves, Straighten path makes every segment a line, and a point
+or a segment is right-clicked for Smooth, Corner, Straighten, or Curve; `smooth` means nothing
+to curves. A group's path moves its members as one, its line
+drawn from the middle of them; a class's path, `all('bars').path({ ..., relative: true })`,
+takes every member from its own place, and the Path tool edits it for all of them at once.
 
 ```js
 dot.path({
@@ -477,5 +579,5 @@ title.fade({
 
 ## Coming
 
-orbits (a turn around a point, as its own verb), objects attached to another's path, the motion of a drag kept as a path, curved paths, `morph`, `link` actions, `Image`, `Video`, `Line`, `Polygon`,
+orbits (a turn around a point, as its own verb), objects attached to another's path, the motion of a drag kept as a path, `link` actions, `Image`, `Video`, `Line`, `Polygon`,
 object states such as `startsMoving`, per-character text animation, 3D.

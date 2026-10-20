@@ -4,6 +4,8 @@ import { evaluateScene } from '../model/evaluate'
 import type { SceneModel } from '../model/types'
 import { applySelection, currentSelection, loadAnchored, loadSoft, setSelectionSink, useStore, type ProjectSettings } from '../state/store'
 import { SAMPLE_SCENE } from './sample'
+import { dropTargets } from '../state/dropTargets'
+import { importSvg } from './operations'
 
 /** Where a new version of the scene text came from. */
 export type SourceOrigin = 'editor' | 'external' | 'load'
@@ -37,6 +39,8 @@ export function commitSource(source: string, origin: SourceOrigin): void {
     const next = model ?? s.model
     return { source, model: next, error, contentEnd: contentEndFor(next), playbackEnd: playbackEndFor(next, s.settings) }
   })
+  // An anchor belongs to an object while it exists: one that is gone takes its anchor with it, so a new object with its name starts free (D161).
+  if (model) useStore.getState().pruneAnchored(model.objects.map((o) => o.name))
   if (origin === 'load') {
     cancelSave()
     resetEditorDoc(source)
@@ -110,6 +114,13 @@ export async function pickProject(): Promise<void> {
 export async function newProject(): Promise<void> {
   const path = await window.api?.project.create()
   if (path) await openProject(path)
+}
+
+/** Ask for an SVG file and put its drawing in the middle of the view (D241). */
+export async function importSvgFile(): Promise<void> {
+  const file = await window.api?.project.importSvg()
+  if (!file) return
+  importSvg(file.text, file.name, dropTargets.previewCenter?.() ?? { x: 0, y: 0 })
 }
 
 /** Wire the editor to the store, listen for outside edits, and reopen the last project. */

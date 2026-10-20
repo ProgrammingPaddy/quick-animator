@@ -9,12 +9,33 @@ export interface Point {
 /** A convex outline, as points around it. */
 export type Polygon = Point[]
 
+/** The convex hull of points, counterclockwise, by the monotone chain; what a concave Shape collides with (D232). */
+export function convexHull(points: Point[]): Polygon {
+  const sorted = [...points].sort((a, b) => a.x - b.x || a.y - b.y)
+  if (sorted.length < 3) return sorted
+  const cross = (o: Point, a: Point, b: Point): number => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+  const lower: Point[] = []
+  for (const p of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2]!, lower[lower.length - 1]!, p) <= 0) lower.pop()
+    lower.push(p)
+  }
+  const upper: Point[] = []
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const p = sorted[i]!
+    while (upper.length >= 2 && cross(upper[upper.length - 2]!, upper[upper.length - 1]!, p) <= 0) upper.pop()
+    upper.push(p)
+  }
+  return [...lower.slice(0, -1), ...upper.slice(0, -1)]
+}
+
 /**
  * The outline an object collides with (D136): a rectangle's four corners, turned and scaled as it
  * is drawn; an oval's rim, as 48 points; text by the box it is drawn in, until its glyphs can be
- * read. Anything drawn is solid; what is not drawn, an object at opacity zero, never gets here.
+ * read; a Shape by the convex hull of the line it is drawn with, given as `drawn` (D232). Anything
+ * drawn is solid; what is not drawn, an object at opacity zero, never gets here.
  */
-export function outlineOf(obj: SceneObject, frame: Frame): Polygon {
+export function outlineOf(obj: SceneObject, frame: Frame, drawn?: Point[]): Polygon {
+  if (drawn && drawn.length >= 3) return convexHull(drawn)
   const a = (frame.rotation * Math.PI) / 180
   const cos = Math.cos(a)
   const sin = Math.sin(a)

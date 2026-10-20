@@ -24,12 +24,26 @@ interface Look {
   round: boolean
   outline?: boolean
   text?: string
+  /** A polygon, as the corners of its box in percent, for a Shape's picture (D232). */
+  polygon?: string
 }
 /** How an object of each kind looks when new, as addObject writes it (D222). */
 const OBJECT_LOOK: Record<ObjectKind, Look> = {
   Rect: { width: 240, height: 140, fill: '#4f8cff', round: false },
   Circle: { width: 120, height: 120, fill: '#f59e0b', round: true },
   Text: { width: 106, height: 58, fill: '#ffffff', round: false, text: 'Text' },
+  Shape: { width: 120, height: 100, fill: '#4f8cff', round: false, polygon: '50% 0%, 100% 100%, 0% 100%' },
+}
+
+/** A list of points as the corners of its box in percent, for a picture; up is up on screen (D232). */
+function polygonOf(points: number[][]): string | undefined {
+  const valid = points.filter((p) => Array.isArray(p) && typeof p[0] === 'number' && typeof p[1] === 'number')
+  if (valid.length < 3) return undefined
+  const xs = valid.map((p) => p[0]!)
+  const ys = valid.map((p) => p[1]!)
+  const w = Math.max(...xs) - Math.min(...xs) || 1
+  const h = Math.max(...ys) - Math.min(...ys) || 1
+  return valid.map((p) => `${Math.round(((p[0]! - Math.min(...xs)) / w) * 100)}% ${Math.round(((Math.max(...ys) - p[1]!) / h) * 100)}%`).join(', ')
 }
 
 /** How one of the user's objects or groups looks, from what its declaration says, else as its kind looks new (D227). */
@@ -47,6 +61,7 @@ function lookOf(p: UserPreset): Look {
     const text = l.text ?? 'Text'
     return { ...base, width: Math.max(1, size * 0.55 * text.length), height: size * 1.2, fill: l.fill ?? base.fill, text }
   }
+  if (kind === 'Shape') return { ...base, width: p.size?.width ?? base.width, height: p.size?.height ?? base.height, fill: l.fill ?? base.fill, polygon: (l.points && polygonOf(l.points)) ?? base.polygon }
   return { ...base, width: l.width ?? base.width, height: l.height ?? base.height, fill: l.fill ?? base.fill }
 }
 
@@ -79,7 +94,7 @@ function ObjectImage({ look, scale }: { look: Look; scale: number }) {
       </span>
     )
   }
-  return <span className="object-image" style={{ width: Math.max(2, look.width * scale), height: Math.max(2, look.height * scale), background: look.fill, borderRadius: look.round ? '50%' : Math.max(1, 6 * scale), border: look.outline ? '1px solid rgba(168, 85, 247, 0.9)' : undefined }} />
+  return <span className="object-image" style={{ width: Math.max(2, look.width * scale), height: Math.max(2, look.height * scale), background: look.fill, borderRadius: look.round ? '50%' : look.polygon ? 0 : Math.max(1, 6 * scale), border: look.outline ? '1px solid rgba(168, 85, 247, 0.9)' : undefined, clipPath: look.polygon ? `polygon(${look.polygon})` : undefined }} />
 }
 
 /**

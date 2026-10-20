@@ -1,7 +1,9 @@
 import * as THREE from 'three'
 import { groupMembers } from '../model/groups'
 import { GROUP } from '../model/registry'
-import { existsAt, groupBox, opacityAt, parseColor, textMeasurer, valueAt, worldPose } from '../model/sample'
+import { hasPathData } from '../model/pathData'
+import { existsAt, groupBox, opacityAt, parseColor, shapePieces, textMeasurer, valueAt, worldPose, type Pose, type ShapePiece } from '../model/sample'
+import { SHAPE } from '../model/registry'
 import type { SceneModel, SceneObject } from '../model/types'
 import type { TransformMode } from '../state/store'
 
@@ -12,6 +14,10 @@ interface Item {
   width: number
   height: number
   textKey?: string
+  /** A Shape's stroke, its own mesh; the box around its line in its own space, its center offset from the object's x and y; and what its geometry was built from (D232). */
+  stroke?: THREE.Mesh
+  bounds?: { x: number; y: number; width: number; height: number }
+  shapeKey?: string
 }
 
 /** A grab point of the selection gizmo: a corner or edge that resizes, or the handle that rotates (D86). */
@@ -233,6 +239,8 @@ const pathMaterial = new THREE.MeshBasicMaterial({ color: 0x86efac, depthTest: f
 /** A handle on each point of an editable path, the one last placed or picked a little larger (D194). */
 const POINT_PX = 7
 const ACTIVE_POINT_PX = 10
+/** A curve's control, a small round handle (D240). */
+const CONTROL_PX = 7
 
 /** How long a dash and a gap are, in pixels, on the line of a path whose shape is code (D226). */
 const DASH_PX = 9
@@ -265,38 +273,200 @@ function dashes(points: { x: number; y: number }[], on: number, off: number): [{
   return out
 }
 
+/** A Shape's stroke as triangles: a quad along each piece of each line and a small fan at each point, so the joins are round (D232). */
+function strokeGeometry(curves: { x: number; y: number }[][], width: number): THREE.BufferGeometry {
+  const positions: number[] = []
+  const half = width / 2
+  const tri = (a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }) => positions.push(a.x, a.y, 0, b.x, b.y, 0, c.x, c.y, 0)
+  const steps = 8
+  for (const curve of curves) {
+    if (curve.length < 2) continue
+    for (let i = 0; i + 1 < curve.length; i++) {
+      const a = curve[i]!
+      const b = curve[i + 1]!
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const length = Math.hypot(dx, dy)
+      if (length < 1e-9) continue
+      const nx = (-dy / length) * half
+      const ny = (dx / length) * half
+      tri({ x: a.x + nx, y: a.y + ny }, { x: b.x + nx, y: b.y + ny }, { x: b.x - nx, y: b.y - ny })
+      tri({ x: a.x + nx, y: a.y + ny }, { x: b.x - nx, y: b.y - ny }, { x: a.x - nx, y: a.y - ny })
+    }
+    for (const p of curve) {
+      for (let k = 0; k < steps; k++) {
+        const a0 = (k / steps) * 2 * Math.PI
+        const a1 = ((k + 1) / steps) * 2 * Math.PI
+        tri(p, { x: p.x + half * Math.cos(a0), y: p.y + half * Math.sin(a0) }, { x: p.x + half * Math.cos(a1), y: p.y + half * Math.sin(a1) })
+      }
+    }
+  }
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  return geometry
+}
+
+/** A Shape's fill as triangles: every filled piece, one inside another cut out as a hole, as SVG fills a path (D238). */
+function fillGeometry(pieces: ShapePiece[]): THREE.BufferGeometry {
+  const path = new THREE.ShapePath()
+  let any = false
+  for (const piece of pieces) {
+    if (!piece.filled) continue
+    const ring = piece.closed ? piece.curve.slice(0, -1) : piece.curve
+    if (ring.length < 3) continue
+    path.moveTo(ring[0]!.x, ring[0]!.y)
+    for (let i = 1; i < ring.length; i++) path.lineTo(ring[i]!.x, ring[i]!.y)
+    any = true
+  }
+  if (!any) return new THREE.BufferGeometry()
+  return new THREE.ShapeGeometry(path.toShapes())
+}
+
+/** A control of a curve's anchor, shown as a handle: where the anchor is and where the control is (D240). */
+export interface ControlHandle {
+  anchor: { x: number; y: number }
+  point: { x: number; y: number }
+}
+
+/** The controls of picked anchors, each a small round handle on a thin stem from its anchor (D240, D246). */
+class Controls {
+  readonly group = new THREE.Group()
+  private readonly marks: Marker[] = []
+  private readonly stems: THREE.Mesh[] = []
+
+  set(handles: ControlHandle[], pixel: number): void {
+    this.group.visible = handles.length > 0
+    while (this.marks.length < handles.length) {
+      const mark = new Marker(unitCircle)
+      this.group.add(mark.group)
+      this.marks.push(mark)
+      const stem = new THREE.Mesh(unitPlane, lightMaterial)
+      stem.renderOrder = ORDER + 1
+      this.group.add(stem)
+      this.stems.push(stem)
+    }
+    this.marks.forEach((mark, i) => {
+      const h = handles[i]
+      const stem = this.stems[i]!
+      stem.visible = !!h
+      if (!h) {
+        mark.hide()
+        return
+      }
+      mark.set(h.point.x, h.point.y, 0, CONTROL_PX * pixel, pixel)
+      const length = Math.hypot(h.point.x - h.anchor.x, h.point.y - h.anchor.y)
+      stem.position.set((h.anchor.x + h.point.x) / 2, (h.anchor.y + h.point.y) / 2, 0.65)
+      stem.rotation.z = Math.atan2(h.point.y - h.anchor.y, h.point.x - h.anchor.x)
+      stem.scale.set(length, LINE_PX * pixel, 1)
+    })
+  }
+
+  count(): number {
+    return this.marks.filter((m) => m.group.visible).length
+  }
+}
+
+/** The marks of a path's anchors: a square for a corner or a straight point, a round one for a smooth point, whose controls move together (D252); the picked ones larger. */
+class AnchorMarks {
+  readonly group = new THREE.Group()
+  private readonly squares: Marker[] = []
+  private readonly rounds: Marker[] = []
+
+  set(points: { x: number; y: number }[], pixel: number, active: number[], round: boolean[]): void {
+    while (this.squares.length < points.length) {
+      const square = new Marker(unitPlane)
+      const circle = new Marker(unitCircle)
+      this.group.add(square.group, circle.group)
+      this.squares.push(square)
+      this.rounds.push(circle)
+    }
+    this.squares.forEach((square, i) => {
+      const p = points[i]
+      const circle = this.rounds[i]!
+      if (!p) {
+        square.hide()
+        circle.hide()
+        return
+      }
+      const size = (active.includes(i) ? ACTIVE_POINT_PX : POINT_PX) * pixel
+      if (round[i]) {
+        circle.set(p.x, p.y, 0, size * 1.15, pixel)
+        square.hide()
+      } else {
+        square.set(p.x, p.y, 0, size, pixel)
+        circle.hide()
+      }
+    })
+  }
+
+  count(): number {
+    return this.squares.filter((m) => m.group.visible).length + this.rounds.filter((m) => m.group.visible).length
+  }
+
+  roundCount(): number {
+    return this.rounds.filter((m) => m.group.visible).length
+  }
+}
+
+/** The points of a selected Shape as handles, the picked ones larger (D233), and the controls of the picked anchors of a path shape (D240). */
+class ShapeHandles {
+  readonly group = new THREE.Group()
+  private readonly marks = new AnchorMarks()
+  private readonly controls = new Controls()
+
+  constructor() {
+    this.group.add(this.marks.group, this.controls.group)
+  }
+
+  set(points: { x: number; y: number }[], pixel: number, active: number[], handles: ControlHandle[] = [], round: boolean[] = []): void {
+    this.group.visible = true
+    this.marks.set(points, pixel, active, round)
+    this.controls.set(handles, pixel)
+  }
+
+  count(): number {
+    return this.group.visible ? this.marks.count() : 0
+  }
+
+  roundCount(): number {
+    return this.group.visible ? this.marks.roundCount() : 0
+  }
+
+  controlCount(): number {
+    return this.group.visible ? this.controls.count() : 0
+  }
+
+  hide(): void {
+    this.group.visible = false
+  }
+}
+
 /** The line of a selected path, its start as a dot and its end as a diamond (D192), and a handle on each point when the points can be edited (D194); dashed when the shape is code and has no points to edit (D226). */
 class PathLine {
   readonly group = new THREE.Group()
   private readonly segments: THREE.Mesh[] = []
   private readonly start = new THREE.Mesh(unitCircle, pathMaterial)
   private readonly end = new THREE.Mesh(unitPlane, pathMaterial)
-  private readonly handles: Marker[] = []
+  private readonly anchors = new AnchorMarks()
+  private readonly controls = new Controls()
 
   constructor() {
     this.start.renderOrder = ORDER + 7
     this.end.renderOrder = ORDER + 7
     this.end.rotation.z = Math.PI / 4
-    this.group.add(this.start, this.end)
+    this.group.add(this.start, this.end, this.anchors.group, this.controls.group)
     this.group.visible = false
   }
 
-  set(points: { x: number; y: number }[], pixel: number, anchors: { x: number; y: number }[] | null = null, active: number[] = [], dashed = false): void {
+  set(points: { x: number; y: number }[], pixel: number, anchors: { x: number; y: number }[] | null = null, active: number[] = [], dashed = false, handles: ControlHandle[] = [], round: boolean[] = []): void {
     if (points.length === 0) {
       this.group.visible = false
       return
     }
     this.group.visible = true
-    const shown = anchors ? anchors.length : 0
-    while (this.handles.length < shown) {
-      const mark = new Marker(unitPlane)
-      this.group.add(mark.group)
-      this.handles.push(mark)
-    }
-    this.handles.forEach((mark, i) => {
-      if (i < shown) mark.set(anchors![i]!.x, anchors![i]!.y, 0, (active.includes(i) ? ACTIVE_POINT_PX : POINT_PX) * pixel, pixel)
-      else mark.hide()
-    })
+    // The controls of the picked anchors of a curves path (D246), and a round mark on each smooth anchor (D252).
+    this.controls.set(handles, pixel)
+    this.anchors.set(anchors ?? [], pixel, active, round)
     const pieces = dashed ? dashes(points, DASH_PX * pixel, GAP_PX * pixel) : points.slice(1).map((b, i) => [points[i]!, b] as [{ x: number; y: number }, { x: number; y: number }])
     while (this.segments.length < pieces.length) {
       const mesh = new THREE.Mesh(unitPlane, pathMaterial)
@@ -324,6 +494,10 @@ class PathLine {
 
   count(): number {
     return this.group.visible ? this.segments.filter((m) => m.visible).length : 0
+  }
+
+  controlCount(): number {
+    return this.group.visible ? this.controls.count() : 0
   }
 
   hide(): void {
@@ -399,6 +573,8 @@ export class SceneRenderer {
   readonly pathLine = new PathLine()
   /** The selected object's other paths (D205). */
   private readonly otherLines: PathLine[] = []
+  /** The selected Shape's points (D233). */
+  readonly shapeHandles = new ShapeHandles()
   /** The handles shown right now, with their world positions, for picking. */
   private handles: { handle: Handle; x: number; y: number; radius: number }[] = []
   private readonly raycaster = new THREE.Raycaster()
@@ -418,7 +594,7 @@ export class SceneRenderer {
     this.stem = new THREE.Mesh(unitPlane, lightMaterial)
     this.stem.renderOrder = ORDER + 1
     this.stem.visible = false
-    this.group.add(this.gizmoOutline.group, this.rotateRing, this.rotateHandle.group, this.anchorCross.group, this.stem, this.guides.group, this.pathLine.group)
+    this.group.add(this.gizmoOutline.group, this.rotateRing, this.rotateHandle.group, this.anchorCross.group, this.stem, this.guides.group, this.pathLine.group, this.shapeHandles.group)
   }
 
   private outline(index: number): Outline {
@@ -437,7 +613,7 @@ export class SceneRenderer {
    * D124). A thin x marks the center of a group's box, which its next turn or scale happens around.
    * `pixel` is the world size of one screen pixel.
    */
-  update(model: SceneModel | null, time: number, selection: string[], mode: TransformMode = 'all', pixel = 1, axes = 0, keepAliveFrom?: number, anchored: string[] = []): void {
+  update(model: SceneModel | null, time: number, selection: string[], mode: TransformMode = 'all', pixel = 1, axes = 0, keepAliveFrom?: number, anchored: string[] = [], handles = true): void {
     this.model = model
     this.time = time
     const seen = new Set<string>()
@@ -451,12 +627,13 @@ export class SceneRenderer {
     for (const [name, item] of this.items) {
       if (seen.has(name)) continue
       this.group.remove(item.mesh)
+      if (item.stroke) this.group.remove(item.stroke)
       disposeItem(item)
       this.items.delete(name)
     }
 
     // An anchored object wears a small diamond at its center, so what a push cannot move is seen (D161).
-    const pinned = anchored.filter((n) => this.items.get(n)?.mesh.visible)
+    const pinned = anchored.filter((n) => this.shown(n))
     while (this.anchorMarks.length < pinned.length) {
       const mark = new Marker(unitPlane)
       this.group.add(mark.group)
@@ -469,16 +646,17 @@ export class SceneRenderer {
     })
 
     const group = selection.length === 1 && model ? (model.objects.find((o) => o.name === selection[0] && o.className === GROUP) ?? null) : null
-    const outlined = (group && model ? groupMembers(model, group.name) : selection).filter((n) => this.items.get(n)?.mesh.visible)
+    const outlined = (group && model ? groupMembers(model, group.name) : selection).filter((n) => this.shown(n))
     outlined.forEach((name, i) => this.outline(i).set(this.frameOf(name)!, pixel))
     for (let i = outlined.length; i < this.outlines.length; i++) this.outlines[i]!.hide()
 
     // A group's box is in the code; a plain turn of an ad-hoc selection leaves its box on the turned axes until the selection changes (D116).
     const frame = group ? this.frameOf(group.name) : outlined.length === 1 ? this.frameOf(outlined[0]!) : outlined.length > 1 ? this.boxAround(outlined, axes) : null
-    const showRing = !!frame && mode === 'rotate'
-    const showResize = !!frame && (mode === 'resize' || mode === 'all')
-    const showRotate = !!frame && mode === 'all'
-    const showAnchor = !!frame && !!group && (mode === 'all' || mode === 'rotate')
+    // The selection shows in every tool; the handles that transform it belong to Select alone (D236, D247).
+    const showRing = handles && !!frame && mode === 'rotate'
+    const showResize = handles && !!frame && (mode === 'resize' || mode === 'all')
+    const showRotate = handles && !!frame && mode === 'all'
+    const showAnchor = handles && !!frame && !!group && (mode === 'all' || mode === 'rotate')
     this.rotateRing.visible = showRing
     this.stem.visible = showRotate
     if (!showRotate) this.rotateHandle.hide()
@@ -487,7 +665,7 @@ export class SceneRenderer {
     if ((group || outlined.length > 1) && frame) this.gizmoOutline.set(frame, pixel)
     else this.gizmoOutline.hide()
     this.handles = []
-    if (!frame) return
+    if (!frame || !handles) return
     const angle = (frame.rotation * Math.PI) / 180
     const cos = Math.cos(angle)
     const sin = Math.sin(angle)
@@ -542,9 +720,14 @@ export class SceneRenderer {
   }
 
   /** Draw a path's curve as a line with its ends marked, with a handle on each anchor when they can be edited, the picked ones larger, or nothing (D192, D194, D198); dashed when its shape is code (D226). */
-  setPath(points: { x: number; y: number }[] | null, pixel: number, anchors: { x: number; y: number }[] | null = null, active: number[] = [], dashed = false): void {
-    if (points) this.pathLine.set(points, pixel, anchors, active, dashed)
+  setPath(points: { x: number; y: number }[] | null, pixel: number, anchors: { x: number; y: number }[] | null = null, active: number[] = [], dashed = false, handles: ControlHandle[] = [], round: boolean[] = []): void {
+    if (points) this.pathLine.set(points, pixel, anchors, active, dashed, handles, round)
     else this.pathLine.hide()
+  }
+
+  /** How many controls the selected path shows right now. */
+  pathControlCount(): number {
+    return this.pathLine.controlCount()
   }
 
   /** The other paths shown, as lines without handles (D205), each dashed when its shape is code (D226). */
@@ -561,6 +744,22 @@ export class SceneRenderer {
     })
   }
 
+  /** The points of the selected Shape as handles, the picked ones larger, with the controls of the picked anchors, or none (D233, D240). */
+  setShapeHandles(points: { x: number; y: number }[] | null, pixel: number, active: number[] = [], handles: ControlHandle[] = [], round: boolean[] = []): void {
+    if (points && points.length > 0) this.shapeHandles.set(points, pixel, active, handles, round)
+    else this.shapeHandles.hide()
+  }
+
+  /** How many of the shown shape handles are round, smooth points. */
+  shapeRoundCount(): number {
+    return this.shapeHandles.roundCount()
+  }
+
+  /** How many control handles show right now. */
+  controlHandleCount(): number {
+    return this.shapeHandles.controlCount()
+  }
+
   /** How many path lines show right now, the selected one included. */
   pathLineCount(): number {
     return (this.pathLine.group.visible ? 1 : 0) + this.otherLines.filter((l) => l.group.visible).length
@@ -574,12 +773,26 @@ export class SceneRenderer {
     return this.guides.count()
   }
 
+  /** Whether an object draws anything right now: its fill, or a Shape's stroke alone (D238). */
+  private shown(name: string): boolean {
+    const item = this.items.get(name)
+    return !!item && (item.mesh.visible || !!item.stroke?.visible)
+  }
+
   /** Where a visible object, or a group, is drawn right now, or null. */
   frameOf(name: string): Frame | null {
     const item = this.items.get(name)
     if (item) {
-      if (!item.mesh.visible) return null
+      // A Shape with no fill is its stroke (D238).
+      if (!item.mesh.visible && !item.stroke?.visible) return null
       const { position, rotation, scale } = item.mesh
+      if (item.bounds) {
+        // A Shape's box sits where its line is, off its x and y, turned and scaled with it (D232).
+        const c = Math.cos(rotation.z)
+        const s = Math.sin(rotation.z)
+        const k = scale.x
+        return { x: position.x + k * (c * item.bounds.x - s * item.bounds.y), y: position.y + k * (s * item.bounds.x + c * item.bounds.y), rotation: (rotation.z * 180) / Math.PI, width: Math.abs(item.bounds.width * k), height: Math.abs(item.bounds.height * k) }
+      }
       return { x: position.x, y: position.y, rotation: (rotation.z * 180) / Math.PI, width: Math.abs(scale.x), height: Math.abs(scale.y) }
     }
     const group = this.model?.objects.find((o) => o.name === name && o.className === GROUP)
@@ -658,7 +871,8 @@ export class SceneRenderer {
   /** The name of the topmost visible object under a normalized device coordinate, or null. */
   pick(camera: THREE.Camera, ndc: THREE.Vector2): string | null {
     this.raycaster.setFromCamera(ndc, camera)
-    const meshes = [...this.items.values()].filter((i) => i.mesh.visible).map((i) => i.mesh)
+    // A Shape's stroke counts as the Shape: an open line has nothing else to hit (D232).
+    const meshes = [...this.items.values()].flatMap((i) => [...(i.mesh.visible ? [i.mesh] : []), ...(i.stroke?.visible ? [i.stroke] : [])])
     const hits = this.raycaster.intersectObjects(meshes, false)
     if (hits.length === 0) return null
     hits.sort((a, b) => b.object.renderOrder - a.object.renderOrder)
@@ -670,18 +884,84 @@ export class SceneRenderer {
     let item = this.items.get(obj.name)
     if (item && item.className !== obj.className) {
       this.group.remove(item.mesh)
+      if (item.stroke) this.group.remove(item.stroke)
       disposeItem(item)
       item = undefined
     }
     if (!item) {
-      const material = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthTest: false, depthWrite: false })
-      const mesh = new THREE.Mesh(obj.className === 'Circle' ? unitCircle : unitPlane, material)
+      const isShape = obj.className === SHAPE
+      // A Shape's triangles wind either way, as its points were drawn, so both sides show.
+      const material = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthTest: false, depthWrite: false, side: isShape ? THREE.DoubleSide : THREE.FrontSide })
+      // A Shape's fill is its own geometry, rebuilt when its line changes; the unit plane and circle are shared (D232).
+      const mesh = new THREE.Mesh(isShape ? new THREE.BufferGeometry() : obj.className === 'Circle' ? unitCircle : unitPlane, material)
       mesh.userData['name'] = obj.name
       item = { mesh, className: obj.className, width: 1, height: 1 }
+      if (isShape) {
+        const stroke = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthTest: false, depthWrite: false, side: THREE.DoubleSide }))
+        stroke.userData['name'] = obj.name
+        item.stroke = stroke
+        this.group.add(stroke)
+      }
       this.items.set(obj.name, item)
       this.group.add(mesh)
     }
     return item
+  }
+
+  /**
+   * Draw a Shape (D232, D238): the pieces of its line, from its path or its points, filled as
+   * SVG fills them, with its stroke as a second mesh; the geometry is rebuilt only when the
+   * line changes. `fill: 'none'` draws no fill. Its box is kept in its own space for the frame.
+   */
+  private applyShape(item: Item, obj: SceneObject, model: SceneModel, time: number, pose: Pose, opacity: number, index: number, z: number): void {
+    const pieces = shapePieces(model, obj, time)
+    const widthValue = valueAt(model, obj, 'strokeWidth', time)
+    const strokeWidth = typeof widthValue === 'number' && Number.isFinite(widthValue) ? Math.max(0, widthValue) : 0
+    const d = valueAt(model, obj, 'curves', time)
+    // Path data is its own key; points, and a morphing shape, are keyed by the line they make, since a list may be a word and a morph changes the line over time (D257).
+    const morphing = obj.actions.some((a) => a.verb === 'morph' && !a.overridden)
+    const key = `${strokeWidth}:${hasPathData(d) && !morphing ? `d${d}` : pieces.map((piece) => `${piece.closed ? 'c' : 'o'}${piece.curve.map((p) => `${Math.round(p.x * 10)},${Math.round(p.y * 10)}`).join(';')}`).join('|')}`
+    if (item.shapeKey !== key) {
+      item.shapeKey = key
+      item.mesh.geometry.dispose()
+      item.mesh.geometry = fillGeometry(pieces)
+      if (item.stroke) {
+        item.stroke.geometry.dispose()
+        item.stroke.geometry = strokeWidth > 0 ? strokeGeometry(pieces.map((piece) => piece.curve), strokeWidth) : new THREE.BufferGeometry()
+      }
+      let left = Infinity
+      let right = -Infinity
+      let bottom = Infinity
+      let top = -Infinity
+      for (const piece of pieces) {
+        for (const p of piece.curve) {
+          left = Math.min(left, p.x)
+          right = Math.max(right, p.x)
+          bottom = Math.min(bottom, p.y)
+          top = Math.max(top, p.y)
+        }
+      }
+      item.bounds = Number.isFinite(left) ? { x: (left + right) / 2, y: (bottom + top) / 2, width: right - left + strokeWidth, height: top - bottom + strokeWidth } : { x: 0, y: 0, width: 0, height: 0 }
+      item.width = item.bounds.width
+      item.height = item.bounds.height
+    }
+    const material = item.mesh.material as THREE.MeshBasicMaterial
+    const fill = String(valueAt(model, obj, 'fill', time))
+    item.mesh.visible = fill !== 'none' && item.mesh.geometry.getAttribute('position') !== undefined
+    if (item.mesh.visible) setColor(material, fill)
+    material.opacity = opacity
+    item.mesh.scale.set(pose.scale, pose.scale, 1)
+    if (item.stroke) {
+      const stroke = item.stroke
+      stroke.visible = strokeWidth > 0 && pieces.some((piece) => piece.curve.length >= 2)
+      stroke.renderOrder = index
+      stroke.position.set(pose.x, pose.y, z)
+      stroke.rotation.z = (pose.rotation * Math.PI) / 180
+      stroke.scale.set(pose.scale, pose.scale, 1)
+      const strokeMaterial = stroke.material as THREE.MeshBasicMaterial
+      setColor(strokeMaterial, String(valueAt(model, obj, 'stroke', time)))
+      strokeMaterial.opacity = opacity
+    }
   }
 
   private apply(item: Item, obj: SceneObject, model: SceneModel, time: number, index: number, keepAliveFrom?: number): void {
@@ -692,6 +972,7 @@ export class SceneRenderer {
     const opacity = alive ? opacityAt(model, obj, time) : 0
     if (opacity <= 0.0005) {
       mesh.visible = false
+      if (item.stroke) item.stroke.visible = false
       return
     }
     const material = mesh.material as THREE.MeshBasicMaterial
@@ -720,6 +1001,9 @@ export class SceneRenderer {
       setColor(material, str('fill'))
     } else if (obj.className === 'Text') {
       this.applyText(item, str('text'), num('fontSize'), str('font'), str('fill'))
+    } else if (obj.className === SHAPE) {
+      this.applyShape(item, obj, model, time, pose, opacity, index, num('z'))
+      return
     }
     mesh.scale.set(item.width * pose.scale, item.height * pose.scale, 1)
   }
@@ -769,4 +1053,10 @@ function disposeItem(item: Item): void {
   const material = item.mesh.material as THREE.MeshBasicMaterial
   material.map?.dispose()
   material.dispose()
+  // A Shape owns its geometries; the other kinds share the unit ones.
+  if (item.className === SHAPE) item.mesh.geometry.dispose()
+  if (item.stroke) {
+    item.stroke.geometry.dispose()
+    ;(item.stroke.material as THREE.MeshBasicMaterial).dispose()
+  }
 }

@@ -39,6 +39,10 @@ export interface ProjectApi {
   /** The last project opened, when it still exists. */
   last(): Promise<string | null>
   write(path: string, file: string, source: string): Promise<void>
+  /** Ask the user for an SVG file and read it: its name without the extension, and its text. Null when cancelled (D241). */
+  importSvg(): Promise<{ name: string; text: string } | null>
+  /** Read a text file by its path, for a file dropped in as a path rather than a file: only an .svg (D241). */
+  readFile(path: string): Promise<string>
   /** Changes made to project files from outside the app. Returns an unsubscribe function. */
   onChanged(callback: (change: FileChange) => void): () => void
 }

@@ -1,5 +1,29 @@
+import { formatCurves, hasPathData } from './pathData'
 import type { AttrValue } from './registry'
 import type { BlockInfo, Range } from './types'
+
+/** Whether a value is curves, SVG path data, which the code writes as a template string of lines (D244). */
+function isCurves(key: string, value: AttrValue): value is string {
+  return (key === 'curves' || key === 'shape' || key === 'to') && typeof value === 'string' && hasPathData(value)
+}
+
+/** Whether a value is a Shape's points, which the code writes one per line, as a path's, so they fold (D244). */
+function isPoints(key: string, value: AttrValue): value is number[][] {
+  return key === 'points' && Array.isArray(value)
+}
+
+/** A list of points as the code writes it: one per line, a step in from the block's properties. */
+function formatPoints(points: number[][], indent: string): string {
+  if (points.length === 0) return '[]'
+  return `[\n${points.map((p) => `${indent}  [${p.map(formatNumber).join(', ')}],`).join('\n')}\n${indent}]`
+}
+
+/** A value as a block writes it: curves and points on their own lines, anything else on the property's. */
+function propText(key: string, value: AttrValue, indent: string): string {
+  if (isCurves(key, value)) return formatCurves(value, indent)
+  if (isPoints(key, value)) return formatPoints(value, indent)
+  return formatValue(value)
+}
 
 /** A replacement of a span of the source. Positions refer to the source before any edit. */
 export interface TextEdit {
@@ -18,14 +42,38 @@ export function formatNumber(n: number): string {
 export function formatValue(value: AttrValue): string {
   if (typeof value === 'number') return formatNumber(value)
   if (typeof value === 'boolean') return String(value)
+  // A list of points, on one line (D232).
+  if (Array.isArray(value)) return `[${value.map((p) => `[${p.map(formatNumber).join(', ')}]`).join(', ')}]`
   return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
 }
 
 /** Set one attribute in a block: replace its literal, or add a line when it is not there. A number given to a range, `[from, to]`, replaces the `to` (D221). */
+/**
+ * The smallest edit, whole lines at a time, that turns the text at a range into other text: the
+ * lines both begin and end with are left alone, so a fold over the text stays folded and only
+ * the lines that changed go into the history (D254). Null when nothing changes.
+ */
+export function lineEdit(source: string, from: number, to: number, text: string): TextEdit | null {
+  const old = source.slice(from, to)
+  if (old === text) return null
+  const a = old.split('\n')
+  const b = text.split('\n')
+  if (a.length < 3 || b.length < 3) return { from, to, insert: text }
+  let p = 0
+  while (p < a.length - 1 && p < b.length - 1 && a[p] === b[p]) p++
+  let q = 0
+  while (q < a.length - p && q < b.length - p && a[a.length - 1 - q] === b[b.length - 1 - q]) q++
+  if (p === 0 || q === 0) return { from, to, insert: text }
+  // The lines between, each with the newline that ends it, from the start of the first to the start of the first kept at the end.
+  const head = a.slice(0, p).join('\n').length + 1
+  const tail = a.slice(a.length - q).join('\n').length
+  return { from: from + head, to: to - tail, insert: text.slice(head, text.length - tail) }
+}
+
 export function setProp(source: string, block: BlockInfo, key: string, value: AttrValue): TextEdit {
   const prop = block.props.find((p) => p.key === key)
   if (prop?.parts && typeof value === 'number') return { from: prop.parts[1].from, to: prop.parts[1].to, insert: formatValue(value) }
-  return setPropText(source, block, key, formatValue(value))
+  return setPropText(source, block, key, propText(key, value, block.indent))
 }
 
 /** Set where a ranged attribute begins from, the `from` of `[from, to]`; null when the attribute is not written as a range (D221). */
@@ -71,7 +119,7 @@ export function removeProp(source: string, block: BlockInfo, key: string): TextE
 
 /** A statement such as `box = Rect({ ... })` or `box.move({ ... })`, one attribute per line. */
 export function blockText(head: string, attrs: Record<string, AttrValue>): string {
-  const lines = Object.entries(attrs).map(([key, value]) => `  ${key}: ${formatValue(value)},`)
+  const lines = Object.entries(attrs).map(([key, value]) => `  ${key}: ${propText(key, value, '  ')},`)
   return `${head}({\n${lines.join('\n')}\n})`
 }
 

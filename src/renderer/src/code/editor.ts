@@ -1,7 +1,7 @@
 import { acceptCompletion, autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete'
 import { defaultKeymap, history, indentLess, indentSelection, invertedEffects, redo, undo } from '@codemirror/commands'
 import { javascript } from '@codemirror/lang-javascript'
-import { bracketMatching, ensureSyntaxTree, foldable, foldEffect, foldedRanges, foldGutter, foldKeymap, indentOnInput, indentUnit, syntaxHighlighting } from '@codemirror/language'
+import { bracketMatching, ensureSyntaxTree, foldable, foldEffect, foldedRanges, foldGutter, foldKeymap, foldService, indentOnInput, indentUnit, syntaxHighlighting } from '@codemirror/language'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import { Annotation, EditorState, RangeSet, RangeSetBuilder, StateEffect, StateField, Transaction, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, GutterMarker, WidgetType, drawSelection, gutterLineClass, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from '@codemirror/view'
@@ -227,11 +227,31 @@ function redoText(v: EditorView): boolean {
   return true
 }
 
+/** Curves fold between their backticks, and a list of points written on one line between its brackets, as a list over several lines folds on its own (D244). */
+const shapeFolding = foldService.of((state, lineStart) => {
+  const line = state.doc.lineAt(lineStart)
+  const m = /^\s*(curves|shape|points|to):\s*(.*)$/.exec(line.text)
+  if (!m) return null
+  const rest = m[2]!
+  if (/^`\s*$/.test(rest)) {
+    for (let n = line.number + 1; n <= state.doc.lines; n++) {
+      const next = state.doc.line(n)
+      if (/^\s*`\s*,?\s*$/.test(next.text)) return { from: line.to, to: next.from + (next.text.length - next.text.trimStart().length) }
+    }
+    return null
+  }
+  const open = line.text.indexOf('[')
+  const close = line.text.lastIndexOf(']')
+  if (rest.startsWith('[') && /\[\s*\[/.test(rest) && close > open + 1) return { from: line.from + open + 1, to: line.from + close }
+  return null
+})
+
 function extensions(): Extension[] {
   return [
     lineNumbers(),
     highlightActiveLineGutter(),
     foldGutter(),
+    shapeFolding,
     drawSelection(),
     history({
       // Every edit of one gesture joins one undo step, whatever it touches, so a drag that pushes other things undoes as one (D22, D136).
@@ -316,7 +336,7 @@ export function foldShapes(): void {
   const folded = foldedRanges(state)
   for (let n = 1; n <= state.doc.lines; n++) {
     const line = state.doc.line(n)
-    if (!/^\s*shape:\s*\[\s*$/.test(line.text)) continue
+    if (!/^\s*(shape|points|curves|to):\s*(\[|`)/.test(line.text)) continue
     const range = foldable(state, line.from, line.to)
     if (!range) continue
     let open = true
@@ -365,6 +385,11 @@ export function beginGesture(): void {
 
 export function endGesture(): void {
   openGesture = null
+}
+
+/** Whether a gesture is open, so an operation inside one joins it rather than starting its own. */
+export function gestureOpen(): boolean {
+  return openGesture !== null
 }
 
 /**

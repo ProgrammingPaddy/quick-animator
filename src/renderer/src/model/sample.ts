@@ -1,5 +1,6 @@
-import { attrSchema, defaultFor, GROUP, type AttrType, type AttrValue } from './registry'
+import { attrSchema, defaultFor, GROUP, SHAPE, type AttrType, type AttrValue } from './registry'
 import { easingFor, unease, type Easing } from './easing'
+import { boundsOf, flattenPathData, hasPathData, parsePathData, pathAnchors, placeBetween, translatePathData, type Anchor, type Seg, type Subpath } from './pathData'
 import type { Action, AttrSource, SceneModel, SceneObject, StateDirection, StateName } from './types'
 
 /**
@@ -76,6 +77,8 @@ interface Cache {
   motions: Map<number, { time: number; motion: Motion; shift: Point }>
   /** The line an object travels during each of its paths, by action id (D223). */
   travels: Map<number, PathFrame | null>
+  /** The pairs of resampled outlines a morph blends, aligned once, by action id (D257). */
+  morphs: Map<number, MorphPairs>
 }
 
 const cache = new WeakMap<SceneModel, Cache>()
@@ -83,7 +86,7 @@ const cache = new WeakMap<SceneModel, Cache>()
 function cacheFor(model: SceneModel): Cache {
   let c = cache.get(model)
   if (!c) {
-    c = { segments: new Map(), containers: new Map(), pivots: new Map(), basePivots: new Map(), starts: new Map(), motions: new Map(), travels: new Map() }
+    c = { segments: new Map(), containers: new Map(), pivots: new Map(), basePivots: new Map(), starts: new Map(), motions: new Map(), travels: new Map(), morphs: new Map() }
     cache.set(model, c)
   }
   return c
@@ -131,7 +134,7 @@ function segmentsFor(model: SceneModel, obj: SceneObject, attr: string): Segment
 }
 
 function isAttrValue(v: unknown): v is AttrValue {
-  return typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean'
+  return typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean' || Array.isArray(v)
 }
 
 /** Turn a written attribute into a value at a time: literals pass through, functions run. */
@@ -264,8 +267,19 @@ export function pathShape(model: SceneModel, action: Action, time: number): Shap
     }
     return { kind: 'function', at: (p) => pointOf(sampled<unknown>(model, time, () => fn(p), null)) }
   }
+  // Curves, SVG path data, travel as the line they draw (D246).
+  if (hasPathData(raw)) {
+    const points = flattenPathData(parsedPathData(raw)).flatMap((sp) => sp.points)
+    return points.length > 0 ? { kind: 'points', points } : null
+  }
   const points = pointsOf(raw)
   return points.length > 0 ? { kind: 'points', points } : null
+}
+
+/** A path's shape when it is written as curves, SVG path data (D246): its segments, read once per string, or null. */
+export function pathCurves(action: Action): Seg[] | null {
+  const raw = action.changes['shape'] as unknown
+  return hasPathData(raw) ? parsedPathData(raw) : null
 }
 
 /** How far a path's shape is shifted from how it is written: by `offset` (D192). */
@@ -290,6 +304,10 @@ export interface PathFrame {
   spans: number[]
   /** The length along the curve up to each of its points. */
   cumulative: number[]
+  /** For a curves path, where each point of the curve came from in its path data, so a point can be put in there (D246). */
+  at?: { seg: number; t: number }[]
+  /** For a curves path, the index in the curve of each anchor. */
+  anchorAt?: number[]
 }
 
 function framed(anchors: Point[], curve: Point[], spans: number[]): PathFrame {
@@ -338,6 +356,41 @@ function smoothCurve(anchors: Point[]): PathFrame {
 /** The curves built from each literal shape, which stays the same object for as long as the model does. */
 const frameCache = new WeakMap<object, { smooth: boolean; frame: PathFrame }>()
 
+/** The lines built from each curves shape, by its text. */
+const curvesFrameCache = new Map<string, PathFrame>()
+
+/** The line of a curves path (D246): its anchors, the path drawn as one polyline, each point tagged with the span of anchors it comes from and where in the path data it came from. */
+function curvesFrame(d: string): PathFrame {
+  const cached = curvesFrameCache.get(d)
+  if (cached) return cached
+  const segs = parsedPathData(d)
+  const anchors = pathAnchors(segs)
+  // The anchor each segment ends at; the closing segment of a loop ends at a stand-in after the last anchor, so its span is the last.
+  const endAnchor = new Map<number, number>()
+  anchors.forEach((a, i) => {
+    endAnchor.set(a.seg, i)
+    if (a.twin !== undefined) endAnchor.set(a.twin, anchors.length)
+  })
+  const curve: Point[] = []
+  const spans: number[] = []
+  const at: { seg: number; t: number }[] = []
+  const anchorAt = anchors.map(() => 0)
+  for (const piece of flattenPathData(segs)) {
+    piece.points.forEach((p, j) => {
+      const where = piece.at[j]!
+      curve.push(p)
+      at.push(where)
+      const end = endAnchor.get(where.seg)
+      spans.push(where.t === 0 ? Math.max(0, (end ?? 0) - 0) : Math.max(0, (end ?? 1) - 1))
+      if (end !== undefined && end < anchors.length && (where.t === 1 || where.t === 0)) anchorAt[end] = curve.length - 1
+    })
+  }
+  const frame: PathFrame = { ...framed(anchors.map((a) => ({ x: a.x, y: a.y })), curve, spans), at, anchorAt }
+  if (curvesFrameCache.size > 256) curvesFrameCache.clear()
+  curvesFrameCache.set(d, frame)
+  return frame
+}
+
 /** The line of a path, as written and shifted, or null when it has no shape to use. */
 export function pathFrame(model: SceneModel, action: Action, time: number): PathFrame | null {
   const shape = pathShape(model, action, time)
@@ -355,7 +408,8 @@ export function pathFrame(model: SceneModel, action: Action, time: number): Path
     const raw = action.changes['shape'] as unknown
     const key = typeof raw === 'object' && raw !== null ? raw : null
     const cached = key ? frameCache.get(key) : undefined
-    if (cached && cached.smooth === smooth) frame = cached.frame
+    if (hasPathData(raw)) frame = curvesFrame(raw)
+    else if (cached && cached.smooth === smooth) frame = cached.frame
     else {
       frame = smooth ? smoothCurve(shape.points) : framed(shape.points, shape.points, shape.points.map((_, i) => Math.max(0, i - 1)))
       if (key) frameCache.set(key, { smooth, frame })
@@ -364,13 +418,13 @@ export function pathFrame(model: SceneModel, action: Action, time: number): Path
   const shift = pathShift(action)
   if (shift.x === 0 && shift.y === 0) return frame
   const moved = (p: Point): Point => ({ x: p.x + shift.x, y: p.y + shift.y })
-  return { anchors: frame.anchors.map(moved), curve: frame.curve.map(moved), spans: frame.spans, cumulative: frame.cumulative }
+  return { anchors: frame.anchors.map(moved), curve: frame.curve.map(moved), spans: frame.spans, cumulative: frame.cumulative, at: frame.at, anchorAt: frame.anchorAt }
 }
 
 /** The point a fraction of the way along a frame's curve, by distance, the direction of travel there in degrees, and which piece of the curve it is on. */
-function alongFrame(frame: PathFrame, fraction: number): { point: Point; angle: number; segment: number } {
+function alongFrame(frame: PathFrame, fraction: number): { point: Point; angle: number; segment: number; t: number } {
   const { curve, cumulative } = frame
-  if (curve.length === 1) return { point: curve[0]!, angle: 0, segment: 0 }
+  if (curve.length === 1) return { point: curve[0]!, angle: 0, segment: 0, t: 0 }
   const total = cumulative[cumulative.length - 1]!
   const target = Math.max(0, Math.min(1, fraction)) * total
   let lo = 0
@@ -384,7 +438,7 @@ function alongFrame(frame: PathFrame, fraction: number): { point: Point; angle: 
   const b = curve[lo + 1]!
   const length = cumulative[lo + 1]! - cumulative[lo]!
   const t = length > 1e-9 ? (target - cumulative[lo]!) / length : 1
-  return { point: { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, angle: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI, segment: lo }
+  return { point: { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, angle: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI, segment: lo, t }
 }
 
 /**
@@ -429,6 +483,7 @@ export function pathPointAt(model: SceneModel, action: Action, progress: number,
 
 /** The curve index of a path's anchor: the frame has one point per span between anchors, or a fixed number when smooth, so the anchors sit evenly along it. */
 function anchorCurveIndex(frame: PathFrame, index: number): number {
+  if (frame.anchorAt) return frame.anchorAt[index] ?? 0
   const n = frame.anchors.length
   return n < 2 ? 0 : Math.round((index * (frame.curve.length - 1)) / (n - 1))
 }
@@ -449,6 +504,39 @@ function anchorTimes(action: Action, frame: PathFrame): number[] {
 export function anchorTime(model: SceneModel, action: Action, index: number): number {
   const frame = pathFrame(model, action, action.start)
   return frame ? (anchorTimes(action, frame)[index] ?? action.start) : action.start
+}
+
+/** Where the controls of a curves path's anchors are drawn (D246): each beside its anchor on the travelled line, with the offset, what lies under the path, and the groups applied as for the anchor; empty for any other path. */
+export function pathControlsWorld(model: SceneModel, obj: SceneObject, action: Action): { in: Point | null; out: Point | null }[] {
+  const curves = pathCurves(action)
+  const shape = pathFrame(model, action, action.start)
+  if (!curves || !shape) return []
+  const times = anchorTimes(action, shape)
+  const shift = pathShift(action)
+  return pathAnchors(curves).map((a, i) => {
+    const t = times[i] ?? action.start
+    const under = underPath(model, obj, action, t)
+    const off = pathAnchorOffset(model, obj, t)
+    const place = (p: Point | null): Point | null => {
+      if (!p) return null
+      const w = carried(model, obj, t, { x: under.x + p.x + shift.x, y: under.y + p.y + shift.y })
+      return { x: w.x + off.x, y: w.y + off.y }
+    }
+    return { in: place(a.in), out: place(a.out) }
+  })
+}
+
+/**
+ * Where a group's path is drawn from (D247): a group's x and y are a shift of its members, so
+ * its line runs from the center of their box, which is this far from where the shift alone
+ * would put it. Nothing for any other object.
+ */
+function pathAnchorOffset(model: SceneModel, obj: SceneObject, time: number): Point {
+  if (obj.className !== GROUP) return { x: 0, y: 0 }
+  const box = groupBox(model, obj, time)
+  if (!box) return { x: 0, y: 0 }
+  const at = carried(model, obj, time, positionAt(model, obj, time))
+  return { x: box.x - at.x, y: box.y - at.y }
 }
 
 /** What else puts an object where it is during a path, at a time (D196, D223, D225): its position with the path's own point taken off; under a relative path what the path adds to, under an absolute one the relative changes added on top. */
@@ -508,15 +596,18 @@ function buildTravel(model: SceneModel, obj: SceneObject, action: Action): PathF
   const anchors = shape.anchors.map((a, i) => {
     const t = times[i]!
     const under = underPath(model, obj, action, t)
-    return carried(model, obj, t, { x: under.x + a.x, y: under.y + a.y })
+    const p = carried(model, obj, t, { x: under.x + a.x, y: under.y + a.y })
+    const off = pathAnchorOffset(model, obj, t)
+    return { x: p.x + off.x, y: p.y + off.y }
   })
   const drawnAt = (t: number): Point => {
-    const pose = worldPose(model, obj, t)
-    return { x: pose.x, y: pose.y }
+    const at = carried(model, obj, t, positionAt(model, obj, t))
+    const off = pathAnchorOffset(model, obj, t)
+    return { x: at.x + off.x, y: at.y + off.y }
   }
   if (span <= 0) {
     const only = anchors[0] ?? drawnAt(action.start)
-    return framed(anchors, [only], [0])
+    return { ...framed(anchors, [only], [0]), at: shape.at ? [shape.at[0] ?? { seg: 0, t: 0 }] : undefined }
   }
   // Sampled evenly in time, for whatever else moves the object, and at the moment each point of the shape's own line is reached, so the line keeps the shape's resolution however the easing hurries, and passes through the anchors.
   const steps = Math.min(TRAVEL_MAX, Math.max(1, Math.round(span * TRAVEL_RATE)))
@@ -530,12 +621,15 @@ function buildTravel(model: SceneModel, obj: SceneObject, action: Action): PathF
   }
   const curve: Point[] = []
   const spans: number[] = []
-  for (const t of [...sampleTimes].sort((a, b) => a - b)) {
-    curve.push(drawnAt(t))
-    const { segment } = alongFrame(shape, progressAt(action, t))
+  const at: { seg: number; t: number }[] = []
+  for (const time of [...sampleTimes].sort((a, b) => a - b)) {
+    curve.push(drawnAt(time))
+    const { segment, t } = alongFrame(shape, progressAt(action, time))
     spans.push(shape.spans[Math.min(segment + 1, shape.spans.length - 1)] ?? 0)
+    // Where in the path data each travelled point lies, for a curves path (D246).
+    if (shape.at) at.push(placeBetween(shape.at[segment], shape.at[segment + 1], t) ?? shape.at[segment] ?? { seg: 0, t: 0 })
   }
-  return framed(anchors, curve, spans)
+  return { ...framed(anchors, curve, spans), at: shape.at ? at : undefined }
 }
 
 /**
@@ -544,10 +638,393 @@ function buildTravel(model: SceneModel, obj: SceneObject, action: Action): PathF
  * path then taken off, and `offset` taken off. The inverse of how the travelled line is drawn.
  */
 export function rawFromWorld(model: SceneModel, obj: SceneObject, action: Action, time: number, world: Point): Point {
-  const local = uncarried(model, obj, time, world)
+  const off = pathAnchorOffset(model, obj, time)
+  const local = uncarried(model, obj, time, { x: world.x - off.x, y: world.y - off.y })
   const shift = pathShift(action)
   const under = underPath(model, obj, action, time)
   return { x: local.x - shift.x - under.x, y: local.y - shift.y - under.y }
+}
+
+/** A Shape's points as written, at a time (D232). Only their places against each other count: see `shapeOwnPoints`. */
+export function shapePoints(model: SceneModel, obj: SceneObject, time: number): Point[] {
+  return pointsOf(valueAt(model, obj, 'points', time))
+}
+
+/** The center of the box around points, or the origin for none (D235). */
+export function pointsCenter(points: Point[]): Point {
+  if (points.length === 0) return { x: 0, y: 0 }
+  let left = Infinity
+  let right = -Infinity
+  let bottom = Infinity
+  let top = -Infinity
+  for (const p of points) {
+    left = Math.min(left, p.x)
+    right = Math.max(right, p.x)
+    bottom = Math.min(bottom, p.y)
+    top = Math.max(top, p.y)
+  }
+  return { x: (left + right) / 2, y: (bottom + top) / 2 }
+}
+
+/** Points with the center of their box at the origin: a Shape's own geometry, which its x and y place and its rotation and scale pivot on (D235). */
+export function centered(points: Point[]): Point[] {
+  const c = pointsCenter(points)
+  return c.x === 0 && c.y === 0 ? points : points.map((p) => ({ x: p.x - c.x, y: p.y - c.y }))
+}
+
+/** A Shape's points in its own space, the center of their box at its x and y (D235): only where the points are against each other counts. */
+export function shapeOwnPoints(model: SceneModel, obj: SceneObject, time: number): Point[] {
+  return centered(shapePoints(model, obj, time))
+}
+
+/** Path data read once per string, with what is drawn from it, so a frame costs nothing while the string is the same (D238). */
+const pathDataCache = new Map<string, { segs: Seg[]; own: Seg[]; pieces: Subpath[]; center: Point }>()
+
+function pathDataOf(d: string): { segs: Seg[]; own: Seg[]; pieces: Subpath[]; center: Point } {
+  let entry = pathDataCache.get(d)
+  if (!entry) {
+    if (pathDataCache.size > 256) pathDataCache.clear()
+    const segs = parsePathData(d)
+    const center = boundsOf(flattenPathData(segs).flatMap((sp) => sp.points))
+    // Only where the path lies against itself counts (D235): it is drawn with the center of its box at the origin.
+    const own = translatePathData(segs, -center.x, -center.y)
+    entry = { segs, own, pieces: flattenPathData(own), center: { x: center.x, y: center.y } }
+    pathDataCache.set(d, entry)
+  }
+  return entry
+}
+
+/** Path data read once per string: the segments as written. */
+export function parsedPathData(d: string): Seg[] {
+  return pathDataOf(d).segs
+}
+
+/** A Shape's `curves` when it holds a path: SVG path data, the full form, drawn instead of the points (D238, D244). */
+export function shapeCurves(model: SceneModel, obj: SceneObject, time: number): string | null {
+  const d = valueAt(model, obj, 'curves', time)
+  return hasPathData(d) ? d : null
+}
+
+/** A Shape's path in its own space, the center of its box at the origin (D235, D238), or null when it draws its points. */
+export function shapeOwnSegs(model: SceneModel, obj: SceneObject, time: number): Seg[] | null {
+  const d = shapeCurves(model, obj, time)
+  return d === null ? null : pathDataOf(d).own
+}
+
+/** The anchors of a Shape's path in its own space, each with its controls, or none for a points shape (D240). */
+export function shapeOwnAnchors(model: SceneModel, obj: SceneObject, time: number): Anchor[] {
+  const own = shapeOwnSegs(model, obj, time)
+  return own ? pathAnchors(own) : []
+}
+
+/** One piece of the line a Shape is drawn with: a polyline, a closed one ending at its start again; filled or not; and, from a path, where each point came from, so a point can be put in on it (D238). */
+export interface ShapePiece {
+  curve: Point[]
+  closed: boolean
+  filled: boolean
+  at?: { seg: number; t: number }[]
+}
+
+/** The pieces a Shape is drawn with, in its own space (D238): its path's subpaths, each filled as SVG fills them, or its points as one piece, filled when closed (D232); with morphs, the outline they have taken it to by this time (D257). */
+export function shapePieces(model: SceneModel, obj: SceneObject, time: number): ShapePiece[] {
+  const morphs = morphActions(obj)
+  return morphs.length > 0 ? morphedPieces(model, obj, time, morphs, morphs.length) : shapeOwnPieces(model, obj, time)
+}
+
+/** The pieces of a Shape's own outline, its curves or its points, with no morph applied. */
+export function shapeOwnPieces(model: SceneModel, obj: SceneObject, time: number): ShapePiece[] {
+  const d = shapeCurves(model, obj, time)
+  if (d !== null) return pathDataOf(d).pieces.map((sp) => ({ curve: sp.points, closed: sp.closed, filled: sp.points.length >= 3, at: sp.at }))
+  const frame = shapeFrame(model, obj, time)
+  return frame.curve.length > 0 ? [{ curve: frame.curve, closed: frame.closed, filled: frame.closed && frame.curve.length >= 4 }] : []
+}
+
+/** A Shape's morphs, in stack order (D257). */
+function morphActions(obj: SceneObject): Action[] {
+  return obj.actions.filter((a) => a.verb === 'morph' && !a.overridden).sort(byStack)
+}
+
+const targetCurvesCache = new Map<string, ShapePiece[]>()
+const targetPointsCache = new WeakMap<object, ShapePiece[]>()
+
+/** The pieces a morph's target draws, where it is written about the shape's x and y (D257): curves as path data, or points as one closed piece; null when the target draws nothing. */
+export function morphTargetPieces(model: SceneModel, action: Action, time: number): ShapePiece[] | null {
+  const raw = action.changes['to']
+  const value = raw === undefined ? undefined : resolveSource(model, raw, time, '')
+  if (hasPathData(value)) {
+    let pieces = targetCurvesCache.get(value)
+    if (!pieces) {
+      if (targetCurvesCache.size > 256) targetCurvesCache.clear()
+      pieces = flattenPathData(parsedPathData(value)).map((sp) => ({ curve: sp.points, closed: sp.closed, filled: sp.points.length >= 3, at: sp.at }))
+      targetCurvesCache.set(value, pieces)
+    }
+    return pieces
+  }
+  if (typeof value !== 'object' || value === null) return null
+  let pieces = targetPointsCache.get(value)
+  if (!pieces) {
+    const points = pointsOf(value)
+    if (points.length < 2) return null
+    pieces = [{ curve: [...points, points[0]!], closed: true, filled: points.length >= 3 }]
+    targetPointsCache.set(value, pieces)
+  }
+  return pieces
+}
+
+/** The outline of a morphing Shape at a time, among the first `count` of its morphs (D257): the one running has its say, else the last to end holds its target; before any, the shape's own; a target that draws nothing leaves the morph out. */
+function morphedPieces(model: SceneModel, obj: SceneObject, time: number, morphs: Action[], count: number): ShapePiece[] {
+  let running = -1
+  let ended = -1
+  for (let i = 0; i < count; i++) {
+    const a = morphs[i]!
+    if (a.start > time) continue
+    if (time < a.end && a.end > a.start) running = i
+    else if (ended < 0 || a.end >= morphs[ended]!.end) ended = i
+  }
+  const index = running >= 0 ? running : ended
+  if (index < 0) return shapeOwnPieces(model, obj, time)
+  const action = morphs[index]!
+  const target = morphTargetPieces(model, action, time)
+  if (!target) return morphedPieces(model, obj, time, morphs, index)
+  const ease = easingFor(action.timing, action.end - action.start)
+  const progress = running < 0 ? ease(1) : ease((time - action.start) / (action.end - action.start))
+  if (progress === 1) return target
+  // The outline the morph began from: what the morphs before it had made of the shape by then.
+  const from = morphedPieces(model, obj, action.start, morphs, index)
+  return blendPieces(cacheFor(model), action, from, target, progress)
+}
+
+interface MorphPairs {
+  target: ShapePiece[]
+  pairs: { a: Point[]; b: Point[]; closed: boolean; filled: boolean }[]
+}
+
+/** The blend of two outlines at a progress (D257): each pair of pieces resampled to one count and aligned once per morph, then every point taken straight across. */
+function blendPieces(c: Cache, action: Action, from: ShapePiece[], to: ShapePiece[], p: number): ShapePiece[] {
+  if (p === 0) return from
+  let entry = c.morphs.get(action.id)
+  if (!entry || entry.target !== to) {
+    entry = { target: to, pairs: pairPieces(from, to) }
+    c.morphs.set(action.id, entry)
+  }
+  return entry.pairs.map(({ a, b, closed, filled }) => {
+    const curve = a.map((q, i) => ({ x: q.x + (b[i]!.x - q.x) * p, y: q.y + (b[i]!.y - q.y) * p }))
+    if (closed && curve.length > 0) curve.push(curve[0]!)
+    return { curve, closed, filled }
+  })
+}
+
+/** Two outlines paired piece by piece (D257): each pair resampled along its length to one count, a piece with no partner shrinking to or growing from the other's middle; a closed pair's target reversed when it runs the other way round and turned to where the points travel least; an open pair's target reversed when its ends match better that way. */
+function pairPieces(from: ShapePiece[], to: ShapePiece[]): MorphPairs['pairs'] {
+  const out: MorphPairs['pairs'] = []
+  const n = Math.max(from.length, to.length)
+  for (let i = 0; i < n; i++) {
+    const f = from[i] ?? collapsed(to[i]!)
+    const t = to[i] ?? collapsed(from[i]!)
+    if (f.curve.length === 0 || t.curve.length === 0) continue
+    const closed = f.closed || t.closed
+    const count = Math.max(32, Math.min(256, Math.max(f.curve.length, t.curve.length)))
+    const a = closed ? resampled(ringOf(f.curve), count) : resampledOpen(f.curve, count)
+    let b = closed ? resampled(ringOf(t.curve), count) : resampledOpen(t.curve, count)
+    if (closed) {
+      if (signedArea(a) * signedArea(b) < 0) b = b.slice().reverse()
+      b = turnedToFit(a, b)
+    } else {
+      const a0 = a[0]!
+      const aN = a[a.length - 1]!
+      const b0 = b[0]!
+      const bN = b[b.length - 1]!
+      if (Math.hypot(a0.x - b0.x, a0.y - b0.y) + Math.hypot(aN.x - bN.x, aN.y - bN.y) > Math.hypot(a0.x - bN.x, a0.y - bN.y) + Math.hypot(aN.x - b0.x, aN.y - b0.y)) b = b.slice().reverse()
+    }
+    out.push({ a, b, closed, filled: (f.filled || t.filled) && closed })
+  }
+  return out
+}
+
+/** A piece shrunk to its middle: where a piece with no partner comes from or goes to. */
+function collapsed(piece: ShapePiece): ShapePiece {
+  const pts = piece.curve
+  const m = pts.reduce((s, p) => ({ x: s.x + p.x / pts.length, y: s.y + p.y / pts.length }), { x: 0, y: 0 })
+  return { curve: pts.map(() => ({ x: m.x, y: m.y })), closed: piece.closed, filled: piece.filled }
+}
+
+/** A closed piece's points once round: the return to its start, when drawn, dropped. */
+function ringOf(curve: Point[]): Point[] {
+  const first = curve[0]!
+  const last = curve[curve.length - 1]!
+  return curve.length > 1 && Math.hypot(last.x - first.x, last.y - first.y) < 1e-9 ? curve.slice(0, -1) : curve
+}
+
+/** Points along an open line, `n` of them evenly by distance, its ends included. */
+function resampledOpen(points: Point[], n: number): Point[] {
+  if (points.length === 1) return Array.from({ length: n }, () => points[0]!)
+  const cumulative = [0]
+  for (let i = 1; i < points.length; i++) cumulative.push(cumulative[i - 1]! + Math.hypot(points[i]!.x - points[i - 1]!.x, points[i]!.y - points[i - 1]!.y))
+  const total = cumulative[cumulative.length - 1]!
+  if (total <= 0) return Array.from({ length: n }, () => points[0]!)
+  const out: Point[] = []
+  let k = 0
+  for (let i = 0; i < n; i++) {
+    const target = (total * i) / (n - 1)
+    while (k < cumulative.length - 2 && cumulative[k + 1]! < target) k++
+    const a = points[k]!
+    const b = points[k + 1]!
+    const length = cumulative[k + 1]! - cumulative[k]!
+    const t = length > 1e-9 ? (target - cumulative[k]!) / length : 0
+    out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })
+  }
+  return out
+}
+
+function signedArea(points: Point[]): number {
+  let area = 0
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i]!
+    const q = points[(i + 1) % points.length]!
+    area += p.x * q.y - q.x * p.y
+  }
+  return area / 2
+}
+
+/** The ring `b` started where its points travel least to reach `a`'s, so a morph has no seam (D257). */
+function turnedToFit(a: Point[], b: Point[]): Point[] {
+  const n = a.length
+  let best = 0
+  let bestCost = Infinity
+  for (let k = 0; k < n; k++) {
+    let cost = 0
+    for (let i = 0; i < n && cost < bestCost; i++) {
+      const p = a[i]!
+      const q = b[(i + k) % n]!
+      cost += (p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y)
+    }
+    if (cost < bestCost) {
+      bestCost = cost
+      best = k
+    }
+  }
+  return best === 0 ? b : [...b.slice(best), ...b.slice(0, best)]
+}
+
+/** Every point of the line a Shape is drawn with, in its own space, for its box and its hull. */
+export function shapeCurve(model: SceneModel, obj: SceneObject, time: number): Point[] {
+  return shapePieces(model, obj, time).flatMap((p) => p.curve)
+}
+
+/** Every point of the line a Shape is drawn with, where it is drawn (D232). */
+export function shapeWorldCurve(model: SceneModel, obj: SceneObject, time: number): Point[] {
+  return shapeCurve(model, obj, time).map((p) => ownToWorld(model, obj, time, p))
+}
+
+/** A closed smooth curve through points: the centripetal Catmull-Rom spline round and back to the first point (D232). */
+function closedSmoothCurve(anchors: Point[]): PathFrame {
+  const n = anchors.length
+  if (n < 3) return framed(anchors, n > 0 ? [...anchors, anchors[0]!] : anchors, anchors.map((_, i) => i))
+  const curve: Point[] = [anchors[0]!]
+  const spans: number[] = [0]
+  const at = (i: number): Point => anchors[((i % n) + n) % n]!
+  const knot = (a: Point, b: Point): number => Math.max(1e-6, Math.sqrt(Math.hypot(b.x - a.x, b.y - a.y)))
+  const mix = (a: Point, b: Point, w: number): Point => ({ x: a.x + (b.x - a.x) * w, y: a.y + (b.y - a.y) * w })
+  for (let i = 0; i < n; i++) {
+    const p0 = at(i - 1)
+    const p1 = at(i)
+    const p2 = at(i + 1)
+    const p3 = at(i + 2)
+    const t1 = knot(p0, p1)
+    const t2 = t1 + knot(p1, p2)
+    const t3 = t2 + knot(p2, p3)
+    for (let s = 1; s <= SPAN_STEPS; s++) {
+      const t = t1 + ((t2 - t1) * s) / SPAN_STEPS
+      const a1 = mix(p0, p1, t / t1)
+      const a2 = mix(p1, p2, (t - t1) / (t2 - t1))
+      const a3 = mix(p2, p3, (t - t2) / (t3 - t2))
+      const b1 = mix(a1, a2, t / t2)
+      const b2 = mix(a2, a3, (t - t1) / (t3 - t1))
+      curve.push(mix(b1, b2, (t - t1) / (t2 - t1)))
+      spans.push(i)
+    }
+  }
+  return framed(anchors, curve, spans)
+}
+
+/** The lines built from each list of points, which stays the same object for as long as the model does. */
+const shapeFrameCache = new WeakMap<object, { closed: boolean; smooth: boolean; frame: PathFrame }>()
+
+/**
+ * The line a Shape is drawn with, in its own space (D232): its points, straight or smooth, open
+ * or closed, each point of the line tagged with the span of points it comes from, as a path's
+ * line is, so the preview edits by point.
+ */
+export function shapeFrame(model: SceneModel, obj: SceneObject, time: number): PathFrame & { closed: boolean } {
+  const raw = valueAt(model, obj, 'points', time)
+  // The points as written, placed with the center of their box at the origin (D235).
+  const anchors = centered(pointsOf(raw))
+  const closed = valueAt(model, obj, 'closed', time) !== false
+  const smooth = valueAt(model, obj, 'smooth', time) === true
+  const key = typeof raw === 'object' && raw !== null ? raw : null
+  const cached = key ? shapeFrameCache.get(key) : undefined
+  if (cached && cached.closed === closed && cached.smooth === smooth) return { ...cached.frame, closed }
+  let frame: PathFrame
+  if (smooth && anchors.length >= 3) frame = closed ? closedSmoothCurve(anchors) : smoothCurve(anchors)
+  else {
+    const curve = closed && anchors.length >= 3 ? [...anchors, anchors[0]!] : anchors
+    frame = framed(anchors, curve, curve.map((_, i) => Math.max(0, i - 1)))
+  }
+  if (key) shapeFrameCache.set(key, { closed, smooth, frame })
+  return { ...frame, closed }
+}
+
+/** A point of an object's own space where it is drawn: turned and scaled about the object's x and y as its own values say, then carried through its groups (D232). */
+function ownToWorld(model: SceneModel, obj: SceneObject, time: number, p: Point): Point {
+  const pose = ownPose(model, obj, time)
+  const a = (pose.rotation * Math.PI) / 180
+  const c = Math.cos(a)
+  const s = Math.sin(a)
+  return carried(model, obj, time, { x: pose.x + pose.scale * (c * p.x - s * p.y), y: pose.y + pose.scale * (s * p.x + c * p.y) })
+}
+
+/** Where a Shape's points are drawn (D233). */
+export function shapeWorldPoints(model: SceneModel, obj: SceneObject, time: number): Point[] {
+  return shapeOwnPoints(model, obj, time).map((p) => ownToWorld(model, obj, time, p))
+}
+
+/** Where a point of a Shape's own space is drawn (D235). */
+export function shapeWorldOf(model: SceneModel, obj: SceneObject, time: number, own: Point): Point {
+  return ownToWorld(model, obj, time, own)
+}
+
+/** The line a Shape is drawn with, where it is drawn, with its points and spans (D233). */
+export function shapeWorldFrame(model: SceneModel, obj: SceneObject, time: number): PathFrame & { closed: boolean } {
+  const f = shapeFrame(model, obj, time)
+  return { anchors: f.anchors.map((p) => ownToWorld(model, obj, time, p)), curve: f.curve.map((p) => ownToWorld(model, obj, time, p)), spans: f.spans, cumulative: f.cumulative, closed: f.closed }
+}
+
+/** A drawn place taken back into a Shape's own space: the inverse of where its points are drawn (D233). */
+export function shapeOwnFromWorld(model: SceneModel, obj: SceneObject, time: number, world: Point): Point {
+  const local = uncarried(model, obj, time, world)
+  const pose = ownPose(model, obj, time)
+  const a = (pose.rotation * Math.PI) / 180
+  const c = Math.cos(a)
+  const s = Math.sin(a)
+  const dx = local.x - pose.x
+  const dy = local.y - pose.y
+  const k = pose.scale === 0 ? 1 : pose.scale
+  return { x: (c * dx + s * dy) / k, y: (-s * dx + c * dy) / k }
+}
+
+/**
+ * The box around what an object draws, in its own space (D232): a Shape's line with its stroke,
+ * its center offset from the object's x and y; any other kind centered on them, by its size.
+ */
+export function ownBounds(model: SceneModel, obj: SceneObject, time: number): { x: number; y: number; width: number; height: number } {
+  if (obj.className === SHAPE) {
+    const curve = shapeCurve(model, obj, time)
+    if (curve.length === 0) return { x: 0, y: 0, width: 0, height: 0 }
+    const b = boundsOf(curve)
+    const stroke = Math.max(0, numValue(valueAt(model, obj, 'strokeWidth', time)))
+    return { x: b.x, y: b.y, width: b.width + stroke, height: b.height + stroke }
+  }
+  return { x: 0, y: 0, ...ownSize(model, obj, time) }
 }
 
 /** The point a fraction of the way along a polyline, by distance, and the direction there in degrees. */
@@ -848,7 +1325,8 @@ export function groupMotion(model: SceneModel, group: SceneObject, time: number)
     if (baseRotation !== 0) motion = turnedAbout(motion, c0, baseRotation)
     if (baseScale !== 1) motion = scaledAbout(motion, c0, baseScale)
   }
-  const shift = { x: numValue(baseValue(model, group, 'x', time)), y: numValue(baseValue(model, group, 'y', time)) }
+  // The shift is the group's x and y as any object's are found, moves, ranges, and paths alike (D124, D247).
+  const shift = positionAt(model, group, time)
   const actions = groupActions(group)
   for (let k = 0; k < actions.length; k++) {
     const action = actions[k]!
@@ -856,8 +1334,6 @@ export function groupMotion(model: SceneModel, group: SceneObject, time: number)
     const pivot = 'rotation' in action.changes || 'scale' in action.changes ? pivotOf(model, group, action) : null
     if (pivot && 'rotation' in action.changes) motion = turnedAbout(motion, pivot, changeOf(model, group, actions, k, 'rotation', time))
     if (pivot && 'scale' in action.changes) motion = scaledAbout(motion, pivot, factorOf(model, group, actions, k, time))
-    if ('x' in action.changes) shift.x += changeOf(model, group, actions, k, 'x', time)
-    if ('y' in action.changes) shift.y += changeOf(model, group, actions, k, 'y', time)
   }
   c.motions.set(group.id, { time, motion, shift })
   return { motion, shift }
@@ -911,8 +1387,10 @@ export function memberBox(model: SceneModel, group: SceneObject, time: number, s
     } else {
       if (!isVisibleAt(model, member, time)) continue
       const own = ownPose(model, member, time)
-      const size = ownSize(model, member, time)
-      frame = { x: own.x, y: own.y, rotation: own.rotation, width: size.width * own.scale, height: size.height * own.scale }
+      // What the member draws may sit off its x and y: a Shape's points do (D232).
+      const b = ownBounds(model, member, time)
+      const ra = (own.rotation * Math.PI) / 180
+      frame = { x: own.x + own.scale * (Math.cos(ra) * b.x - Math.sin(ra) * b.y), y: own.y + own.scale * (Math.sin(ra) * b.x + Math.cos(ra) * b.y), rotation: own.rotation, width: b.width * own.scale, height: b.height * own.scale }
     }
     // The groups that carry the member before this one place it in this group's space.
     const chain = containers(model, member)
@@ -1120,7 +1598,42 @@ export function isVisibleAt(model: SceneModel, obj: SceneObject, time: number): 
 function interpolate(from: AttrValue, to: AttrValue, p: number, type: AttrType): AttrValue {
   if (type === 'number' && typeof from === 'number' && typeof to === 'number') return from + (to - from) * p
   if (type === 'color' && typeof from === 'string' && typeof to === 'string') return lerpColor(from, to, p)
+  if (type === 'points' && Array.isArray(from) && Array.isArray(to)) return morphPoints(from, to, p)
   return p < 1 ? from : to
+}
+
+/** Points along a closed line of points, `n` of them evenly by distance, from the first point round. */
+function resampled(points: Point[], n: number): Point[] {
+  const loop = [...points, points[0]!]
+  const cumulative = [0]
+  for (let i = 1; i < loop.length; i++) cumulative.push(cumulative[i - 1]! + Math.hypot(loop[i]!.x - loop[i - 1]!.x, loop[i]!.y - loop[i - 1]!.y))
+  const total = cumulative[cumulative.length - 1]!
+  if (total <= 0) return Array.from({ length: n }, () => points[0]!)
+  const out: Point[] = []
+  let k = 0
+  for (let i = 0; i < n; i++) {
+    const target = (total * i) / n
+    while (k < cumulative.length - 2 && cumulative[k + 1]! < target) k++
+    const a = loop[k]!
+    const b = loop[k + 1]!
+    const length = cumulative[k + 1]! - cumulative[k]!
+    const t = length > 1e-9 ? (target - cumulative[k]!) / length : 0
+    out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })
+  }
+  return out
+}
+
+/** Two lists of points blended (D232): each resampled along its length to one count, then each point taken straight across. */
+function morphPoints(from: number[][], to: number[][], p: number): number[][] {
+  if (p <= 0) return from
+  if (p >= 1) return to
+  const a = pointsOf(from)
+  const b = pointsOf(to)
+  if (a.length === 0 || b.length === 0) return p < 1 ? from : to
+  const n = Math.max(a.length, b.length, 24)
+  const ra = resampled(a, n)
+  const rb = resampled(b, n)
+  return ra.map((q, i) => [q.x + (rb[i]!.x - q.x) * p, q.y + (rb[i]!.y - q.y) * p])
 }
 
 /** Parse #rgb or #rrggbb into 0..255 channels. */

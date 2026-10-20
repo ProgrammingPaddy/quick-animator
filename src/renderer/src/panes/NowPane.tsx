@@ -3,8 +3,9 @@ import { beginGesture, endGesture } from '../code/editor'
 import { BakeIcon } from '../components/BakeIcon'
 import { LinkIcon } from '../components/LinkIcon'
 import { actionLinks, objectLinks } from '../model/links'
+import { hasPathData, parsePathData, pathAnchors } from '../model/pathData'
 import { EASE_NAMES, GROUP, PIVOT_PARAMS, schemaOf, type AttrSchema, type AttrType, type AttrValue } from '../model/registry'
-import { basePivot, definingAction, isVisibleAt, pathShape, valueAt } from '../model/sample'
+import { basePivot, definingAction, isVisibleAt, pathCurves, pathShape, valueAt } from '../model/sample'
 import type { Action, SceneModel, SceneObject } from '../model/types'
 import { bakeActionProp, bakeObjectProp, canEdit, frameSeconds, roundSeconds, setActionFrom, setActionProp, setAttrsAt, setLifetime, setObjectProp } from '../project/operations'
 import { useStore } from '../state/store'
@@ -255,9 +256,9 @@ export function NowPane() {
   const obj = model && selection[0] ? model.objects.find((o) => o.name === selection[0]) : undefined
   const schema = obj ? schemaOf(obj.className) : undefined
   if (!model || !obj || !schema) {
-    return <div className="empty">{selection.length === 0 ? 'Select something to see its values at the playhead.' : 'Nothing to show for this selection.'}</div>
+    return <div className="empty">{selection.length === 0 ? 'Nothing selected.' : 'Nothing to show.'}</div>
   }
-  return <ObjectView model={model} obj={obj} attrs={schema.attrs} time={time} editable={editable} openLinks={(key) => openLinksDialog({ object: obj.name, key })} />
+  return <ObjectView model={model} obj={obj} attrs={schema.attrs.filter((a) => !a.hidden)} time={time} editable={editable} openLinks={(key) => openLinksDialog({ object: obj.name, key })} />
 }
 
 function ObjectView({ model, obj, attrs, time, editable, openLinks }: { model: SceneModel; obj: SceneObject; attrs: AttrSchema[]; time: number; editable: boolean; openLinks: (key: string) => void }) {
@@ -284,7 +285,13 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks }: { model: S
             const defining = definingAction(obj, attr.name, time)
             const status = link
               ? 'linked'
-              : defining
+              : attr.type === 'points'
+                ? `${Array.isArray(value) ? value.length : 0} points`
+                : attr.type === 'pathdata'
+                  ? hasPathData(value)
+                    ? `${pathAnchors(parsePathData(value)).length} anchors`
+                    : ''
+                  : defining
                 ? `${defining.name ? `${defining.name} ` : ''}${defining.verb}${defining.timing.relative ? ' (relative)' : ''}${defining.start > time ? ', holds its start' : defining.end > time ? ', in progress' : ', done'}`
                 : attr.name in obj.attrs
                   ? ''
@@ -321,6 +328,26 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks }: { model: S
                     }}
                   />
                 </span>
+              )
+            } else if (attr.type === 'points') {
+              // A Shape's points are written as code: a list, [[x, y], ...], or a word such as Shape.star(5, 100, 50) (D232).
+              const raw = obj.decl?.props.find((p) => p.key === attr.name)?.raw ?? ''
+              control = <Commit value={raw.replace(/\s+/g, ' ').trim()} disabled={locked} title="[[x, y], ...], or Shape.rect, circle, polygon, star" onCommit={(t) => t.trim() && writeCode(t.trim())} />
+            } else if (attr.type === 'pathdata') {
+              // A Shape's path is SVG path data, written as is; anything else, a word or a link, is written as code (D238).
+              const raw = obj.decl?.props.find((p) => p.key === attr.name)?.raw ?? ''
+              control = (
+                <Commit
+                  value={(hasPathData(value) ? value : raw).replace(/\s+/g, ' ').trim()}
+                  disabled={locked}
+                  title="SVG path data, 'M 0 0 L 100 0 ... Z'"
+                  onCommit={(t) => {
+                    const text = t.trim()
+                    if (!text) writeValue(null)
+                    else if (/^[MmLlHhVvCcSsQqTtAaZz][\s\d.,-]/.test(text)) writeValue(text)
+                    else writeCode(text)
+                  }}
+                />
               )
             } else {
               control = <Field type={attr.type} name={attr.name} value={value} model={model} disabled={locked} doc={attr.doc} range={RANGES[attr.name]} step={stepFor(attr.name)} onValue={writeValue} onCode={writeCode} />
@@ -438,13 +465,48 @@ function ActionView({ model, obj, action, index, fps, editable, openLinks }: { m
             const isPivot = (PIVOT_PARAMS as readonly string[]).includes(key)
             const type: AttrType = attr?.type ?? (typeof value === 'number' ? 'number' : typeof value === 'string' ? 'string' : 'boolean')
             const label = isPivot ? `${key} (pivot)` : key
-            if (key === 'shape' || key === 'offset') {
-              // A path's shape and its offset are written as code: points [[x, y], ...] or a function of the progress, and [dx, dy] (D192).
+            const morphTarget = key === 'to' && action.verb === 'morph'
+            if (key === 'shape' || key === 'offset' || key === 'points' || morphTarget) {
+              // A path's shape and its offset are written as code: points [[x, y], ...] or a function of the progress, and [dx, dy] (D192); a morph's target the same, curves or points (D257).
               const shape = key === 'shape' ? pathShape(model, action, action.start) : null
-              const status = key !== 'shape' ? '' : shape?.kind === 'points' ? `${shape.points.length} ${shape.points.length === 1 ? 'point' : 'points'}` : shape ? 'function' : 'none'
+              // Curves, SVG path data, count their anchors (D246).
+              const curves = key === 'shape' ? pathCurves(action) : morphTarget && hasPathData(value) ? parsePathData(value) : null
+              const status = morphTarget
+                ? curves
+                  ? `${pathAnchors(curves).length} anchors`
+                  : Array.isArray(value)
+                    ? `${value.length} points`
+                    : typeof value === 'function'
+                      ? 'linked'
+                      : 'none'
+                : key !== 'shape'
+                  ? ''
+                  : curves
+                    ? `${pathAnchors(curves).length} anchors`
+                    : shape?.kind === 'points'
+                      ? `${shape.points.length} ${shape.points.length === 1 ? 'point' : 'points'}`
+                      : shape
+                        ? 'function'
+                        : 'none'
               return (
                 <Row key={key} name={key} status={status}>
-                  <Commit value={(raw(key) ?? '').replace(/\s+/g, ' ')} disabled={locked} title={key === 'shape' ? "The shape: points [[x, y], ...] in the scene's space, or a function of the progress, (p) => [x, y]" : 'A shift of the whole path, [dx, dy]'} onCommit={(t) => (t.trim() ? setActionProp(ref, key, t.trim(), true) : setActionProp(ref, key, null))} />
+                  <Commit
+                    value={(curves ? String(action.changes[key]) : (raw(key) ?? '')).replace(/\s+/g, ' ')}
+                    disabled={locked}
+                    title={
+                      key === 'shape'
+                        ? "The shape: points [[x, y], ...] in the scene's space, curves 'M 0 0 C ...', or a function of the progress, (p) => [x, y]"
+                        : morphTarget
+                          ? "The target outline: curves 'M 0 0 C ...', points [[x, y], ...], a word such as Shape.star(5, 100, 50), or a link such as () => other.curves"
+                          : 'A shift of the whole path, [dx, dy]'
+                    }
+                    onCommit={(t) => {
+                      const text = t.trim()
+                      if (!text) setActionProp(ref, key, null)
+                      else if ((key === 'shape' || morphTarget) && /^[MmLlHhVvCcSsQqTtAaZz][\s\d.,-]/.test(text)) setActionProp(ref, key, text)
+                      else setActionProp(ref, key, text, true)
+                    }}
+                  />
                 </Row>
               )
             }

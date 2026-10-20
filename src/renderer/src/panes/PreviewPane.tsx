@@ -4,18 +4,19 @@ import { showMenu } from '../components/ContextMenu'
 import { NumberField } from '../components/NumberField'
 import { ScrollBar } from '../components/ScrollBar'
 import { groupMembers } from '../model/groups'
-import { GROUP } from '../model/registry'
-import { pathHolds, positionAt, shownValue, travelFrame, type PathFrame, type Point } from '../model/sample'
+import { anchorIsSmooth, placeBetween, type AnchorKind, type Seg } from '../model/pathData'
+import { GROUP, SHAPE } from '../model/registry'
+import { ownBounds, pathControlsWorld, pathHolds, positionAt, shapeOwnAnchors, shapeOwnPoints, shapeOwnSegs, shapeWorldCurve, shapeWorldFrame, shapeWorldOf, shapeWorldPoints, shownValue, travelFrame, type PathFrame, type Point } from '../model/sample'
 import type { SceneModel, SceneObject } from '../model/types'
 import { newProject, pickProject } from '../project/controller'
 import { DEFAULT_EASE_FRACTION, easingFor, unease } from '../model/easing'
-import { addObject, addPath, adjustDurations, appendPushedMove, beginTimed, createGroup, deleteActions, deleteObjects, duplicateObjects, inProgressActions, insertPathPoints, jumpToObject, lastActionIndex, overrideClassAction, pathDragTarget, pathEditable, pathOffset, removePathPoints, requestClasses, requestRename, resizeAttrs, resizedValues, setActionDestination, setActionTiming, setAttrsAtMany, setPathPoints, setPathShift, setPathSmooth, ungroup } from '../project/operations'
+import { addMorph, addObject, addPath, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, inProgressActions, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, pathDragTarget, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestClasses, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
 import { requestSavePreset } from '../project/userPresets'
-import { makeMover, outlineOf, resetMover, walk, type Mover, type Pushing } from '../preview/collide'
-import { SceneRenderer, type Frame, type GuideLine, type Handle } from '../preview/SceneRenderer'
+import { makeMover, outlineOf, resetMover, walk, type Mover, type Polygon, type Pushing } from '../preview/collide'
+import { SceneRenderer, type ControlHandle, type Frame, type GuideLine, type Handle } from '../preview/SceneRenderer'
 import { Viewport } from '../preview/Viewport'
 import { dropTargets } from '../state/dropTargets'
-import { OBJECT_KINDS, TRANSFORM_MODES, useStore, type ActionRef, type TransformMode } from '../state/store'
+import { OBJECT_KINDS, TRANSFORM_MODES, useStore, type ActionRef, type Pick, type TransformMode } from '../state/store'
 import { formatTime } from '../state/time'
 
 const MODE_LABEL: Record<TransformMode, string> = { all: 'Transform', move: 'Move', rotate: 'Rotate', resize: 'Resize' }
@@ -47,6 +48,14 @@ function distanceToSegment(p: Point, a: Point, b: Point): number {
   const length2 = dx * dx + dy * dy
   const t = length2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / length2)) : 0
   return Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t))
+}
+
+/** How far along the segment from a to b the nearest point to p lies, 0 to 1. */
+function fractionAlong(a: Point, b: Point, p: Point): number {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const length2 = dx * dx + dy * dy
+  return length2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / length2)) : 0
 }
 
 /** The index of the segment, from point i to point i + 1, within `radius` of a place, or null. */
@@ -82,6 +91,39 @@ function simplify(points: Point[], tolerance: number): Point[] {
 }
 
 type MenuItems = Parameters<typeof showMenu>[1]
+
+/** What a press on an object picks (D247): the object, the outermost group that holds it, or every object of its first class. */
+function pickTargets(model: SceneModel, name: string, pick: Pick): string[] {
+  if (pick === 'group') {
+    const holders = model.objects.filter((o) => o.className === GROUP && groupMembers(model, o.name).includes(name)).map((o) => o.name)
+    const outer = holders.find((h) => !holders.some((other) => other !== h && groupMembers(model, other).includes(h)))
+    return [outer ?? name]
+  }
+  if (pick === 'class') {
+    const cls = model.objects.find((o) => o.name === name)?.classes[0]
+    const members = cls ? (model.classes.get(cls) ?? []) : []
+    return members.length > 0 ? members : [name]
+  }
+  return [name]
+}
+
+const PICK_LABEL: Record<Pick, string> = { object: 'Object', group: 'Group', class: 'Class' }
+const PICK_TIP: Record<Pick, string> = { object: 'A click picks the object', group: 'A click picks the group it is in', class: 'A click picks every object of its class' }
+
+/** Where a press on a line puts a new point: after a span's point of a points shape or path (D233), or on a segment of curves, a fraction of the way along it (D240, D246). */
+type LineInsert = { kind: 'points'; at: number } | { kind: 'curves'; seg: number; t: number }
+
+/** A control shown for a picked anchor: whose, which side, and where (D240). */
+type AnchorHandle = ControlHandle & { index: number; which: 'in' | 'out' }
+
+/** The selected Shape in the Shape tool: its line where it is drawn, what can be edited, the pieces of its line with where each point came from, and the controls shown (D233, D240). */
+interface ShownShape {
+  name: string
+  frame: PathFrame & { closed: boolean }
+  editable: 'points' | 'curves' | null
+  pieces: { curve: Point[]; at: { seg: number; t: number }[] }[]
+  handles: AnchorHandle[]
+}
 
 interface Drag {
   /** `plain`: edit the values at the playhead. `timed`: Shift, make an action. `destination`: the selected action's end follows. */
@@ -121,6 +163,10 @@ interface Drag {
   movers: { dragged: Mover; obstacles: Mover[] } | null
   /** How far the dragged thing's place at the time being edited is from where its animation starts: an animation's push sweeps from the start (D206). */
   sweepOrigin: Point
+  /** A Shape being resized: its points, or its path, as the drag began, when they are written out, with the center of its box and its scale in its own space (D233, D240). */
+  shapeBase: { points: Point[] | null; segs: Seg[] | null; center: Point; scale: number } | null
+  /** The target of the morph a Shift resize of a Shape wrote, as it began, which the drag scales (D257). */
+  morphBase?: ShapeEditBase | null
   /** The pointer's last angle around the gizmo center, and the turn so far, in radians; turns add up past a full circle (D105). */
   lastAngle: number
   turned: number
@@ -262,7 +308,12 @@ export function PreviewPane() {
   const [altDown, setAltDown] = useState(false)
   const [dragging, setDragging] = useState<'aspect' | null>(null)
   /** The paths shown right now (D194, D209): the selected one, with its line and anchors and whether its points can be edited, and the others, lines only. */
-  const pathRef = useRef<{ primary: { ref: ActionRef; frame: PathFrame; editable: boolean } | null; others: { ref: ActionRef; frame: PathFrame }[] } | null>(null)
+  const pathRef = useRef<{ primary: { ref: ActionRef; frame: PathFrame; editable: boolean; kind: 'points' | 'curves' | null; handles: AnchorHandle[] } | null; others: { ref: ActionRef; frame: PathFrame }[] } | null>(null)
+  /** The selected Shape in Edit mode, with its line where it is drawn and what can be edited (D233, D240). */
+  const shapeRef = useRef<ShownShape | null>(null)
+  /** The Shape the Object tool is drawing, point by point (D233). */
+  const shapeDraftRef = useRef<string | null>(null)
+  const [drafting, setDrafting] = useState(false)
   /** A line being drawn for the selected path, in pane pixels, until the pointer is let go (D194). */
   const [sketch, setSketch] = useState<{ x: number; y: number }[] | null>(null)
   const [marquee, setMarquee] = useState<Marquee | null>(null)
@@ -285,6 +336,35 @@ export function PreviewPane() {
   const setTool = useStore((s) => s.setTool)
   const addKind = useStore((s) => s.addKind)
   const pathMode = useStore((s) => s.pathMode)
+  const shapeMode = useStore((s) => s.shapeMode)
+  const pick = useStore((s) => s.pick)
+  const setPick = useStore((s) => s.setPick)
+  const setShapeMode = useStore((s) => s.setShapeMode)
+  const notice = useStore((s) => s.notice)
+  // A notice, about an import, stays for a moment (D241).
+  useEffect(() => {
+    if (!notice) return
+    const timer = setTimeout(() => useStore.getState().setNotice(null), 6000)
+    return () => clearTimeout(timer)
+  }, [notice])
+  // A Shape being drawn ends with Enter, closed, or Escape, as a line (D233); leaving the Shape tool's Create mode ends it as a line.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!shapeDraftRef.current || (e.key !== 'Enter' && e.key !== 'Escape')) return
+      const t = e.target
+      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || (t instanceof HTMLElement && t.isContentEditable)) return
+      endShapeDraft(e.key === 'Enter')
+      if (e.key === 'Enter') e.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // The draft lives in a ref; the handler reads it when a key comes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    if (shapeDraftRef.current && (tool !== 'shape' || shapeMode !== 'create')) endShapeDraft(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, shapeMode])
   const showPaths = useStore((s) => s.showPaths)
   const setPathMode = useStore((s) => s.setPathMode)
   const toggleShowPaths = useStore((s) => s.toggleShowPaths)
@@ -311,7 +391,8 @@ export function PreviewPane() {
     const paint = () => {
       const s = useStore.getState()
       // While Shift looks ahead, whatever was alive where the gesture began stays drawn (D138).
-      renderer.update(s.model, s.time, s.selection, s.transformMode, 1 / viewport.zoom, axesRef.current, gestureRef.current?.restore, s.anchored)
+      // The selection shows in every tool but the Shape tool, whose handles show it; the box's handles belong to Select alone (D208, D236, D247).
+      renderer.update(s.model, s.time, s.tool === 'shape' ? [] : s.selection, s.transformMode, 1 / viewport.zoom, axesRef.current, gestureRef.current?.restore, s.anchored, s.tool === 'select')
       // The selected path, or the first path of the selected object, shows its shape; with the path itself selected and its points written out, each point wears a handle (D192, D194).
       // Which paths show (D205, D209): with the Path tool, every object's, but for those hidden for now; otherwise the selected object's when Paths is on; and the selected path always. The selected path carries the handles.
       const found: { ref: ActionRef; frame: PathFrame; selected: boolean }[] = []
@@ -334,15 +415,67 @@ export function PreviewPane() {
         }
       }
       const lead = found.find((p) => p.selected)
-      const primary = lead ? { ref: lead.ref, frame: lead.frame, editable: pathEditable(lead.ref) } : null
+      let primary: NonNullable<typeof pathRef.current>['primary'] = null
+      const pathRound: boolean[] = []
+      if (lead && s.model) {
+        const kind = pathEditableKind(lead.ref)
+        const handles: AnchorHandle[] = []
+        // A curves path shows the controls of its picked anchors (D246), and its smooth anchors round (D252).
+        if (kind === 'curves') {
+          const o = s.model.objects.find((x) => x.name === lead.ref.object)
+          const action = o?.actions[lead.ref.index]
+          if (o && action)
+            pathControlsWorld(s.model, o, action).forEach((c, index) => {
+              const at = lead.frame.anchors[index]
+              if (!at) return
+              pathRound[index] = anchorIsSmooth({ x: at.x, y: at.y, in: c.in, out: c.out })
+              if (!s.pathPoints.includes(index)) return
+              if (c.in) handles.push({ index, which: 'in', anchor: at, point: c.in })
+              if (c.out) handles.push({ index, which: 'out', anchor: at, point: c.out })
+            })
+        }
+        primary = { ref: lead.ref, frame: lead.frame, editable: kind !== null, kind, handles }
+      }
       const others = found.filter((p) => !p.selected).map((p) => ({ ref: p.ref, frame: p.frame }))
       pathRef.current = primary || others.length > 0 ? { primary, others } : null
       // A path whose shape is code has no points to drag and is drawn dashed to say so (D226).
-      renderer.setPath(primary ? primary.frame.curve : null, 1 / viewport.zoom, primary?.editable ? primary.frame.anchors : null, s.pathPoints, !!primary && !primary.editable)
+      renderer.setPath(primary ? primary.frame.curve : null, 1 / viewport.zoom, primary?.editable ? primary.frame.anchors : null, s.pathPoints, !!primary && !primary.editable, primary?.handles ?? [], pathRound)
       renderer.setOtherPaths(
         others.map((o) => ({ points: o.frame.curve, dashed: !pathEditable(o.ref) })),
         1 / viewport.zoom,
       )
+      // The Shape tool shows the selected Shape's points as handles when they are written out, in Create mode and in Edit mode (D233, D236), or its curves' anchors, with the controls of the picked ones (D240).
+      let shape: ShownShape | null = null
+      const shapeRound: boolean[] = []
+      const model = s.model
+      // With one of the shape's morphs selected, the handles are its target's (D257).
+      if (model && s.tool === 'shape' && s.selection.length === 1 && (s.selectedActions.length === 0 || shapeMorphSelected(s.selection[0]!))) {
+        const o = model.objects.find((x) => x.name === s.selection[0] && x.className === SHAPE)
+        if (o) {
+          const editable = shapeEditable(o.name)
+          const frame = shapeWorldFrame(model, o, s.time)
+          const handles: ShownShape['handles'] = []
+          let pieces: ShownShape['pieces'] = [{ curve: frame.curve, at: [] }]
+          if (editable === 'curves') {
+            const world = (p: Point): Point => shapeWorldOf(model, o, s.time, p)
+            const anchors = shapeEditAnchors(o.name)
+            frame.anchors = anchors.map(world)
+            pieces = shapeEditPieces(o.name).map((piece) => ({ curve: piece.curve.map(world), at: piece.at ?? [] }))
+            frame.curve = pieces.flatMap((piece) => piece.curve)
+            anchors.forEach((a, index) => {
+              // A smooth anchor is drawn round (D252); a picked one shows its controls.
+              shapeRound[index] = anchorIsSmooth(a)
+              if (!s.pathPoints.includes(index)) return
+              const at = frame.anchors[index]!
+              if (a.in) handles.push({ index, which: 'in', anchor: at, point: world(a.in) })
+              if (a.out) handles.push({ index, which: 'out', anchor: at, point: world(a.out) })
+            })
+          }
+          shape = { name: o.name, frame, editable, pieces, handles }
+        }
+      }
+      shapeRef.current = shape
+      renderer.setShapeHandles(shape?.editable ? shape.frame.anchors : null, 1 / viewport.zoom, shape?.editable ? s.pathPoints : [], shape?.handles ?? [], shapeRound)
       viewport.render()
     }
     paintRef.current = paint
@@ -565,9 +698,8 @@ export function PreviewPane() {
         if (points.length === 0) return
         beginGesture()
         insertPathPoints(ref, count, points)
-        // A drawn line is a curve: the path turns smooth, once (D199).
-        const action = useStore.getState().model?.objects.find((o) => o.name === ref.object)?.actions[ref.index]
-        if (moved && action && action.changes['smooth'] !== true) setPathSmooth(ref, true)
+        // A drawn line is a curve: the path turns smooth, as curves with handles (D249).
+        if (moved) smoothPath(ref)
         endGesture()
         useStore.getState().setPathPoints([count + points.length - 1])
       },
@@ -645,7 +777,7 @@ export function PreviewPane() {
    * pointer rather than by how far it went: for an object pressed mid-path and shown at the
    * path's end, which then lands where the pointer is, as a move's end does (D102, D205).
    */
-  const beginPathEdit = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, world: Point, point: number | null, insertAt: number | null, toggle: boolean, follow = false) => {
+  const beginPathEdit = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, world: Point, point: number | null, insert: LineInsert | null, toggle: boolean, follow = false) => {
     const viewport = viewportRef.current
     if (!viewport) return
     const bounds = host.getBoundingClientRect()
@@ -659,11 +791,20 @@ export function PreviewPane() {
       }
       beginGesture()
       indices = s.pathPoints.includes(point) ? s.pathPoints : [point]
-    } else if (insertAt !== null) {
-      // A click on the line between two anchors puts a new anchor there, which the drag then carries.
+    } else if (insert !== null) {
+      // A click on the line between two anchors puts a new anchor there, which the drag then carries; on curves the curve is kept (D246).
       beginGesture()
-      insertPathPoints(ref, insertAt, [gridded(world)])
-      indices = [insertAt]
+      if (insert.kind === 'points') {
+        insertPathPoints(ref, insert.at, [gridded(world)])
+        indices = [insert.at]
+      } else {
+        const index = insertPathAnchor(ref, insert.seg, insert.t)
+        if (index === null) {
+          endGesture()
+          return
+        }
+        indices = [index]
+      }
     } else return
     useStore.getState().setPathPoints(indices)
     const frame0 = frameOf(ref)
@@ -683,6 +824,266 @@ export function PreviewPane() {
       () => endGesture(),
     )
   }
+
+  /**
+   * Draw a Shape with the Object tool (D233): the first press starts one where the pointer is,
+   * each press after adds a corner there, a drag draws a curve kept as its corners, and a press
+   * on the first corner closes it. Enter closes, Escape leaves it a line.
+   */
+  /** A press on empty space (D89, D255): a drag draws a box in pane pixels and hands over its corners in the scene, `a` the top left and `b` the bottom right, or null for a click. */
+  const beginMarquee = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, located: { paneX: number; paneY: number }, onEnd: (box: { a: Point; b: Point } | null) => void) => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const start = { x: located.paneX, y: located.paneY }
+    let moved = false
+    let rect: Marquee | null = null
+    capture(
+      host,
+      e.pointerId,
+      (ev) => {
+        const bounds = host.getBoundingClientRect()
+        const p = { x: ev.clientX - bounds.left, y: ev.clientY - bounds.top }
+        if (!moved && Math.hypot(p.x - start.x, p.y - start.y) < 3) return
+        moved = true
+        rect = { x0: start.x, y0: start.y, x1: p.x, y1: p.y }
+        setMarquee(rect)
+      },
+      () => {
+        const box = moved && rect ? { a: viewport.toWorld(Math.min(rect.x0, rect.x1), Math.min(rect.y0, rect.y1)), b: viewport.toWorld(Math.max(rect.x0, rect.x1), Math.max(rect.y0, rect.y1)) } : null
+        onEnd(box)
+        setMarquee(null)
+      },
+    )
+  }
+
+  /** Whether a point of the scene lies in a box from `beginMarquee`. */
+  const inBox = (p: Point, box: { a: Point; b: Point }): boolean => p.x >= box.a.x && p.x <= box.b.x && p.y >= box.b.y && p.y <= box.a.y
+
+  const beginShapeDraw = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, world: Point) => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const s = useStore.getState()
+    let name = shapeDraftRef.current
+    if (name && !s.model?.objects.some((o) => o.name === name)) name = null
+    if (name && s.model) {
+      const obj = s.model.objects.find((o) => o.name === name)!
+      const anchor = shapeOwnAnchors(s.model, obj, s.time)[0]
+      const first = anchor ? shapeWorldOf(s.model, obj, s.time, anchor) : shapeWorldPoints(s.model, obj, s.time)[0]
+      if (first && shapeAnchorCount(name) >= 3 && Math.hypot(first.x - world.x, first.y - world.y) <= 8 / viewport.zoom) {
+        finishShape(name, true)
+        shapeDraftRef.current = null
+        setDrafting(false)
+        return
+      }
+      appendShapePoints(name, [gridded(world)])
+    } else {
+      name = beginShape(world.x, world.y)
+      if (!name) return
+      shapeDraftRef.current = name
+      setDrafting(true)
+    }
+    const drawn = name
+    const bounds = host.getBoundingClientRect()
+    const samples: Point[] = [world]
+    const pane: { x: number; y: number }[] = [{ x: e.clientX - bounds.left, y: e.clientY - bounds.top }]
+    let moved = false
+    capture(
+      host,
+      e.pointerId,
+      (ev) => {
+        if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 4) return
+        moved = true
+        samples.push(viewport.toWorld(ev.clientX - bounds.left, ev.clientY - bounds.top))
+        pane.push({ x: ev.clientX - bounds.left, y: ev.clientY - bounds.top })
+        setSketch([...pane])
+      },
+      () => {
+        setSketch(null)
+        if (!moved) return
+        // A drawn line is its corners, smoothed as a run from the corner it left (D249).
+        const points = simplify(samples, 4 / viewport.zoom).slice(1)
+        if (points.length === 0) return
+        const before = shapeAnchorCount(drawn)
+        beginGesture()
+        appendShapePoints(drawn, points)
+        const after = shapeAnchorCount(drawn)
+        const from = Math.max(0, before - 1)
+        if (after > before) smoothShapeRun(drawn, Array.from({ length: after - from }, (_, k) => from + k))
+        endGesture()
+      },
+    )
+  }
+
+  /** Finish the Shape being drawn, closed when it can be and `close` says so, else as a line (D233). */
+  const endShapeDraft = (close: boolean) => {
+    const name = shapeDraftRef.current
+    shapeDraftRef.current = null
+    setDrafting(false)
+    if (!name) return
+    const s = useStore.getState()
+    const obj = s.model?.objects.find((o) => o.name === name)
+    if (!obj || !s.model) return
+    finishShape(name, close && shapeAnchorCount(name) >= 3)
+  }
+
+  /**
+   * Edit a Shape's points as a path's (D233): drag the point `point`, with every other picked
+   * one; or put a new point in at `insertAt`, where the pointer is, and drag it. With `toggle`,
+   * a click picks the point or lets it go, and nothing moves.
+   */
+  const beginShapePointEdit = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, name: string, world: Point, point: number | null, insert: LineInsert | null, toggle: boolean, morph = false) => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const bounds = host.getBoundingClientRect()
+    const s = useStore.getState()
+    let indices: number[]
+    if (point !== null) {
+      if (toggle) {
+        s.setPathPoints(s.pathPoints.includes(point) ? s.pathPoints.filter((i) => i !== point) : [...s.pathPoints, point])
+        return
+      }
+      beginGesture()
+      if (morph && !shapeMorphSelected(name)) {
+        // Shift with a point writes a morph from the playhead, for the proposed length, and the drag shapes its target (D257).
+        const gesture = gestureRef.current
+        if (addMorph(name, gesture ? gesture.from : s.time, gesture?.duration) === null) {
+          endGesture()
+          return
+        }
+        indices = [point]
+      } else indices = s.pathPoints.includes(point) ? s.pathPoints : [point]
+    } else if (insert !== null) {
+      beginGesture()
+      if (insert.kind === 'points') {
+        insertShapePoints(name, insert.at, [gridded(world)])
+        indices = [insert.at]
+      } else {
+        const index = insertShapeAnchor(name, insert.seg, insert.t)
+        if (index === null) {
+          endGesture()
+          return
+        }
+        indices = [index]
+      }
+    } else return
+    useStore.getState().setPathPoints(indices)
+    const fresh = useStore.getState()
+    const freshModel = fresh.model
+    const obj = freshModel?.objects.find((o) => o.name === name)
+    const anchors = obj && freshModel ? (shapeEditable(name) === 'curves' ? shapeEditAnchors(name).map((a) => shapeWorldOf(freshModel, obj, fresh.time, a)) : shapeWorldPoints(freshModel, obj, fresh.time)) : []
+    const starts = indices.map((i) => anchors[i] ?? world)
+    // Every write of the drag is computed from where it began, so nothing drifts (D243).
+    const base = shapeEditBase(name) ?? undefined
+    let dragged = false
+    capture(
+      host,
+      e.pointerId,
+      (ev) => {
+        if (!dragged && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 3) return
+        dragged = true
+        const now = viewport.toWorld(ev.clientX - bounds.left, ev.clientY - bounds.top)
+        const dx = now.x - world.x
+        const dy = now.y - world.y
+        setShapePoints(
+          name,
+          indices.map((index, k) => ({ index, world: gridded({ x: starts[k]!.x + dx, y: starts[k]!.y + dy }) })),
+          base,
+        )
+      },
+      () => endGesture(),
+    )
+  }
+
+  /** Drag a control of an anchor of a curves shape (D240): a smooth anchor's other control turns to stay in line, except while Alt is held, whenever in the drag that is, when this one moves alone; a corner's moves alone (D252). */
+  const beginShapeHandleDrag = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, name: string, handle: AnchorHandle, world: Point) => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const bounds = host.getBoundingClientRect()
+    const base = shapeEditBase(name) ?? undefined
+    const joined = shapeAnchorSmooth(name, handle.index)
+    beginGesture()
+    capture(
+      host,
+      e.pointerId,
+      (ev) => {
+        const now = viewport.toWorld(ev.clientX - bounds.left, ev.clientY - bounds.top)
+        setShapeHandle(name, handle.index, handle.which, { x: handle.point.x + (now.x - world.x), y: handle.point.y + (now.y - world.y) }, base, joined && !ev.altKey)
+      },
+      () => endGesture(),
+    )
+  }
+
+  /** Drag a control of an anchor of a curves path (D246), with the same rules, Alt included. */
+  const beginPathHandleDrag = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, handle: AnchorHandle, world: Point) => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const bounds = host.getBoundingClientRect()
+    const joined = pathAnchorSmooth(ref, handle.index)
+    beginGesture()
+    capture(
+      host,
+      e.pointerId,
+      (ev) => {
+        const now = viewport.toWorld(ev.clientX - bounds.left, ev.clientY - bounds.top)
+        setPathHandle(ref, handle.index, handle.which, { x: handle.point.x + (now.x - world.x), y: handle.point.y + (now.y - world.y) }, joined && !ev.altKey)
+      },
+      () => endGesture(),
+    )
+  }
+
+  /** Where a press on a path's line puts a new point: on a curves path, on the segment there, a fraction of the way along it; else after the span's anchor (D194, D246). */
+  const pathInsertionAt = (frame: PathFrame, segment: number, world: Point): LineInsert => {
+    if (frame.at) {
+      const place = placeBetween(frame.at[segment], frame.at[segment + 1], fractionAlong(frame.curve[segment]!, frame.curve[segment + 1]!, world))
+      if (place) return { kind: 'curves', seg: place.seg, t: place.t }
+    }
+    return { kind: 'points', at: (frame.spans[segment + 1] ?? 0) + 1 }
+  }
+
+  /** Where a press within `radius` of a shape's line puts a new point, or null (D233, D240). */
+  const insertionAt = (shape: ShownShape, world: Point, radius: number): LineInsert | null => {
+    if (shape.editable === 'points') {
+      const segment = nearestSegment(shape.frame.curve, world, radius)
+      return segment === null ? null : { kind: 'points', at: (shape.frame.spans[segment + 1] ?? 0) + 1 }
+    }
+    if (shape.editable !== 'curves') return null
+    for (const piece of shape.pieces) {
+      const segment = nearestSegment(piece.curve, world, radius)
+      if (segment === null) continue
+      // How far along the drawn piece the press is, then along the segment it came from.
+      const place = placeBetween(piece.at[segment], piece.at[segment + 1], fractionAlong(piece.curve[segment]!, piece.curve[segment + 1]!, world))
+      return place ? { kind: 'curves', seg: place.seg, t: place.t } : null
+    }
+    return null
+  }
+
+  /** What a Shape's menu adds (D233, D234, D252, D253): Smooth or Straighten the whole shape, and on a line, one with no fill, Close or Open it; a Rect or a Circle offers to become one. */
+  const shapeItems = (name: string): MenuItems => {
+    const obj = useStore.getState().model?.objects.find((o) => o.name === name)
+    if (!obj) return []
+    if (obj.className === 'Rect' || obj.className === 'Circle') return [{ label: 'Convert to shape', run: () => convertToShape(name) }]
+    if (obj.className !== SHAPE || shapeEditable(name) === null) return []
+    const closed = isShapeClosed(name)
+    const line = obj.attrs['fill'] === 'none'
+    return [
+      { label: 'Smooth shape', run: () => smoothShape(name) },
+      { label: 'Straighten shape', run: () => straightenShape(name) },
+      ...(line ? [{ label: closed ? 'Open line' : 'Close line', run: () => setShapeClosed(name, !closed) }] : []),
+    ]
+  }
+
+  /** The items of a point's menu, by what it is (D252): Smooth point, with its controls in one line; Corner point, each control turned toward its neighbour, to move alone; Straighten point, lines on both sides. An end of a line has one side, so it offers only Straighten point, when that side is a curve. */
+  const pointItems = (kind: AnchorKind, curved: boolean, set: (kind: 'smooth' | 'corner' | 'straight') => void): MenuItems => {
+    if (kind === 'end') return curved ? [{ label: 'Straighten point', run: () => set('straight') }] : []
+    return [
+      ...(kind !== 'smooth' ? [{ label: 'Smooth point', run: () => set('smooth') }] : []),
+      ...(kind === 'smooth' ? [{ label: 'Corner point', run: () => set('corner') }] : []),
+      ...(kind !== 'straight' ? [{ label: 'Straighten point', run: () => set('straight') }] : []),
+    ]
+  }
+
+  /** The item of a segment's menu (D252): Curve segment, or Straighten segment. */
+  const segmentItems = (kind: 'curve' | 'line', set: (kind: 'curve' | 'line') => void): MenuItems => [kind === 'line' ? { label: 'Curve segment', run: () => set('curve') } : { label: 'Straighten segment', run: () => set('line') }]
 
   /** Edit path for each path an object has, and Add path (D194). */
   const pathItems = (name: string): MenuItems => {
@@ -742,6 +1143,60 @@ export function PreviewPane() {
       addObject(store.addKind, located.world.x, located.world.y)
       return
     }
+    // The Shape tool (D236): Create draws a shape point by point; Edit works on the selected shape's points, a press on a Shape picks it, and empty space lets the points go.
+    if (store.tool === 'shape') {
+      const shown = shapeRef.current
+      const pixel = 1 / viewport.zoom
+      const creating = store.shapeMode === 'create'
+      if (shown?.editable && (!e.shiftKey || !creating)) {
+        // A control of a picked anchor first, then a point, then, in Edit mode, the line (D240). In Create mode a press on the first corner of the shape being drawn closes it (D233); any other point drags, in either mode. Shift with a point in Edit mode writes a morph and drags its target (D257).
+        const control = e.shiftKey ? null : nearestPoint(shown.handles.map((h) => h.point), located.world, 8 * pixel)
+        if (control !== null) {
+          beginShapeHandleDrag(host, e, shown.name, shown.handles[control]!, located.world)
+          return
+        }
+        const point = nearestPoint(shown.frame.anchors, located.world, 8 * pixel)
+        const closing = creating && shapeDraftRef.current === shown.name && point === 0 && shown.frame.anchors.length >= 3
+        if (point !== null && !closing) {
+          beginShapePointEdit(host, e, shown.name, located.world, point, null, e.ctrlKey || e.metaKey, e.shiftKey)
+          return
+        }
+        const insert = creating || e.shiftKey ? null : insertionAt(shown, located.world, 6 * pixel)
+        if (insert && !(e.ctrlKey || e.metaKey)) {
+          beginShapePointEdit(host, e, shown.name, located.world, null, insert, false)
+          return
+        }
+        if (e.shiftKey) return
+      }
+      if (creating) {
+        beginShapeDraw(host, e, located.world)
+        return
+      }
+      const under = located.hit ? store.model?.objects.find((o) => o.name === located.hit) : undefined
+      if (under?.className === SHAPE) {
+        // A press on the shape picks it; one of its morphs, when selected, stays selected, so its target stays in hand (D257).
+        if (!store.selection.includes(under.name) || (store.selectedActions.length > 0 && !shapeMorphSelected(under.name))) store.select([under.name])
+        return
+      }
+      // Empty space in Edit mode (D255): a drag boxes the points of the shape in hand, or, past them, the shapes it touches; a click lets the points go.
+      const extend = e.ctrlKey || e.metaKey
+      beginMarquee(host, e, located, (box) => {
+        const s = useStore.getState()
+        const edited = shapeRef.current
+        if (!box) {
+          if (s.pathPoints.length > 0) s.setPathPoints([])
+          return
+        }
+        const inside = edited?.editable ? edited.frame.anchors.map((p, i) => (inBox(p, box) ? i : -1)).filter((i) => i >= 0) : []
+        if (inside.length > 0) {
+          s.setPathPoints(extend ? [...new Set([...s.pathPoints, ...inside])] : inside)
+          return
+        }
+        const names = renderer.objectsIn({ left: box.a.x, right: box.b.x, top: box.a.y, bottom: box.b.y }).filter((n) => s.model?.objects.find((o) => o.name === n)?.className === SHAPE)
+        if (names.length > 0 || !extend) s.select(extend ? [...s.selection, ...names.filter((n) => !s.selection.includes(n))] : names)
+      })
+      return
+    }
     const model = store.model
     if (!model) return
 
@@ -756,6 +1211,14 @@ export function PreviewPane() {
     const pathAction = store.selectedActions.length === 1 ? store.selectedActions[0]! : null
     const pathTool = store.tool === 'path'
     const pixel = 1 / viewport.zoom
+    // A control of a picked anchor of the selected curves path comes first (D246).
+    if (shown?.primary && shown.primary.handles.length > 0 && !e.shiftKey && !(pathTool && store.pathMode === 'move')) {
+      const control = nearestPoint(shown.primary.handles.map((h) => h.point), located.world, 8 * pixel)
+      if (control !== null) {
+        beginPathHandleDrag(host, e, shown.primary.ref, shown.primary.handles[control]!, located.world)
+        return
+      }
+    }
     const candidates = [...(shown?.primary ? [shown.primary] : []), ...(pathTool ? (shown?.others ?? []) : [])]
     let hitPath: { ref: ActionRef; frame: PathFrame; point: number | null; segment: number | null } | null = null
     for (const p of candidates) {
@@ -783,7 +1246,7 @@ export function PreviewPane() {
         }
         if (!ctrlHeld) {
           // A click on the line puts a point there and drags it.
-          beginPathEdit(host, e, hitPath.ref, located.world, null, (hitPath.frame.spans[hitPath.segment! + 1] ?? 0) + 1, false)
+          beginPathEdit(host, e, hitPath.ref, located.world, null, pathInsertionAt(hitPath.frame, hitPath.segment!, located.world), false)
           return
         }
       }
@@ -793,18 +1256,42 @@ export function PreviewPane() {
     if (pathTool) {
       const editing = store.pathMode === 'edit'
       if (located.hit) {
-        const owner = model.objects.find((o) => o.name === located.hit)
+        const pressed = model.objects.find((o) => o.name === located.hit)
+        if (!pressed) return
+        // What the press picks (D247): the object's own path, its outermost group's, or its class's, a relative path every member follows.
+        const cls = store.pick === 'class' ? pressed.classes[0] : undefined
+        if (cls) {
+          const classPaths = pressed.actions.map((a, index) => ({ a, index })).filter(({ a }) => a.verb === 'path' && a.classAction?.className === cls && !a.overridden)
+          const found = classPaths[classPaths.length - 1]
+          if (found) {
+            if (!(pathAction && pathAction.object === pressed.name && pathAction.index === found.index)) store.selectAction(pressed.name, found.index)
+            return
+          }
+          if (!editing) return
+          addClassPath(cls, store.time)
+          const fresh = useStore.getState()
+          const again = fresh.model?.objects.find((o) => o.name === pressed.name)
+          const made = again ? again.actions.map((a, index) => ({ a, index })).filter(({ a }) => a.verb === 'path' && a.classAction?.className === cls && !a.overridden).pop() : undefined
+          if (again && fresh.model && made) {
+            fresh.selectAction(pressed.name, made.index)
+            beginStroke(host, e, { object: pressed.name, index: made.index }, positionAt(fresh.model, again, store.time), false)
+          }
+          return
+        }
+        const owner = store.pick === 'group' ? model.objects.find((o) => o.name === pickTargets(model, pressed.name, 'group')[0]) : pressed
         if (!owner) return
         const paths = owner.actions.map((a, index) => ({ a, index })).filter(({ a }) => a.verb === 'path' && !a.classAction && !a.overridden)
         if (paths.length > 0) {
           const holding = pathHolds(owner, 'x', store.time)
-          const pick = paths.find(({ a }) => a === holding) ?? paths[0]!
-          if (!(pathAction && pathAction.object === owner.name && pathAction.index === pick.index)) store.selectAction(owner.name, pick.index)
+          const chosen = paths.find(({ a }) => a === holding) ?? paths[0]!
+          if (!(pathAction && pathAction.object === owner.name && pathAction.index === chosen.index)) store.selectAction(owner.name, chosen.index)
           return
         }
         if (!editing) return
         const index = addPath(owner.name, store.time)
-        if (index !== null) beginStroke(host, e, { object: owner.name, index }, positionAt(useStore.getState().model ?? model, owner, store.time), false)
+        // A group's line runs from the middle of its members (D247).
+        const from = owner.className === GROUP ? (renderer.frameOf(owner.name) ?? positionAt(model, owner, store.time)) : positionAt(useStore.getState().model ?? model, owner, store.time)
+        if (index !== null) beginStroke(host, e, { object: owner.name, index }, { x: from.x, y: from.y }, false)
         return
       }
       if (!editing) return
@@ -832,59 +1319,43 @@ export function PreviewPane() {
     const selectedGroup = groupOf(model, selection)
     const members = selectedGroup ? groupMembers(model, selectedGroup.name) : []
     const under = located.hit
-    const hit = handle ? (selectedGroup ? selectedGroup.name : selection.includes(under ?? '') ? under! : selection[0]!) : under
+    // What the press picks (D247): the object, its outermost group, or every object of its class.
+    const picked = under ? pickTargets(model, under, store.pick) : []
+    const hit = handle ? (selectedGroup ? selectedGroup.name : selection.includes(under ?? '') ? under! : selection[0]!) : under && store.pick === 'group' ? picked[0]! : under
 
     if (!hit) {
       // Empty space: a drag selects what it touches, a click clears the selection (D89). The store folds exactly a group's members into the group (D124).
-      const start = { x: located.paneX, y: located.paneY }
       const extend = ctrl
-      let moved = false
-      let rect: Marquee | null = null
-      capture(
-        host,
-        e.pointerId,
-        (ev) => {
-          const bounds = host.getBoundingClientRect()
-          const p = { x: ev.clientX - bounds.left, y: ev.clientY - bounds.top }
-          if (!moved && Math.hypot(p.x - start.x, p.y - start.y) < 3) return
-          moved = true
-          rect = { x0: start.x, y0: start.y, x1: p.x, y1: p.y }
-          setMarquee(rect)
-        },
-        () => {
-          const s = useStore.getState()
-          // With a path selected, the box picks its points, and a click on empty space lets them go first (D198).
-          const pointsMode = !!pathRef.current?.primary?.editable && s.selectedActions.length === 1
-          if (!moved || !rect) {
-            if (pointsMode && s.pathPoints.length > 0) s.setPathPoints([])
-            else if (!extend) s.select([])
-          } else {
-            const a = viewport.toWorld(Math.min(rect.x0, rect.x1), Math.min(rect.y0, rect.y1))
-            const b = viewport.toWorld(Math.max(rect.x0, rect.x1), Math.max(rect.y0, rect.y1))
-            if (pointsMode) {
-              const inside = pathRef.current!.primary!.frame.anchors.map((p, i) => (p.x >= a.x && p.x <= b.x && p.y >= b.y && p.y <= a.y ? i : -1)).filter((i) => i >= 0)
-              s.setPathPoints(extend ? [...new Set([...s.pathPoints, ...inside])] : inside)
-            } else {
-              const names = renderer.objectsIn({ left: a.x, right: b.x, top: a.y, bottom: b.y })
-              s.select(extend ? [...s.selection, ...names.filter((n) => !s.selection.includes(n))] : names)
-            }
-          }
-          setMarquee(null)
-        },
-      )
+      beginMarquee(host, e, located, (box) => {
+        const s = useStore.getState()
+        // With a path selected, the box picks its points, and a click on empty space lets them go first (D198).
+        const pointsMode = !!pathRef.current?.primary?.editable && s.selectedActions.length === 1
+        if (!box) {
+          if (pointsMode && s.pathPoints.length > 0) s.setPathPoints([])
+          else if (!extend) s.select([])
+        } else if (pointsMode) {
+          const inside = pathRef.current!.primary!.frame.anchors.map((p, i) => (inBox(p, box) ? i : -1)).filter((i) => i >= 0)
+          s.setPathPoints(extend ? [...new Set([...s.pathPoints, ...inside])] : inside)
+        } else {
+          const names = renderer.objectsIn({ left: box.a.x, right: box.b.x, top: box.a.y, bottom: box.b.y })
+          s.select(extend ? [...s.selection, ...names.filter((n) => !s.selection.includes(n))] : names)
+        }
+      })
       return
     }
 
     if (!handle && ctrl) {
-      // Ctrl-click adds or removes; on a member of the selected group it picks that member alone (D89, D124).
-      store.toggleSelected(hit)
+      // Ctrl-click adds or removes; on a member of the selected group it picks that member alone (D89, D124); with a class picked, every member goes in or out.
+      if (store.pick === 'class') for (const n of picked) store.toggleSelected(n)
+      else store.toggleSelected(hit)
       return
     }
 
-    // The gesture works on the selection when the hit thing is part of it, else on the hit object.
-    const inSelection = selection.includes(hit) || (!!selectedGroup && members.includes(hit))
-    const names = handle || inSelection ? selection : [hit]
-    if (!inSelection) store.select([hit])
+    // The gesture works on the selection when the hit thing is part of it, else on what the press picks.
+    const classPick = store.pick === 'class' && picked.length > 1
+    const inSelection = selection.includes(hit) || (!!selectedGroup && members.includes(hit)) || (classPick && picked.every((n) => selection.includes(n)))
+    const names = handle || inSelection ? selection : classPick ? picked : [hit]
+    if (!inSelection) store.select(classPick ? picked : [hit])
     const objects = names.map((n) => model.objects.find((o) => o.name === n)).filter((o): o is SceneObject => !!o)
     if (objects.length === 0) return
     const subject = objects.find((o) => o.name === hit) ?? objects[0]!
@@ -985,6 +1456,14 @@ export function PreviewPane() {
         sweepOrigin = { x: b['x']! - at.x, y: b['y']! - at.y }
       }
     }
+    // A Shape's points as a resize begins, with the center of its box and its scale in its own space, so its handles scale the points about the anchor (D233).
+    const shapeBase: Drag['shapeBase'] =
+      op === 'resize' && objects.length === 1 && subject.className === SHAPE
+        ? { points: shapeEditable(subject.name) === 'points' ? shapeOwnPoints(model, subject, sampleTime) : null, segs: shapeEditable(subject.name) === 'curves' ? shapeOwnSegs(model, subject, sampleTime) : null, center: (({ x, y }) => ({ x, y }))(ownBounds(model, subject, sampleTime)), scale: base.get(subject.name)?.['scale'] || 1 }
+        : null
+    // What an object collides with: a Shape by the line it is drawn with (D232).
+    const outlineFor = (o: SceneObject, f: Frame, shift: Point = { x: 0, y: 0 }): Polygon =>
+      outlineOf(o, { ...f, x: f.x - shift.x, y: f.y - shift.y }, o.className === SHAPE ? shapeWorldCurve(model, o, sampleTime).map((p) => ({ x: p.x - shift.x, y: p.y - shift.y })) : undefined)
     if (op === 'move') {
       const draggedPolys: Mover['polys'] = []
       const obstacles: Mover[] = []
@@ -993,13 +1472,13 @@ export function PreviewPane() {
         const f = renderer.frameOf(o.name)
         if (!f) continue
         if (dragged.has(o.name)) {
-          draggedPolys.push(outlineOf(o, { ...f, x: f.x - sweepOrigin.x, y: f.y - sweepOrigin.y }))
+          draggedPolys.push(outlineFor(o, f, sweepOrigin))
           continue
         }
         others.push({ name: o.name, box: toBox(f) })
         // What a push moves is written through the solver from where it shows now; what cannot be written is as good as anchored.
         if (!base.has(o.name)) base.set(o.name, baseValues(model, o, sampleTime))
-        obstacles.push(makeMover(o.name, [outlineOf(o, f)], store.anchored.includes(o.name) || !o.decl, store.soft.includes(o.name)))
+        obstacles.push(makeMover(o.name, [outlineFor(o, f)], store.anchored.includes(o.name) || !o.decl, store.soft.includes(o.name)))
       }
       movers = { dragged: makeMover(primary.name, draggedPolys, false, false), obstacles }
     }
@@ -1026,6 +1505,7 @@ export function PreviewPane() {
       frameBox: viewport.frameRect(),
       movers,
       sweepOrigin,
+      shapeBase,
       lastAngle: angle0,
       turned: 0,
       local0: toLocal(frame, located.world),
@@ -1153,6 +1633,24 @@ export function PreviewPane() {
               const obj = current?.objects.find((o) => o.name === name)
               if (!obj) continue
               const b = drag.base.get(name)!
+              // A Shape's points scale about the anchor in its own space and are written (D233); points that are code scale by `scale` instead. With Shift, the scaled outline is the target of a morph written at the first move (D257).
+              if (obj.className === SHAPE && drag.shapeBase) {
+                const about = { x: drag.shapeBase.center.x + anchorLocal.x / drag.shapeBase.scale, y: drag.shapeBase.center.y + anchorLocal.y / drag.shapeBase.scale }
+                if (drag.kind === 'timed' && (drag.shapeBase.points || drag.shapeBase.segs)) {
+                  if (!drag.created) {
+                    if (addMorph(name, restoreTime, proposed, gestureRef.current?.editing ? 'start' : useStore.getState().pin) === null) continue
+                    drag.created = true
+                    drag.morphBase = shapeEditBase(name)
+                  }
+                  const target = drag.morphBase
+                  if (target?.kind === 'curves') scaleShapeCurves(name, target.segs, { x: b['x']!, y: b['y']! }, about, fx, fy)
+                  continue
+                }
+                if (drag.shapeBase.points) scaleShapePoints(name, drag.shapeBase.points, { x: b['x']!, y: b['y']! }, about, fx, fy)
+                else if (drag.shapeBase.segs) scaleShapeCurves(name, drag.shapeBase.segs, { x: b['x']!, y: b['y']! }, about, fx, fy)
+                else values.set(name, { scale: (b['scale'] || 1) * (Math.abs(fx - 1) >= Math.abs(fy - 1) ? fx : fy) })
+                continue
+              }
               const l0 = drag.locals.get(name)!
               // Each thing's center moves with the box's scaling from the anchor; it stays only when nothing is anchored away from it.
               const p = toWorld(drag.frame, { x: anchorLocal.x + (l0.x - anchorLocal.x) * fx, y: anchorLocal.y + (l0.y - anchorLocal.y) * fy })
@@ -1349,28 +1847,55 @@ export function PreviewPane() {
       return
     }
     if (shown?.primary?.editable && pathAction) {
-      const { anchors, curve, spans } = shown.primary.frame
-      const action = st.model?.objects.find((o) => o.name === pathAction.object)?.actions[pathAction.index]
-      const smooth = action?.changes['smooth'] === true
-      const smoothItem = { label: smooth ? 'Straight lines' : 'Smooth curve', run: () => setPathSmooth(pathAction, !smooth) }
+      const primary = shown.primary
+      const { anchors, curve } = primary.frame
+      // The whole path, a point of it, or a segment, with one vocabulary (D252): Smooth, Corner, Straighten, Curve.
+      const curveItems: MenuItems = [{ label: 'Smooth path', run: () => smoothPath(pathAction) }, { label: 'Straighten path', run: () => straightenPath(pathAction) }]
       const hideItems: MenuItems = inPathTool ? [{ label: 'Hide path', run: () => st.setPathHidden(`${pathAction.object}:${pathAction.index}`, true) }] : []
+      // The whole path's items sit one level down (D256).
+      const pathSub: MenuItems = [{ label: 'Path', children: [...curveItems, ...hideItems] }]
       const point = nearestPoint(anchors, world, 8 * pixel)
       if (point !== null && anchors.length > 1) {
         const picked = st.pathPoints.includes(point) && st.pathPoints.length > 1 ? st.pathPoints : [point]
-        showMenu(e, [smoothItem, ...hideItems, { label: picked.length > 1 ? `Delete ${picked.length} points` : 'Delete point', run: () => removePathPoints(pathAction, picked), danger: true }])
+        const kindItems = pointItems(pathAnchorKind(pathAction, point), pathAnchorCurved(pathAction, point), (kind) => setPathAnchorKind(pathAction, picked, kind))
+        showMenu(e, [...kindItems, ...pathSub, { label: picked.length > 1 ? `Delete ${picked.length} points` : 'Delete point', run: () => removePathPoints(pathAction, picked), danger: true }])
         return
       }
       const segment = point === null ? nearestSegment(curve, world, 6 * pixel) : null
       if (segment !== null) {
-        showMenu(e, [{ label: 'Add point here', run: () => insertPathPoints(pathAction, (spans[segment + 1] ?? 0) + 1, [world]) }, smoothItem, ...hideItems])
+        const insert = pathInsertionAt(primary.frame, segment, world)
+        // On a points path the segment is the one ending at the point an insertion would take the place of.
+        const seg = insert.kind === 'curves' ? insert.seg : insert.at
+        const segItems = segmentItems(pathSegmentKind(pathAction, seg), (kind) => setPathSegment(pathAction, seg, kind))
+        showMenu(e, [{ label: 'Add point here', run: () => (insert.kind === 'points' ? insertPathPoints(pathAction, insert.at, [world]) : void insertPathAnchor(pathAction, insert.seg, insert.t)) }, ...segItems, ...pathSub])
         return
       }
       if (!hit) {
         showMenu(e, [
           { label: 'Add point here', run: () => insertPathPoints(pathAction, anchors.length, [world]) },
-          smoothItem,
+          ...pathSub,
           { label: 'Add', children: OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, world.x, world.y) })) },
         ])
+        return
+      }
+    }
+    // A selected Shape's points and line (D233): delete the point under the pointer, or add one on the line there.
+    const shape = shapeRef.current
+    if (shape?.editable) {
+      const point = nearestPoint(shape.frame.anchors, world, 8 * pixel)
+      if (point !== null) {
+        const picked = st.pathPoints.includes(point) && st.pathPoints.length > 1 ? st.pathPoints : [point]
+        // Smooth, Corner, or Straighten the point (D252), on curves and on points alike.
+        const kindItems = pointItems(shapeAnchorKind(shape.name, point), shapeAnchorCurved(shape.name, point), (kind) => setShapeAnchorKind(shape.name, picked, kind))
+        showMenu(e, [...kindItems, { label: picked.length > 1 ? `Delete ${picked.length} points` : 'Delete point', run: () => removeShapePoints(shape.name, picked), danger: true }])
+        return
+      }
+      const insert = insertionAt(shape, world, 6 * pixel)
+      if (insert) {
+        // On a points shape the segment is the one ending at the point an insertion would take the place of; the whole shape's items sit one level down (D256).
+        const seg = insert.kind === 'curves' ? insert.seg : insert.at
+        const segItems = segmentItems(shapeSegmentKind(shape.name, seg), (kind) => setShapeSegment(shape.name, seg, kind))
+        showMenu(e, [{ label: 'Add point here', run: () => (insert.kind === 'points' ? insertShapePoints(shape.name, insert.at, [world]) : void insertShapeAnchor(shape.name, insert.seg, insert.t)) }, ...segItems, { label: 'Shape', children: shapeItems(shape.name) }])
         return
       }
     }
@@ -1390,26 +1915,37 @@ export function PreviewPane() {
       const targets = s.selection.includes(hit) ? s.selection : [hit]
       if (!s.selection.includes(hit)) s.select([hit])
       const many = targets.length > 1
+      // The shape's, the path's, and the collision items each sit one level down (D256).
+      const shapeSub = many ? [] : shapeItems(hit)
+      const pathSub: MenuItems = [
+        ...(many ? [] : pathItems(hit)),
+        ...(s.hiddenPaths.some((k) => k.startsWith(`${hit}:`)) ? [{ label: 'Show paths', run: () => s.hiddenPaths.filter((k) => k.startsWith(`${hit}:`)).forEach((k) => s.setPathHidden(k, false)) }] : []),
+      ]
       showMenu(e, [
         { label: 'Jump to code', run: () => jumpToObject(hit) },
         ...(many ? [] : [{ label: 'Rename', run: () => requestRename({ object: hit }) }]),
-        ...(many ? [] : pathItems(hit)),
+        ...(shapeSub.length > 0 ? [{ label: 'Shape', children: shapeSub }] : []),
+        ...(pathSub.length > 0 ? [{ label: 'Path', children: pathSub }] : []),
         ...(many ? [] : [{ label: 'Save as preset', run: () => requestSavePreset({ object: hit }) }]),
-        ...(s.hiddenPaths.some((k) => k.startsWith(`${hit}:`)) ? [{ label: 'Show paths', run: () => s.hiddenPaths.filter((k) => k.startsWith(`${hit}:`)).forEach((k) => s.setPathHidden(k, false)) }] : []),
         { label: 'Classes', run: () => requestClasses(targets) },
         {
-          label: targets.every((n) => s.anchored.includes(n)) ? 'Unanchor' : 'Anchor',
-          run: () => {
-            const anchored = !targets.every((n) => s.anchored.includes(n))
-            for (const n of targets) s.setAnchored(n, anchored)
-          },
-        },
-        {
-          label: targets.every((n) => s.soft.includes(n)) ? 'Disable passthrough' : 'Enable passthrough',
-          run: () => {
-            const soft = !targets.every((n) => s.soft.includes(n))
-            for (const n of targets) s.setSoft(n, soft)
-          },
+          label: 'Collision',
+          children: [
+            {
+              label: targets.every((n) => s.anchored.includes(n)) ? 'Unanchor' : 'Anchor',
+              run: () => {
+                const anchored = !targets.every((n) => s.anchored.includes(n))
+                for (const n of targets) s.setAnchored(n, anchored)
+              },
+            },
+            {
+              label: targets.every((n) => s.soft.includes(n)) ? 'Disable passthrough' : 'Enable passthrough',
+              run: () => {
+                const soft = !targets.every((n) => s.soft.includes(n))
+                for (const n of targets) s.setSoft(n, soft)
+              },
+            },
+          ],
         },
         { label: many ? `Duplicate ${targets.length} objects` : 'Duplicate', run: () => duplicateObjects(targets) },
         { label: many ? `Delete ${targets.length} objects` : 'Delete object', run: () => deleteObjects(targets), danger: true },
@@ -1444,7 +1980,7 @@ export function PreviewPane() {
 
   return (
     <div
-      className={`preview${tool === 'object' ? ' placing' : tool === 'path' ? ' drawing' : ''} mode-${transformMode}`}
+      className={`preview${tool === 'object' ? ' placing' : tool === 'path' || tool === 'shape' ? ' drawing' : ''} mode-${transformMode}`}
       ref={hostRef}
       onPointerDown={onPointerDown}
       onPointerMove={() => (hoverRef.current = true)}
@@ -1453,6 +1989,7 @@ export function PreviewPane() {
       onContextMenu={onContextMenu}
     >
       <canvas ref={canvasRef} />
+      {notice && <div className="preview-notice">{notice}</div>}
       {marquee && (
         <div className="preview-marquee" style={{ left: Math.min(marquee.x0, marquee.x1), top: Math.min(marquee.y0, marquee.y1), width: Math.abs(marquee.x1 - marquee.x0), height: Math.abs(marquee.y1 - marquee.y0) }} />
       )}
@@ -1487,15 +2024,34 @@ export function PreviewPane() {
             <circle cx="21" cy="9" r="2" fill="currentColor" />
           </svg>
         </button>
+        <button className={tool === 'shape' ? 'active' : ''} onClick={() => setTool(tool === 'shape' ? 'select' : 'shape')} title="Shape: draw one, or edit its points (Escape to leave)" aria-pressed={tool === 'shape'} aria-label="Shape">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path d="M12 3l9 7-3.5 10h-11L3 10z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+            <circle cx="12" cy="3" r="2" fill="currentColor" />
+            <circle cx="21" cy="10" r="2" fill="currentColor" />
+            <circle cx="3" cy="10" r="2" fill="currentColor" />
+          </svg>
+        </button>
       </div>
+      <div className="preview-top">
       <div className="preview-toolbar" onPointerDown={stop}>
         {tool === 'object' && (
           <div className="preview-modes" role="group" aria-label="Kind of object to add">
-            {OBJECT_KINDS.map((k) => (
+            {OBJECT_KINDS.filter((k) => k !== SHAPE).map((k) => (
               <button key={k} className={addKind === k ? 'active' : ''} onClick={() => setAddKind(k)} title={`Each click adds a ${k}`} aria-pressed={addKind === k}>
                 {k}
               </button>
             ))}
+          </div>
+        )}
+        {tool === 'shape' && (
+          <div className="preview-modes" role="group" aria-label="Shape tool mode">
+            <button className={shapeMode === 'create' ? 'active' : ''} onClick={() => setShapeMode('create')} title="Draw a shape" aria-pressed={shapeMode === 'create'}>
+              Create
+            </button>
+            <button className={shapeMode === 'edit' ? 'active' : ''} onClick={() => setShapeMode('edit')} title="Edit the points" aria-pressed={shapeMode === 'edit'}>
+              Edit
+            </button>
           </div>
         )}
         {tool === 'path' && (
@@ -1554,19 +2110,26 @@ export function PreviewPane() {
         )}
       </div>
       <div className="preview-tools" onPointerDown={stop}>
+        <div className="preview-modes" role="group" aria-label="What a click picks">
+          {(['object', 'group', 'class'] as const).map((p) => (
+            <button key={p} className={pick === p ? 'active' : ''} onClick={() => setPick(p)} title={PICK_TIP[p]} aria-pressed={pick === p}>
+              {PICK_LABEL[p]}
+            </button>
+          ))}
+        </div>
         <button className={previewSnap.on ? 'on' : ''} onClick={() => setPreviewSnap({ on: !previewSnap.on })} title={previewSnap.on ? 'Snapping to the grid' : 'Free placement'} aria-pressed={previewSnap.on}>
           Grid
         </button>
         {previewSnap.on && <NumberField label="Grid, in pixels" value={previewSnap.grid} unit="px" onChange={(grid) => setPreviewSnap({ grid })} />}
         {previewSnap.on && <NumberField label="Angle step, in degrees" value={previewSnap.angle} unit={'°'} onChange={(angle) => setPreviewSnap({ angle })} />}
         <button className={showPaths ? 'on' : ''} onClick={toggleShowPaths} title={showPaths ? "Showing the selected object's paths" : 'Showing a path only while it is selected'} aria-pressed={showPaths}>
-          Paths
+          Show Paths
         </button>
         <button className={previewSnap.edges ? 'on' : ''} onClick={() => setPreviewSnap({ edges: !previewSnap.edges })} title={previewSnap.edges ? 'Aligning to edges and centers' : 'Not aligning to other objects'} aria-pressed={previewSnap.edges}>
           Edges
         </button>
         <button className={collide ? 'on' : ''} onClick={() => setCollide(!collide)} title={collide ? 'Objects collide' : 'Objects pass through each other'} aria-pressed={collide}>
-          Collide
+          Collision
         </button>
         {collide && (
           <button className={push ? 'on' : ''} onClick={() => setPush(!push)} title={push ? 'Dragged objects push others' : 'Dragged objects stop at others'} aria-pressed={push}>
@@ -1580,14 +2143,17 @@ export function PreviewPane() {
           Fit
         </button>
       </div>
+      </div>
       <div className="preview-hud">
         <span>{formatTime(time, settings.fps)}</span>
         <span className="dim">
           {settings.width} x {settings.height}
         </span>
         {tool === 'object' && <span className="hint">Click to place</span>}
+        {tool === 'shape' && shapeMode === 'create' && <span className="hint">{drafting ? 'Click for corners, drag to draw; the first point closes and fills, Escape leaves a line' : 'Click to start a shape'}</span>}
+        {tool === 'shape' && shapeMode === 'edit' && <span className="hint">{shapeRef.current?.editable ? 'Drag a point, or a box around several; right-click a point or the line for curves and corners' : 'Click a shape, or drag a box around one'}</span>}
         {tool === 'path' && pathMode === 'move' && <span className="hint">Drag any point or line of a path to move the whole path</span>}
-        {tool === 'path' && pathMode === 'edit' && <span className="hint">{pathSelected ? 'Click for a corner, drag to draw' : codePathSelected ? 'Shape is code: edit it in the code pane' : selection.length === 1 ? 'Click the object, or where the path goes' : 'Click an object, or a path'}</span>}
+        {tool === 'path' && pathMode === 'edit' && <span className="hint">{pathSelected ? (pathRef.current?.primary?.kind === 'curves' ? 'Drag a point, or the handles of a clicked one; click for a corner' : 'Click for a corner, drag to draw') : codePathSelected ? 'Shape is code: edit it in the code pane' : selection.length === 1 ? 'Click the object, or where the path goes' : 'Click an object, or a path'}</span>}
         {tool === 'select' && codePathSelected && <span className="hint">Shape is code: edit it in the code pane</span>}
         {selectedGroup && model ? (
           <span className="dim">

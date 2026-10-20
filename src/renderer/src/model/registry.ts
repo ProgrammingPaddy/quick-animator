@@ -4,8 +4,9 @@
  * document all read from here, so they can never disagree.
  */
 
-export type AttrType = 'number' | 'color' | 'string' | 'boolean'
-export type AttrValue = number | string | boolean
+export type AttrType = 'number' | 'color' | 'string' | 'boolean' | 'points' | 'pathdata'
+/** A plain value: a number, a word, yes or no, or a list of points, `[[x, y], ...]`, for a Shape (D232); path data is a string (D238). */
+export type AttrValue = number | string | boolean | number[][]
 
 export interface AttrSchema {
   name: string
@@ -16,6 +17,8 @@ export interface AttrSchema {
   animatable: boolean
   /** When set, the default comes from the object's other attributes, such as a circle's width from its radius (D106). */
   derive?: (attrs: Record<string, AttrValue>) => AttrValue
+  /** A note kept in the code, such as where an import came from: the panes list it nowhere, and nothing links to it (D241). */
+  hidden?: boolean
 }
 
 export interface ClassSchema {
@@ -35,6 +38,7 @@ const common: AttrSchema[] = [
   { name: 'class', type: 'string', default: '', doc: "Class names separated by spaces, like CSS classes. An action on all('name') applies to every member (D80).", animatable: false },
   { name: 'at', type: 'number', default: 0, doc: 'When the object begins, in seconds or a time reference such as other.end. Before it, the object does not exist (D138).', animatable: false },
   { name: 'until', type: 'number', default: 0, doc: 'When the object is removed, in seconds or a time reference. Unset, it lasts to the end of the content.', animatable: false },
+  { name: 'imported', type: 'string', default: '', doc: 'The file this came in from, when it was imported; the object pane tags it (D241).', animatable: false, hidden: true },
 ]
 
 export const classes: Record<string, ClassSchema> = {
@@ -67,6 +71,19 @@ export const classes: Record<string, ClassSchema> = {
       { name: 'font', type: 'string', default: 'Segoe UI', doc: 'Font family.', animatable: false },
     ],
   },
+  Shape: {
+    name: 'Shape',
+    doc: 'A polygon or a line through points of its own, or any SVG path (D232, D238).',
+    attrs: [
+      ...common,
+      { name: 'points', type: 'points', default: [], doc: 'The corners, [[x, y], ...], around x and y. Shape.rect(w, h), Shape.polygon(sides, r), and Shape.star(points, outer, inner) give lists.', animatable: true },
+      { name: 'curves', type: 'pathdata', default: '', doc: "SVG path data, 'M 0 0 C 50 -80 150 -80 200 0 Z': curves, and several pieces, which the Shape tool draws. Set, it is drawn instead of the points. Shape.circle(r) gives a circle.", animatable: true },
+      { name: 'closed', type: 'boolean', default: true, doc: 'Joins the last point to the first and fills it. False draws an open line.', animatable: false },
+      { name: 'smooth', type: 'boolean', default: false, doc: 'A curve through the points instead of straight lines between them.', animatable: false },
+      { name: 'stroke', type: 'color', default: '#ffffff', doc: 'Outline color, as #rrggbb.', animatable: true },
+      { name: 'strokeWidth', type: 'number', default: 0, doc: 'Outline width in pixels. 0 draws none.', animatable: true },
+    ],
+  },
   Group: {
     name: 'Group',
     doc: "Several objects that move, turn, and scale as one. Members keep their own values; the group's own values and its animations act on top (D124).",
@@ -79,16 +96,19 @@ export const classes: Record<string, ClassSchema> = {
       { name: 'scale', type: 'number', default: 1, doc: "What the group has multiplied its members by: this value around its pivot, then each scaling around the center of their box when that scaling began.", animatable: true },
       { name: 'pivotX', type: 'number', default: 0, doc: "What the group's own rotation and scale pivot on, in the members' space. The GUI writes the center of their box when it first turns or scales the group; unset, that center at time zero.", animatable: false },
       { name: 'pivotY', type: 'number', default: 0, doc: 'The pivot, up.', animatable: false },
+      { name: 'imported', type: 'string', default: '', doc: 'The file this came in from, when it was imported; the object pane tags it (D241).', animatable: false, hidden: true },
     ],
   },
 }
 
 /** The class whose body is other objects (D124). */
 export const GROUP = 'Group'
+/** The class drawn from points of its own (D232). */
+export const SHAPE = 'Shape'
 
 export const CLASS_NAMES: ReadonlySet<string> = new Set(Object.keys(classes))
 
-export const VERBS = ['to', 'move', 'rotate', 'resize', 'fade', 'path'] as const
+export const VERBS = ['to', 'move', 'rotate', 'resize', 'fade', 'path', 'morph'] as const
 export type Verb = (typeof VERBS)[number]
 
 /** Old names for verbs, still read, each as the verb it now is: `scale` folded into `resize` (D211). A file using one loads, with a note at the line. */
@@ -110,6 +130,8 @@ export const VERB_ATTRS: Record<Verb, readonly string[] | null> = {
   rotate: ['rotation'],
   resize: ['width', 'height', 'radius', 'fontSize', 'scale'],
   fade: ['opacity'],
+  // A morph changes a Shape's outline, named here by its curves so the menus offer it to Shapes alone; the target itself is `to` (D257).
+  morph: ['curves'],
 }
 
 
@@ -125,6 +147,7 @@ export const VERB_PARAMS: Record<Verb, readonly string[]> = {
   rotate: ['pivotX', 'pivotY'],
   resize: ['pivotX', 'pivotY'],
   fade: [],
+  morph: ['to'],
 }
 export const PIVOT_PARAMS = ['pivotX', 'pivotY'] as const
 
@@ -136,6 +159,7 @@ export const VERB_COLORS: Record<Verb, string> = {
   resize: '#f59e0b',
   fade: '#64748b',
   to: '#10b981',
+  morph: '#ec4899',
 }
 
 /** The color for an object itself, as opposed to one of its actions. */
@@ -162,7 +186,7 @@ export function defaultFor(className: string, attr: string, attrs: Record<string
   if (!schema) return undefined
   if (!schema.derive) return schema.default
   const literals: Record<string, AttrValue> = {}
-  for (const [key, value] of Object.entries(attrs)) if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean') literals[key] = value
+  for (const [key, value] of Object.entries(attrs)) if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean' || Array.isArray(value)) literals[key] = value as AttrValue
   return schema.derive(literals)
 }
 

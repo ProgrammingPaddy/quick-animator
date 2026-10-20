@@ -1,5 +1,5 @@
 import { editorRedo, editorUndo } from '../code/editor'
-import { newProject, pickProject } from '../project/controller'
+import { importSvgFile, newProject, pickProject } from '../project/controller'
 import { useStore } from '../state/store'
 import icon from '../../../../resources/icon-mono.svg'
 
@@ -23,6 +23,9 @@ export function TitleBar() {
             </button>
             <button onClick={() => void newProject()} title="Create a project folder">
               New
+            </button>
+            <button onClick={() => void importSvgFile()} title="Import an SVG file into the scene">
+              Import
             </button>
             <button onClick={() => setExportOpen(true)} title="Export a video of the project (Ctrl+E)">
               Export

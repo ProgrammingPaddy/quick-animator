@@ -25,8 +25,9 @@ the tool is used for real work. **Later** means wanted, scheduled after the core
 relationships, links between objects, reusable components, audio and video on the timeline, export
 to video, headless render for agents.
 
-**Out of scope for now:** video editing, 3D model import, photoreal rendering, physics, SVG import,
-freehand vector drawing and morphing, text on a path, 3D text, macOS and Linux, an in-app agent.
+**Out of scope for now:** video editing, 3D model import, photoreal rendering, physics,
+text on a path, 3D text, macOS and Linux, an in-app agent. Drawn shapes, morphing, and SVG import came in with
+CP4 on the owner's word, 2026-10-18 (D232, D241).
 See `checkpoints.md` for what is scheduled and what is backlog.
 
 ## 3. Main window

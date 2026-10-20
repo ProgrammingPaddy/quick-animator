@@ -51,10 +51,10 @@ function PreferencesDialog() {
       >
         <div className="dialog-title">Preferences</div>
         <div className="prefs-grid">
-          <span className="dim">New objects last</span>
+          <span className="dim">Object default duration</span>
           <div className="row">
             <NumberField
-              label="Seconds a new object lasts from where it is added"
+              label="Seconds"
               value={length}
               unit="s"
               min={0.1}
@@ -64,7 +64,7 @@ function PreferencesDialog() {
                 if (!toEnd) setPrefs({ objectLength: v })
               }}
             />
-            <label className="check" title="New objects last to the end of the content instead of a set length">
+            <label className="check" title="To the end of the content">
               <input
                 type="checkbox"
                 checked={toEnd}
@@ -73,13 +73,12 @@ function PreferencesDialog() {
               to the end
             </label>
           </div>
-          <span className="dim">Hold the final frame</span>
+          <span className="dim">Final frame hold</span>
           <div className="row">
-            <NumberField label="Seconds the final frame stays after the content ends, in playback and export; saved with the project" value={hold} unit="s" min={0} step={0.1} onChange={(v) => updateSettings({ hold: roundSeconds(v) })} disabled={!project} />
-            {!project && <span className="dim">Open a project to set its hold.</span>}
+            <NumberField label="Seconds" value={hold} unit="s" min={0} step={0.1} onChange={(v) => updateSettings({ hold: roundSeconds(v) })} disabled={!project} />
+            {!project && <span className="dim">Open a project first.</span>}
           </div>
         </div>
-        <div className="dialog-note dim">An object added from the preview, the object pane, or the timeline begins at the playhead and lasts this long; drag its clip's edges to change that. The hold keeps the last frame on screen without extending the content.</div>
         <div className="dialog-actions">
           <button ref={closeRef} className="primary" onClick={close}>
             Done

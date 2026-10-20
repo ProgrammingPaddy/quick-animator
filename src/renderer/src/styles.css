@@ -429,20 +429,28 @@ button.icon:hover {
   height: 100%;
 }
 
-.preview-toolbar,
-.preview-tools {
+/* The top of the preview is one row that wraps: the tool's own controls on the left, the pick and view buttons on the right, never one under the other (D251). */
+.preview-top {
   position: absolute;
   top: 8px;
+  left: 76px;
+  right: 10px;
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 4px;
+  row-gap: 4px;
+  pointer-events: none;
 }
 
-.preview-toolbar {
-  left: 76px;
-  right: 270px;
+.preview-toolbar,
+.preview-tools {
+  display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
   row-gap: 4px;
+  pointer-events: auto;
 }
 
 .preview-toolbar button,
@@ -451,7 +459,17 @@ button.icon:hover {
 }
 
 .preview-tools {
-  right: 10px;
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
+.preview-tools .preview-modes button {
+  font-family: var(--font-ui);
+}
+
+.preview-tools .preview-modes button.active {
+  background: var(--accent);
+  color: #ffffff;
 }
 
 .preview-toolbar button,
@@ -2081,6 +2099,12 @@ button.chevron:hover {
   text-decoration: line-through;
 }
 
+/* The tag of a thing that came in from a file (D241). */
+.badge.imported {
+  padding: 0 5px;
+  font-weight: 600;
+}
+
 .badge.off {
   background: rgba(239, 68, 68, 0.25);
   color: #fca5a5;
@@ -2710,6 +2734,23 @@ button.chevron:hover {
 /* What the tool in hand does, on the status line (D203). */
 .preview-hud .hint {
   color: var(--fg-dim);
+}
+
+/* A line about the last import, over the top of the preview for a moment (D241). */
+.preview-notice {
+  position: absolute;
+  top: 44px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 70%;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--fg);
+  font-size: 12px;
+  pointer-events: none;
+  z-index: 3;
 }
 
 /* An animation's bar slides to its lane when the stack changes; the one being dragged follows the pointer (D210). */

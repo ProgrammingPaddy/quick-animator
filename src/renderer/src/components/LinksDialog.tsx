@@ -142,7 +142,7 @@ function LinksDialog({ target }: { target: LinksTarget }) {
       { key: 'until', label: 'end', kind: 'time', type: null, current: links.find((l) => l.key === 'until')?.text ?? (obj.until === null ? 'the end' : timecode(obj.until, fps)), linked: links.some((l) => l.key === 'until') },
     ]
     for (const attr of schemaOf(obj.className)?.attrs ?? []) {
-      if (NOT_LINKABLE.has(attr.name)) continue
+      if (NOT_LINKABLE.has(attr.name) || attr.hidden) continue
       const link = links.find((l) => l.key === attr.name)
       out.push({ key: attr.name, label: attr.name, kind: 'value', type: attr.type, current: link ? link.text : formatShown(valueAt(model, obj, attr.name, time)), linked: !!link })
     }
@@ -173,7 +173,7 @@ function LinksDialog({ target }: { target: LinksTarget }) {
       const self = o.name === obj.name
       if (!o.decl || (self && ref === null)) continue
       const isGroup = o.className === GROUP
-      const values = self ? [] : (schemaOf(o.className)?.attrs ?? []).filter((a) => !NOT_LINKABLE.has(a.name)).map((a) => ({ name: a.name, type: a.type }))
+      const values = self ? [] : (schemaOf(o.className)?.attrs ?? []).filter((a) => !NOT_LINKABLE.has(a.name) && !a.hidden).map((a) => ({ name: a.name, type: a.type }))
       // What the object is doing, as stretches to pick a moment of (D212): written as text, since the reference names the state.
       const groups = () => {
         const found: Group[] = []

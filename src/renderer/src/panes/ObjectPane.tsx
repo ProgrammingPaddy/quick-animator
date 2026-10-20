@@ -11,7 +11,7 @@ import { requestSavePreset } from '../project/userPresets'
 import { isActionSelected, OBJECT_KINDS, useStore } from '../state/store'
 import { timecode } from '../state/time'
 
-const GLYPHS: Record<string, string> = { Rect: '▭', Circle: '○', Text: 'T', Group: '⊞' }
+const GLYPHS: Record<string, string> = { Rect: '▭', Circle: '○', Text: 'T', Shape: '⬠', Group: '⊞' }
 
 function actionLabel(action: Action): string {
   const what = action.verb === 'to' ? Object.keys(action.changes).filter((k) => !(PIVOT_PARAMS as readonly string[]).includes(k)).join(', ') || 'to' : action.verb
@@ -91,7 +91,8 @@ export function ObjectPane() {
     return isVisibleAt(model, obj, time)
   }
   const q = query.trim().toLowerCase()
-  const matches = (obj: SceneObject): boolean => !q || `${obj.name} ${obj.className} ${obj.classes.join(' ')} ${obj.actions.map((a) => `${a.name ?? ''} ${a.verb}`).join(' ')}`.toLowerCase().includes(q)
+  // An imported thing is found by "imported" or by the file it came from (D241).
+  const matches = (obj: SceneObject): boolean => !q || `${obj.name} ${obj.className} ${obj.classes.join(' ')} ${typeof obj.attrs['imported'] === 'string' ? `imported ${obj.attrs['imported']}` : ''} ${obj.actions.map((a) => `${a.name ?? ''} ${a.verb}`).join(' ')}`.toLowerCase().includes(q)
   const shown = (obj: SceneObject): boolean => matches(obj) && (!activeOnly || isActive(obj))
   /** Everything that folds: the type sections, the class groups, and the objects with actions (D177). */
   const foldable = [...types.map((t) => `type:${t.className}`), ...groups.map((g) => classKey(g.className)), ...objects.filter((o) => o.actions.length > 0).map((o) => o.name)]
@@ -233,6 +234,11 @@ export function ObjectPane() {
           <span className="glyph">{GLYPHS[obj.className] ?? '?'}</span>
           <span className="name">{obj.name}</span>
           <span className="dim">{obj.className}</span>
+          {typeof obj.attrs['imported'] === 'string' && (
+            <span className="badge imported" title={`Imported from ${obj.attrs['imported']}`}>
+              I
+            </span>
+          )}
           {obj.className === GROUP && <span className="dim members">{(model?.groups.get(obj.name) ?? []).join(' · ')}</span>}
           {marks(objectLinks(obj), dependents.get(targetKey({ object: obj })))}
           {obj.codeDriven && <span className="badge">code</span>}
@@ -336,7 +342,7 @@ export function ObjectPane() {
     <div className="objects">
       {objects.length === 0 ? (
         <div className="empty" onContextMenu={blankMenu}>
-          {project ? 'No objects yet. Turn on Add object above the preview and click where it goes, or right-click here.' : 'Open or create a project to begin.'}
+          {project ? 'No objects yet.' : 'Open or create a project to begin.'}
         </div>
       ) : (
         <>

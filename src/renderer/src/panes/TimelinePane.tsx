@@ -1528,7 +1528,7 @@ export function TimelinePane() {
         </div>
         <div className="tl-body" ref={bodyRef}>
           <div className="tl-rows" ref={rowsRef} onContextMenu={blankMenu}>
-            {model && model.objects.length === 0 && <div className="empty">No objects yet. Right-click to add one.</div>}
+            {model && model.objects.length === 0 && <div className="empty">No objects yet.</div>}
             {renderObjectsView()}
             <div className="tl-playhead-layer" aria-hidden="true">
               {snapLine !== null && <div className="tl-snap-line" style={{ left: xAt(snapLine) }} />}

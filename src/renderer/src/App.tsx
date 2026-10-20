@@ -10,8 +10,9 @@ import { HelpOverlay } from './components/HelpOverlay'
 import { Layout } from './Layout'
 import { runHeadless } from './export/headless'
 import { initProject } from './project/controller'
-import { copySelection, cutSelection, deleteActions, deleteObjects, duplicateObjects, nudgeActions, nudgeObjects, nudgeObjectsInTime, pasteClipboard, removePathPoints, requestRename } from './project/operations'
+import { copySelection, cutSelection, deleteActions, deleteObjects, duplicateObjects, importSvg, nudgeActions, nudgeObjects, nudgeObjectsInTime, pasteClipboard, removePathPoints, removeShapePoints, requestRename } from './project/operations'
 import { useClock } from './state/clock'
+import { dropTargets } from './state/dropTargets'
 import { useStore } from './state/store'
 
 /** True when the key event came from somewhere that handles its own typing. */
@@ -38,6 +39,47 @@ export function App() {
     }
     window.addEventListener('pointerdown', onPointerDown, true)
     return () => window.removeEventListener('pointerdown', onPointerDown, true)
+  }, [])
+
+  // Files dragged in (D241): an .svg dropped on the preview is imported where it lands; no file is ever opened in place of the app.
+  useEffect(() => {
+    const carriesFiles = (dt: DataTransfer | null): dt is DataTransfer => !!dt && Array.from(dt.types).some((t) => t === 'Files' || t === 'text/uri-list')
+    // Both dragenter and dragover must be taken, or the drop is refused; the copy cursor only where the source allows it.
+    const over = (e: DragEvent) => {
+      if (!carriesFiles(e.dataTransfer)) return
+      e.preventDefault()
+      if (/^(all|copy|copyMove|copyLink|uninitialized)$/.test(e.dataTransfer.effectAllowed)) e.dataTransfer.dropEffect = 'copy'
+    }
+    const drop = (e: DragEvent) => {
+      if (!carriesFiles(e.dataTransfer)) return
+      e.preventDefault()
+      const notice = useStore.getState().setNotice
+      const target = e.target instanceof Element ? e.target : null
+      const where = dropTargets.preview?.(e.clientX, e.clientY)?.world ?? dropTargets.previewCenter?.() ?? { x: 0, y: 0 }
+      const files = Array.from(e.dataTransfer.files)
+      // Some sources, a code editor say, hand over paths rather than files; the main process reads those.
+      const paths = files.length > 0 ? [] : (e.dataTransfer.getData('text/uri-list') || '').split(/\r?\n/).filter((l) => l.startsWith('file:')).map((l) => decodeURIComponent(new URL(l).pathname).replace(/^\/([A-Za-z]:)/, '$1'))
+      const svgs = files.filter((f) => /\.svg$/i.test(f.name))
+      const svgPaths = paths.filter((p) => /\.svg$/i.test(p))
+      if (svgs.length === 0 && svgPaths.length === 0) {
+        notice(files.length + paths.length > 0 ? 'Only .svg files can be imported.' : 'Nothing to import was dropped.')
+        return
+      }
+      if (!target?.closest('.preview')) {
+        notice('Drop an .svg on the preview to import it.')
+        return
+      }
+      for (const file of svgs) void file.text().then((text) => importSvg(text, file.name.replace(/\.svg$/i, ''), where))
+      for (const path of svgPaths) void window.api?.project.readFile(path).then((text) => importSvg(text, path.replace(/^.*[\\/]/, '').replace(/\.svg$/i, ''), where))
+    }
+    window.addEventListener('dragenter', over)
+    window.addEventListener('dragover', over)
+    window.addEventListener('drop', drop)
+    return () => {
+      window.removeEventListener('dragenter', over)
+      window.removeEventListener('dragover', over)
+      window.removeEventListener('drop', drop)
+    }
   }, [])
 
   useEffect(() => {
@@ -137,6 +179,11 @@ export function App() {
           if (store.pathPoints.length > 0 && selectedActions.length === 1) {
             e.preventDefault()
             removePathPoints(selectedActions[0]!, store.pathPoints)
+            store.setPathPoints([])
+          } else if (store.pathPoints.length > 0 && selection.length === 1 && store.model?.objects.some((o) => o.name === selection[0] && o.className === 'Shape')) {
+            // A selected Shape's picked points (D233).
+            e.preventDefault()
+            removeShapePoints(selection[0]!, store.pathPoints)
             store.setPathPoints([])
           } else if (selectedActions.length > 0) {
             e.preventDefault()

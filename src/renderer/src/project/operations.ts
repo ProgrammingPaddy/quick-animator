@@ -1,14 +1,16 @@
-import { applyEdits, beginGesture, endGesture, foldShapes, scrollToPos } from '../code/editor'
+import { applyEdits, beginGesture, endGesture, foldShapes, gestureOpen, scrollToPos } from '../code/editor'
 import { findDependents, type Dependent } from '../model/dependents'
-import { appendStatement, blockText, formatNumber, insertDeclaration, moveStatementEdits, removeProp, removeStatements, setProp, setPropFrom, setPropText, type TextEdit } from '../model/edits'
+import { appendStatement, blockText, formatNumber, insertDeclaration, lineEdit, moveStatementEdits, removeProp, removeStatements, setProp, setPropFrom, setPropText, type TextEdit } from '../model/edits'
 import { isMember } from '../model/evaluate'
 import { memberRef, normalizeSelection } from '../model/groups'
-import { classes, GROUP, TIMING_KEY_NAMES, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
-import { absoluteAt, anchorTime, memberBox, pathFrame, pathHolds, pathShift, positionAt, rawFromWorld, travelFrame, type Point } from '../model/sample'
-import { insertPointsEdit, pointText, removePointEdit, setPointEdit, shapeLiteral, type ShapeLiteral } from '../model/pathEdits'
+import { classes, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
+import { absoluteAt, anchorTime, memberBox, pathFrame, pathHolds, pathShift, pointsCenter, positionAt, rawFromWorld, shapeCurves, shapeOwnFromWorld, shapeOwnPoints, shapeOwnSegs, travelFrame, type Point, type ShapePiece } from '../model/sample'
+import { anchorCurved, anchorKind, closePath, cornerAnchors, curveSegment, dragAnchorHandle, ellipsePathData, flattenPathData, formatCurves, hasPathData, moveAnchor, openPath, parsePathData, pathAnchors, pathDataBounds, polygonPathData, removeAnchor, scalePathData, segmentKind, serializePathData, smoothAnchors, smoothPathData, splitSegment, straightenAll, straightenAnchors, straightenSegment, translatePathData, type Anchor, type AnchorKind, type Seg } from '../model/pathData'
+import { insertPointsEdit, pointText, removePointEdit, setPointEdit, shapeLiteral, stringLiteral, type ShapeLiteral } from '../model/pathEdits'
+import { readSvg, scaleImported, type ImportedItem } from './svgImport'
 import { identifierEdits, nameProblem, renameMembers, replaceIdentifiers } from '../model/rename'
 import { currentWritten, definingAction, shownValue, valueAt, withWritten, writesFrom, writtenValues } from '../model/sample'
-import type { Action, ActionInfo, BlockInfo, ClassAction, Range, SceneModel, SceneObject } from '../model/types'
+import type { Action, ActionInfo, BlockInfo, ClassAction, PropInfo, Range, SceneModel, SceneObject } from '../model/types'
 import { useStore, type ActionRef, type Clip, type ClipAction, type ClipObject, type Pin, type SelectionState, type ObjectKind } from '../state/store'
 
 /**
@@ -132,11 +134,15 @@ export function addObject(className: ObjectKind, x: number, y: number, at = stat
   if (className === 'Rect') Object.assign(attrs, { width: 240, height: 140, fill: '#4f8cff' })
   if (className === 'Circle') Object.assign(attrs, { radius: 60, fill: '#f59e0b' })
   if (className === 'Text') Object.assign(attrs, { text: 'Text', fontSize: 48, fill: '#ffffff' })
+  // A stock Shape is a triangle; the Shape tool draws one point by point instead (D233).
+  if (className === SHAPE) Object.assign(attrs, { points: [[0, 50], [-60, -50], [60, -50]], fill: '#4f8cff' })
   // A new object begins where the playhead is and lasts as long as the preferences say (D138, D145).
   if (at > 0) attrs['at'] = roundSeconds(at)
   const length = useStore.getState().prefs.objectLength
   if (length !== null) attrs['until'] = roundSeconds(at + length)
   applyEdits([insertDeclaration(model.lastDeclEnd, blockText(`${name} = ${className}`, attrs))], objectsSelected([name]))
+  // A Shape's points stay folded until wanted (D204, D244).
+  if (className === SHAPE) foldShapes()
   return name
 }
 
@@ -479,10 +485,46 @@ function startingValues(model: SceneModel, obj: SceneObject, verb: Verb, time: n
   return attrs
 }
 
+/** The outline a new morph starts from, as path data in the shape's own space (D257): the target of the morph in force at the time, else the shape's own curves, or its points as lines or as their smooth curve. */
+function outlineSegsAt(model: SceneModel, obj: SceneObject, time: number): Seg[] | null {
+  const inForce = obj.actions.filter((a) => a.verb === 'morph' && !a.overridden && a.start <= time).sort((a, b) => a.id - b.id).pop()
+  const raw = inForce?.changes['to']
+  if (hasPathData(raw)) return parsePathData(raw)
+  if (Array.isArray(raw)) {
+    const points = (raw as unknown[]).filter((p): p is number[] => Array.isArray(p) && typeof p[0] === 'number' && typeof p[1] === 'number').map((p) => ({ x: p[0]!, y: p[1]! }))
+    if (points.length >= 2) return polygonPathData(points, true)
+  }
+  const own = shapeOwnSegs(model, obj, time)
+  if (own) return own
+  const points = shapeOwnPoints(model, obj, time)
+  if (points.length < 2) return null
+  const closed = valueAt(model, obj, 'closed', time) !== false
+  return valueAt(model, obj, 'smooth', time) === true && points.length >= 3 ? smoothPathData(points, closed) : polygonPathData(points, closed)
+}
+
+/** Add a morph to a Shape (D257): its target the outline as it is then, written as curves, the morph selected and the playhead at its end, so the Shape tool's handles then shape the target. Returns the morph's index, or null. */
+export function addMorph(name: string, time: number, length = 1, pin: Pin = 'start'): number | null {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl || obj.className !== SHAPE) return null
+  const segs = outlineSegsAt(model, obj, time)
+  if (!segs) return null
+  const { at, duration } = pinnedSpan(pin, time, length)
+  const index = obj.actions.length
+  applyEdits([appendStatement(source, blockText(`${name}.morph`, { to: serializePathData(segs), at, duration })), ...coverEdits(source, obj, at, at + duration)], actionSelected(name, index))
+  useStore.getState().setTime(at + duration)
+  foldShapes()
+  return index
+}
+
 /** Add an action of a kind at a time. Its values start as the object's current ones, so nothing jumps. */
 export function addAction(name: string, verb: Verb, time: number): void {
   if (verb === 'path') {
     addPath(name, time)
+    return
+  }
+  if (verb === 'morph') {
+    addMorph(name, time)
     return
   }
   const { source, model } = state()
@@ -504,6 +546,14 @@ export function addClassAction(className: string, verb: Verb, time: number): voi
     // Every member takes the same path, which begins where the first member is (D194).
     const here = positionAt(model, first, roundSeconds(time))
     applyEdits([appendStatement(source, pathText(`all('${className}').path`, [{ x: Math.round(here.x), y: Math.round(here.y) }], roundSeconds(time), 1))], actionSelected(first.name, first.actions.length))
+    return
+  }
+  if (verb === 'morph') {
+    // Every member morphs to the same target, which starts as the first member's outline (D257).
+    const segs = first.className === SHAPE ? outlineSegsAt(model, first, roundSeconds(time)) : null
+    if (!segs) return
+    applyEdits([appendStatement(source, blockText(`all('${className}').morph`, { to: serializePathData(segs), at: roundSeconds(time), duration: 1 }))], actionSelected(first.name, first.actions.length))
+    foldShapes()
     return
   }
   const attrs = startingValues(model, first, verb, time)
@@ -542,7 +592,15 @@ interface EditableShape {
   model: SceneModel
   obj: SceneObject
   action: Action
+  /** The statement the shape is written in: the object's own, or the class statement every member follows (D247). */
+  stmt: ActionInfo
   shape: ShapeLiteral
+}
+
+/** The statement a path is written in, when it can be edited: a class path is edited where it is written, for every member at once (D247). */
+function pathStmt(action: Action | undefined): ActionInfo | null {
+  if (!action || action.verb !== 'path' || action.overridden) return null
+  return action.classAction ? action.classAction.stmt : action.stmt
 }
 
 /** A path action with its shape written as literal points, in the object's own statement, which the GUI edits point by point (D194). */
@@ -550,14 +608,54 @@ function editableShape(ref: ActionRef): EditableShape | null {
   const { source, model } = state()
   const obj = model?.objects.find((o) => o.name === ref.object)
   const action = obj?.actions[ref.index]
-  if (!model || !obj || !action?.stmt || action.classAction || action.verb !== 'path') return null
-  const shape = shapeLiteral(source, action.stmt)
-  return shape ? { source, model, obj, action, shape } : null
+  const stmt = pathStmt(action)
+  if (!model || !obj || !action || !stmt) return null
+  const shape = shapeLiteral(source, stmt)
+  return shape ? { source, model, obj, action, stmt, shape } : null
 }
 
-/** Whether the preview can edit a path's points: they are written as literals in the object's own statement. */
+interface EditableCurves {
+  source: string
+  model: SceneModel
+  obj: SceneObject
+  action: Action
+  stmt: ActionInfo
+  literal: { prop: PropInfo; range: Range; value: string }
+  segs: Seg[]
+}
+
+/** A path action whose shape is written as curves, SVG path data, in its statement, which the GUI edits anchor by anchor (D246). */
+function editableCurves(ref: ActionRef): EditableCurves | null {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === ref.object)
+  const action = obj?.actions[ref.index]
+  const stmt = pathStmt(action)
+  if (!model || !obj || !action || !stmt) return null
+  const literal = stringLiteral(source, stmt, 'shape')
+  return literal && hasPathData(literal.value) ? { source, model, obj, action, stmt, literal, segs: parsePathData(literal.value) } : null
+}
+
+/** What the preview can edit of a path's shape: points written as a list (D194), curves written as a string (D246), or nothing. */
+export function pathEditableKind(ref: ActionRef): 'points' | 'curves' | null {
+  if (editableCurves(ref)) return 'curves'
+  return editableShape(ref) ? 'points' : null
+}
+
+/** Whether the preview can edit a path's shape: its points or its curves are written out in the object's own statement. */
 export function pathEditable(ref: ActionRef): boolean {
-  return editableShape(ref) !== null
+  return pathEditableKind(ref) !== null
+}
+
+/** Write a path's curves, the anchors that did not move keeping their numbers. */
+function writePathCurves(e: EditableCurves, segs: Seg[]): void {
+  const edit = lineEdit(e.source, e.literal.range.from, e.literal.range.to, formatCurves(serializePathData(segs), e.stmt.indent))
+  if (edit) applyEdits([edit])
+}
+
+/** The literal a point of the scene is written as in a path's curves, to a hundredth, at the time the object reaches an anchor: as `rawPoint`. */
+function rawCurvePoint(e: EditableCurves, world: Point, time: number): Point {
+  const p = rawFromWorld(e.model, e.obj, e.action, time, world)
+  return { x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 }
 }
 
 /**
@@ -576,8 +674,20 @@ function insertTime(e: EditableShape, index: number): number {
   return index > 0 ? anchorTime(e.model, e.action, Math.min(index, e.shape.points.length) - 1) : e.action.start
 }
 
-/** Move several points of a path at once, each to a place in the scene (D198). */
+/** Move several points of a path at once, each to a place in the scene (D198); on a curves path, the anchors, their controls along (D246). */
 export function setPathPoints(ref: ActionRef, entries: { index: number; world: Point }[]): void {
+  const cur = editableCurves(ref)
+  if (cur) {
+    let segs = cur.segs
+    const count = pathAnchors(segs).length
+    for (const { index, world } of entries) {
+      if (index < 0 || index >= count) continue
+      const p = rawCurvePoint(cur, world, anchorTime(cur.model, cur.action, index))
+      segs = moveAnchor(segs, index, p.x, p.y)
+    }
+    writePathCurves(cur, segs)
+    return
+  }
   const e = editableShape(ref)
   if (!e) return
   const edits: TextEdit[] = []
@@ -614,18 +724,158 @@ export function setPathShift(ref: ActionRef, base: Point, from: Point, to: Point
   else setActionProp(ref, 'offset', pointText(next.x, next.y), true)
 }
 
-/** Take several points out of a path, as one undo step; at least one point stays (D198). */
+/** Take several points out of a path, as one undo step; at least one point stays (D198); on a curves path the segments on either side of a gone anchor become one (D246). */
 export function removePathPoints(ref: ActionRef, indices: number[]): void {
   const sorted = [...new Set(indices)].sort((a, b) => b - a)
   if (sorted.length === 0) return
+  const cur = editableCurves(ref)
+  if (cur) {
+    let segs = cur.segs
+    for (const index of sorted) {
+      const anchors = pathAnchors(segs)
+      if (anchors.length <= 1) break
+      if (index >= 0 && index < anchors.length) segs = removeAnchor(segs, index)
+    }
+    if (segs !== cur.segs) writePathCurves(cur, segs)
+    return
+  }
   beginGesture()
   for (const index of sorted) removePathPoint(ref, index)
   endGesture()
 }
 
-/** Make a path a smooth curve through its points, or straight lines between them (D199). */
+/** Make a path a smooth curve through its points, or straight lines between them (D199); a curves path is its own curve and keeps it. A class path changes for every member (D247). */
 export function setPathSmooth(ref: ActionRef, smooth: boolean): void {
-  setActionProp(ref, 'smooth', smooth ? true : null)
+  if (editableCurves(ref)) return
+  const { source, model } = state()
+  const stmt = pathStmt(model?.objects.find((o) => o.name === ref.object)?.actions[ref.index])
+  if (!stmt) return
+  const edit = smooth ? setProp(source, stmt, 'smooth', true) : removeProp(source, stmt, 'smooth')
+  if (edit) applyEdits([edit])
+}
+
+/** Move one control of an anchor of a curves path to a place in the scene; with `smooth`, the other control stays in line (D246). */
+export function setPathHandle(ref: ActionRef, index: number, which: 'in' | 'out', world: Point, smooth = false): void {
+  const cur = editableCurves(ref)
+  if (!cur) return
+  const p = rawCurvePoint(cur, world, anchorTime(cur.model, cur.action, index))
+  writePathCurves(cur, dragAnchorHandle(cur.segs, index, which, p.x, p.y, smooth))
+}
+
+/** What an anchor of a path is (D252): smooth, a corner, or straight; a points path's are straight, or smooth when the path is. */
+export function pathAnchorKind(ref: ActionRef, index: number): AnchorKind {
+  const cur = editableCurves(ref)
+  if (cur) return anchorKind(cur.segs, index)
+  const e = editableShape(ref)
+  if (e && (index === 0 || index === e.shape.points.length - 1)) return 'end'
+  return e?.action.changes['smooth'] === true ? 'smooth' : 'straight'
+}
+
+/** Whether a segment on either side of a path's anchor is a curve, so an end of it has a handle to straighten (D252). */
+export function pathAnchorCurved(ref: ActionRef, index: number): boolean {
+  const cur = editableCurves(ref)
+  if (cur) return anchorCurved(cur.segs, index)
+  return editableShape(ref)?.action.changes['smooth'] === true
+}
+
+/** Whether an anchor of a path is smooth, its controls in line, so a drag of one control turns the other (D245). */
+export function pathAnchorSmooth(ref: ActionRef, index: number): boolean {
+  return pathAnchorKind(ref, index) === 'smooth'
+}
+
+/** Whether a segment of a path, the one ending at the anchor of `seg`, is a curve or a line (D252); on a points path, `seg` is the index of the point it ends at. */
+export function pathSegmentKind(ref: ActionRef, seg: number): 'curve' | 'line' {
+  const cur = editableCurves(ref)
+  if (cur) return segmentKind(cur.segs, seg)
+  return editableShape(ref)?.action.changes['smooth'] === true ? 'curve' : 'line'
+}
+
+/** A points path as curves, its lines or its spline, so one anchor or segment can be edited (D249). */
+function pathAsCurves(ref: ActionRef): EditableCurves | null {
+  const cur = editableCurves(ref)
+  if (cur) return cur
+  convertPathToCurves(ref)
+  return editableCurves(ref)
+}
+
+/** Make anchors of a path smooth, corners, or straight (D252); a points path becomes curves first. */
+export function setPathAnchorKind(ref: ActionRef, indices: number[], kind: AnchorKind): void {
+  beginGesture()
+  try {
+    const cur = pathAsCurves(ref)
+    if (!cur) return
+    writePathCurves(cur, kind === 'smooth' ? smoothAnchors(cur.segs, indices) : kind === 'corner' ? cornerAnchors(cur.segs, indices) : straightenAnchors(cur.segs, indices))
+  } finally {
+    endGesture()
+  }
+}
+
+/** Make a segment of a path a curve or a line (D252); a points path becomes curves first, where `seg` is the index of the point the segment ends at. */
+export function setPathSegment(ref: ActionRef, seg: number, kind: 'curve' | 'line'): void {
+  beginGesture()
+  try {
+    const cur = pathAsCurves(ref)
+    if (!cur) return
+    writePathCurves(cur, kind === 'curve' ? curveSegment(cur.segs, seg) : straightenSegment(cur.segs, seg))
+  } finally {
+    endGesture()
+  }
+}
+
+/** Make a path smooth (D249): every anchor of its curves smooth; a points path becomes curves, the spline through its points, with handles. */
+export function smoothPath(ref: ActionRef): void {
+  const cur = editableCurves(ref)
+  if (cur) {
+    writePathCurves(cur, smoothAnchors(cur.segs, pathAnchors(cur.segs).map((_, i) => i)))
+    return
+  }
+  convertPathToCurves(ref, true)
+}
+
+/** Make a path straight (D249): every segment of its curves a line; a points path loses `smooth`. */
+export function straightenPath(ref: ActionRef): void {
+  const cur = editableCurves(ref)
+  if (cur) {
+    writePathCurves(cur, straightenAll(cur.segs))
+    return
+  }
+  setPathSmooth(ref, false)
+}
+
+/** Put an anchor into a curves path on a segment, a fraction of the way along it, the curve kept (D246). Returns the new anchor's index. */
+export function insertPathAnchor(ref: ActionRef, seg: number, t: number): number | null {
+  const cur = editableCurves(ref)
+  if (!cur) return null
+  const { segs, anchor } = splitSegment(cur.segs, seg, t)
+  if (segs === cur.segs) return null
+  writePathCurves(cur, segs)
+  return anchor
+}
+
+/** Write a points path as curves (D246, D249): its lines as lines, or its smooth curve as the cubic curves it is; `smooth` goes. */
+export function convertPathToCurves(ref: ActionRef, smoothen?: boolean): void {
+  const e = editableShape(ref)
+  if (!e || e.shape.points.length < 2) return
+  const points = e.shape.points.map((p) => ({ x: p.x, y: p.y }))
+  const smooth = smoothen ?? e.action.changes['smooth'] === true
+  const segs = smooth && points.length >= 3 ? smoothPathData(points, false) : polygonPathData(points, false)
+  const edits: TextEdit[] = [setPropText(e.source, e.stmt, 'shape', formatCurves(serializePathData(segs), e.stmt.indent))]
+  const dropSmooth = removeProp(e.source, e.stmt, 'smooth')
+  if (dropSmooth) edits.push(dropSmooth)
+  applyEdits(edits, actionSelected(ref.object, ref.index))
+  foldShapes()
+}
+
+/**
+ * Add a path to a class (D247): `all('name').path`, relative, so every member follows it from
+ * its own place, beginning at the playhead; the Path tool adds the rest of its points.
+ */
+export function addClassPath(className: string, time: number): void {
+  const { source, model } = state()
+  if (!model) return
+  const at = roundSeconds(time)
+  applyEdits([appendStatement(source, `all('${className}').path({\n  shape: [\n    [0, 0],\n  ],\n  relative: true,\n  at: ${formatNumber(at)},\n  duration: 1,\n})`)])
+  foldShapes()
 }
 
 /**
@@ -658,8 +908,25 @@ export function setPathPoint(ref: ActionRef, index: number, world: Point): void 
   if (edit) applyEdits([edit])
 }
 
-/** Put points into a path so that the first lands at `index`; the count appends (D194). */
+/** Put points into a path so that the first lands at `index`; the count appends (D194). On a curves path they come in as corners, with lines to and from them (D246). */
 export function insertPathPoints(ref: ActionRef, index: number, worlds: Point[]): void {
+  const cur = editableCurves(ref)
+  if (cur) {
+    const anchors = pathAnchors(cur.segs)
+    const at = Math.max(0, Math.min(index, anchors.length))
+    const time = at > 0 ? anchorTime(cur.model, cur.action, Math.min(at, anchors.length) - 1) : cur.action.start
+    const raws = worlds.map((w) => rawCurvePoint(cur, w, time))
+    const lines = raws.map((p): Seg => ({ c: 'L', x: p.x, y: p.y }))
+    const segs = [...cur.segs]
+    if (at >= anchors.length) segs.push(...lines)
+    else if (at === 0) {
+      const first = segs[0]
+      if (first?.c === 'M') segs[0] = { c: 'L', x: first.x, y: first.y }
+      segs.unshift({ c: 'M', x: raws[0]!.x, y: raws[0]!.y }, ...lines.slice(1))
+    } else segs.splice(anchors[at]!.seg, 0, ...lines)
+    writePathCurves(cur, segs)
+    return
+  }
   const e = editableShape(ref)
   if (!e) return
   const time = insertTime(e, index)
@@ -673,6 +940,688 @@ export function removePathPoint(ref: ActionRef, index: number): void {
   if (!e) return
   const edit = removePointEdit(e.source, e.shape, index)
   if (edit) applyEdits([edit])
+}
+
+interface EditableShapePoints {
+  source: string
+  model: SceneModel
+  obj: SceneObject
+  shape: ShapeLiteral
+}
+
+/** A Shape whose points are written as a literal list in its declaration, which the GUI edits point by point (D233), and which draws them rather than a path. */
+function shapeLiteralOf(name: string): EditableShapePoints | null {
+  const { source, model, time } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl || obj.className !== SHAPE || shapeCurves(model, obj, time) !== null) return null
+  const shape = shapeLiteral(source, obj.decl, 'points')
+  return shape ? { source, model, obj, shape } : null
+}
+
+interface EditableShapeCurves {
+  source: string
+  model: SceneModel
+  obj: SceneObject
+  literal: { prop: PropInfo; range: Range; value: string }
+  /** The path as written, which the shape draws with the center of its box at its x and y (D235); a morph's target as written, drawn where it is (D257). */
+  written: Seg[]
+  /** The center of the box around the written path's line; the origin for a morph's target. */
+  center: Point
+  /** The morph whose target this is, when one of the shape's morphs is selected (D257). */
+  target?: Action
+}
+
+/** The morph of a Shape that is selected, when one is and it is written in the object's own statement (D257). */
+function selectedMorph(obj: SceneObject): Action | null {
+  const { selectedActions } = useStore.getState()
+  const ref = selectedActions.length === 1 ? selectedActions[0]! : null
+  if (!ref || ref.object !== obj.name) return null
+  const action = obj.actions[ref.index]
+  return action && action.verb === 'morph' && !action.overridden && !action.classAction && action.stmt ? action : null
+}
+
+/** Whether one of a Shape's morphs is selected, so the Shape tool edits its target (D257). */
+export function shapeMorphSelected(name: string): boolean {
+  const obj = findObject(name)
+  return !!obj && selectedMorph(obj) !== null
+}
+
+/** A Shape whose curves are written as a literal string in its declaration, which the GUI edits anchor by anchor (D240); with one of its morphs selected, that morph's target when it is written as curves (D257). */
+function shapeCurvesOf(name: string): EditableShapeCurves | null {
+  const { source, model, time } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl || obj.className !== SHAPE) return null
+  const target = selectedMorph(obj)
+  if (target) {
+    const literal = stringLiteral(source, target.stmt!, 'to')
+    if (!literal || !hasPathData(literal.value)) return null
+    return { source, model, obj, literal, written: parsePathData(literal.value), center: { x: 0, y: 0 }, target }
+  }
+  if (shapeCurves(model, obj, time) === null) return null
+  const literal = stringLiteral(source, obj.decl, 'curves')
+  if (!literal || !hasPathData(literal.value)) return null
+  const written = parsePathData(literal.value)
+  const b = pathDataBounds(written)
+  return { source, model, obj, literal, written, center: { x: b.x, y: b.y } }
+}
+
+/** What the preview can edit of a Shape: its points, written as a list (D233), its curves, written as a string (D240), or nothing; a selected morph whose target is not written as curves is edited in the code (D257). */
+export function shapeEditable(name: string): 'points' | 'curves' | null {
+  if (shapeCurvesOf(name)) return 'curves'
+  const obj = findObject(name)
+  if (obj && selectedMorph(obj)) return null
+  return shapeLiteralOf(name) ? 'points' : null
+}
+
+/** The anchors the Shape tool edits, in the shape's own space (D257): the selected morph's target, or the shape's own curves as they are drawn. */
+export function shapeEditAnchors(name: string): Anchor[] {
+  const cur = shapeCurvesOf(name)
+  return cur ? pathAnchors(translatePathData(cur.written, -cur.center.x, -cur.center.y)) : []
+}
+
+/** The pieces of the outline the Shape tool edits, in the shape's own space, each point with where it came from (D257). */
+export function shapeEditPieces(name: string): ShapePiece[] {
+  const cur = shapeCurvesOf(name)
+  return cur ? flattenPathData(translatePathData(cur.written, -cur.center.x, -cur.center.y)).map((sp) => ({ curve: sp.points, closed: sp.closed, filled: sp.points.length >= 3, at: sp.at })) : []
+}
+
+/** Whether the preview can edit a Shape's points: they are a literal list in its declaration. */
+export function shapePointsEditable(name: string): boolean {
+  return shapeLiteralOf(name) !== null
+}
+
+/** What a gesture on a Shape's points or curves starts from (D243): the geometry as written and the shape's position, so every write of the gesture is computed afresh from them and nothing drifts. */
+export type ShapeEditBase = { kind: 'points'; points: Point[]; center: Point; origin: Point | null } | { kind: 'curves'; segs: Seg[]; center: Point; origin: Point | null }
+
+export function shapeEditBase(name: string): ShapeEditBase | null {
+  const origin = (obj: SceneObject): Point | null => (typeof obj.attrs['x'] === 'number' && typeof obj.attrs['y'] === 'number' ? { x: obj.attrs['x'], y: obj.attrs['y'] } : null)
+  const cur = shapeCurvesOf(name)
+  if (cur) return { kind: 'curves', segs: cur.written, center: cur.center, origin: origin(cur.obj) }
+  const e = shapeLiteralOf(name)
+  if (!e) return null
+  const points = e.shape.points.map((p) => ({ x: p.x, y: p.y }))
+  return { kind: 'points', points, center: pointsCenter(points), origin: origin(e.obj) }
+}
+
+/**
+ * The edits that move a shape's x and y by where the center of its geometry went, through its
+ * own turn and scale, so every other point stays where it is drawn (D235, D243): `delta` is the
+ * new center against the old, in the shape's own space, and `origin` the position a gesture
+ * began from, so repeated writes never pile the shift up. The shift is written to a hundredth
+ * of a pixel, so nothing else moves.
+ */
+function centerShift(source: string, obj: SceneObject, delta: Point, origin?: Point | null): TextEdit[] {
+  const x = origin ? origin.x : obj.attrs['x']
+  const y = origin ? origin.y : obj.attrs['y']
+  if (typeof x !== 'number' || typeof y !== 'number') return []
+  const rotation = typeof obj.attrs['rotation'] === 'number' ? obj.attrs['rotation'] : 0
+  const scale = typeof obj.attrs['scale'] === 'number' && obj.attrs['scale'] !== 0 ? obj.attrs['scale'] : 1
+  const a = (rotation * Math.PI) / 180
+  const nx = Math.round((x + scale * (Math.cos(a) * delta.x - Math.sin(a) * delta.y)) * 100) / 100
+  const ny = Math.round((y + scale * (Math.sin(a) * delta.x + Math.cos(a) * delta.y)) * 100) / 100
+  const edits: TextEdit[] = []
+  if (nx !== obj.attrs['x']) edits.push(setProp(source, obj.decl!, 'x', nx))
+  if (ny !== obj.attrs['y']) edits.push(setProp(source, obj.decl!, 'y', ny))
+  return edits
+}
+
+/** Write a Shape's curves whole, recentered (D240): the box around its line at the origin, to a hundredth of a pixel, with its x and y moved by where the center went. For a resize or a conversion, where every number changes anyway. */
+function writeShapeCurves(e: EditableShapeCurves, own: Seg[], origin?: Point): void {
+  // A morph's target is drawn where it is written, so it is written as it is (D257).
+  if (e.target) {
+    writeCurvesAsIs(e, own)
+    return
+  }
+  const c = pathDataBounds(own)
+  const edits: TextEdit[] = []
+  const edit = lineEdit(e.source, e.literal.range.from, e.literal.range.to, formatCurves(serializePathData(translatePathData(own, -c.x, -c.y)), e.obj.decl!.indent))
+  if (edit) edits.push(edit)
+  edits.push(...centerShift(e.source, e.obj, { x: c.x, y: c.y }, origin))
+  if (edits.length > 0) applyEdits(edits)
+}
+
+/** Write a Shape's curves as they are, the anchors that did not move keeping their numbers (D243), by the lines that changed, so the fold over them stays (D254): x and y take the shift of the center, from the base of the gesture when there is one. */
+function writeCurvesAsIs(e: EditableShapeCurves, segs: Seg[], base?: ShapeEditBase): void {
+  const edits: TextEdit[] = []
+  const edit = lineEdit(e.source, e.literal.range.from, e.literal.range.to, formatCurves(serializePathData(segs), e.target ? e.target.stmt!.indent : e.obj.decl!.indent))
+  if (edit) edits.push(edit)
+  // A morph's target is drawn where it is written, so x and y stay (D257).
+  if (!e.target) {
+    const c = pathDataBounds(segs)
+    const ref = base ? base.center : e.center
+    edits.push(...centerShift(e.source, e.obj, { x: c.x - ref.x, y: c.y - ref.y }, base?.origin))
+  }
+  if (edits.length > 0) applyEdits(edits)
+}
+
+/** A place in the scene as a Shape's points are written: against the center of their box as it is written now (D243). */
+function writtenPoint(e: EditableShapePoints, world: Point): Point {
+  const c = pointsCenter(e.shape.points)
+  const own = ownPoint(e, world)
+  return { x: Math.round(c.x + own.x), y: Math.round(c.y + own.y) }
+}
+
+/** A place in the scene as a Shape's curves are written. */
+function writtenCurvePoint(e: EditableShapeCurves, world: Point): Point {
+  const own = shapeOwnFromWorld(e.model, e.obj, state().time, world)
+  return { x: e.center.x + own.x, y: e.center.y + own.y }
+}
+
+/** A place in the scene in a Shape's own space, where its points live (D235). */
+function ownPoint(e: EditableShapePoints, world: Point): Point {
+  return shapeOwnFromWorld(e.model, e.obj, state().time, world)
+}
+
+/**
+ * Write a Shape's points whole (D235): centered on their box, whole pixels, one per line when
+ * the list was written that way; and the shape's x and y moved by where the center went,
+ * through its own turn and scale, so every other point stays where it is drawn. Only where the
+ * points are against each other counts, so a list written off center is centered the first time
+ * the GUI writes it, and nothing moves.
+ */
+function writeShapePoints(e: EditableShapePoints, own: Point[], origin?: Point): void {
+  const c = pointsCenter(own)
+  const points = own.map((p) => ({ x: Math.round(p.x - c.x), y: Math.round(p.y - c.y) }))
+  const decl = e.obj.decl!
+  const indent = decl.indent
+  const text = e.shape.multiline ? `[\n${points.map((p) => `${indent}  ${pointText(p.x, p.y)},`).join('\n')}\n${indent}]` : `[${points.map((p) => pointText(p.x, p.y)).join(', ')}]`
+  const edits: TextEdit[] = []
+  const edit = lineEdit(e.source, e.shape.range.from, e.shape.range.to, text)
+  if (edit) edits.push(edit)
+  edits.push(...centerShift(e.source, e.obj, c, origin))
+  if (edits.length > 0) applyEdits(edits)
+}
+
+/**
+ * Move points of a Shape, each to a place in the scene: its points (D233), or the anchors of its
+ * curves, their controls along (D240). Only those points' numbers change; x and y take the shift
+ * of the center, so nothing else moves, and a gesture computes every write from its base (D243).
+ */
+export function setShapePoints(name: string, entries: { index: number; world: Point }[], base?: ShapeEditBase): void {
+  const cur = shapeCurvesOf(name)
+  if (cur) {
+    let segs = base?.kind === 'curves' ? base.segs : cur.written
+    const count = pathAnchors(segs).length
+    for (const { index, world } of entries) {
+      if (index < 0 || index >= count) continue
+      const p = writtenCurvePoint(cur, world)
+      segs = moveAnchor(segs, index, p.x, p.y)
+    }
+    writeCurvesAsIs(cur, segs, base)
+    return
+  }
+  const e = shapeLiteralOf(name)
+  if (!e) return
+  const points = (base?.kind === 'points' ? base.points : e.shape.points).map((p) => ({ x: p.x, y: p.y }))
+  const edits: TextEdit[] = []
+  for (const { index, world } of entries) {
+    if (index < 0 || index >= points.length) continue
+    points[index] = writtenPoint(e, world)
+    const edit = setPointEdit(e.shape, index, points[index]!.x, points[index]!.y)
+    if (edit && e.source.slice(edit.from, edit.to) !== edit.insert) edits.push(edit)
+  }
+  const c = pointsCenter(points)
+  const ref = base?.kind === 'points' ? base.center : pointsCenter(e.shape.points)
+  edits.push(...centerShift(e.source, e.obj, { x: c.x - ref.x, y: c.y - ref.y }, base?.origin))
+  if (edits.length > 0) applyEdits(edits)
+}
+
+/** Put points into a Shape so that the first lands at `index`; the count appends (D233). Only the new points are written; x and y take the center's shift (D243). */
+export function insertShapePoints(name: string, index: number, worlds: Point[]): void {
+  const e = shapeLiteralOf(name)
+  if (!e || worlds.length === 0) return
+  const at = Math.max(0, Math.min(index, e.shape.points.length))
+  const added = worlds.map((w) => writtenPoint(e, w))
+  const edit = insertPointsEdit(e.source, e.shape, at, added)
+  if (!edit) return
+  const before = pointsCenter(e.shape.points)
+  const after = pointsCenter([...e.shape.points.slice(0, at), ...added, ...e.shape.points.slice(at)])
+  applyEdits([edit, ...centerShift(e.source, e.obj, { x: after.x - before.x, y: after.y - before.y })])
+}
+
+/** Take points out of a Shape; a closed one keeps three, a line two (D233); curves keep two anchors, the segments on either side of a gone one becoming one (D240). The rest keep their numbers; x and y take the center's shift (D243). */
+export function removeShapePoints(name: string, indices: number[]): void {
+  const cur = shapeCurvesOf(name)
+  if (cur) {
+    let segs = cur.written
+    for (const index of [...new Set(indices)].sort((a, b) => b - a)) {
+      const anchors = pathAnchors(segs)
+      if (anchors.length <= 2) break
+      if (index >= 0 && index < anchors.length) segs = removeAnchor(segs, index)
+    }
+    if (segs !== cur.written) writeCurvesAsIs(cur, segs)
+    return
+  }
+  const e = shapeLiteralOf(name)
+  if (!e) return
+  const least = e.obj.attrs['closed'] === false ? 2 : 3
+  const gone = new Set<number>()
+  for (const index of [...new Set(indices)].sort((a, b) => b - a)) {
+    if (e.shape.points.length - gone.size <= least) break
+    if (index >= 0 && index < e.shape.points.length) gone.add(index)
+  }
+  if (gone.size === 0) return
+  const before = pointsCenter(e.shape.points)
+  const after = pointsCenter(e.shape.points.filter((_, i) => !gone.has(i)))
+  beginGesture()
+  try {
+    // One point at a time, each edit on the text as it then is; then x and y take the center's shift.
+    for (const index of [...gone].sort((a, b) => b - a)) {
+      const fresh = shapeLiteralOf(name)
+      const edit = fresh && removePointEdit(fresh.source, fresh.shape, index)
+      if (edit) applyEdits([edit])
+    }
+    const fresh = shapeLiteralOf(name)
+    const shift = fresh ? centerShift(fresh.source, fresh.obj, { x: after.x - before.x, y: after.y - before.y }) : []
+    if (shift.length > 0) applyEdits(shift)
+  } finally {
+    endGesture()
+  }
+}
+
+/** Scale a Shape's points about a point of its own space, from the points and the position it had when the gesture began, and write them (D233); the anchor stays where it is drawn. */
+export function scaleShapePoints(name: string, base: Point[], origin: Point, anchor: Point, fx: number, fy: number): void {
+  const e = shapeLiteralOf(name)
+  if (!e) return
+  writeShapePoints(
+    e,
+    base.map((p) => ({ x: anchor.x + (p.x - anchor.x) * fx, y: anchor.y + (p.y - anchor.y) * fy })),
+    origin,
+  )
+}
+
+/** Scale a Shape's curves about a point of its own space, from the curves and the position it had when the gesture began, and write them centered (D240); the anchor stays where it is drawn. */
+export function scaleShapeCurves(name: string, base: Seg[], origin: Point, anchor: Point, fx: number, fy: number): void {
+  const cur = shapeCurvesOf(name)
+  if (!cur) return
+  writeShapeCurves(cur, scalePathData(base, anchor, fx, fy), origin)
+}
+
+/** Move one control of an anchor of a Shape's curves to a place in the scene: `in`, the control before the anchor, or `out`, the one after; with `smooth`, the other control stays in line (D240, D245). */
+export function setShapeHandle(name: string, index: number, which: 'in' | 'out', world: Point, base?: ShapeEditBase, smooth = false): void {
+  const cur = shapeCurvesOf(name)
+  if (!cur) return
+  const p = writtenCurvePoint(cur, world)
+  writeCurvesAsIs(cur, dragAnchorHandle(base?.kind === 'curves' ? base.segs : cur.written, index, which, p.x, p.y, smooth), base)
+}
+
+/** What an anchor of a Shape is (D252): smooth, a corner, or straight; a points shape's are straight, or smooth when the shape is. */
+export function shapeAnchorKind(name: string, index: number): AnchorKind {
+  const cur = shapeCurvesOf(name)
+  if (cur) return anchorKind(cur.written, index)
+  const e = shapeLiteralOf(name)
+  if (e && e.obj.attrs['closed'] === false && (index === 0 || index === e.shape.points.length - 1)) return 'end'
+  return findObject(name)?.attrs['smooth'] === true ? 'smooth' : 'straight'
+}
+
+/** Whether a segment on either side of a Shape's anchor is a curve, so an end of a line has a handle to straighten (D252). */
+export function shapeAnchorCurved(name: string, index: number): boolean {
+  const cur = shapeCurvesOf(name)
+  if (cur) return anchorCurved(cur.written, index)
+  return findObject(name)?.attrs['smooth'] === true
+}
+
+/** Whether an anchor of a Shape is smooth, its controls in line, so a drag of one control turns the other (D245). */
+export function shapeAnchorSmooth(name: string, index: number): boolean {
+  return shapeAnchorKind(name, index) === 'smooth'
+}
+
+/** Whether a segment of a Shape, the one ending at the anchor of `seg`, is a curve or a line (D252); on a points shape, `seg` is the index of the point it ends at. */
+export function shapeSegmentKind(name: string, seg: number): 'curve' | 'line' {
+  const cur = shapeCurvesOf(name)
+  if (cur) return segmentKind(cur.written, seg)
+  return findObject(name)?.attrs['smooth'] === true ? 'curve' : 'line'
+}
+
+/** A points Shape as curves, its lines or its spline, so one anchor or segment can be edited (D249). */
+function shapeAsCurves(name: string): EditableShapeCurves | null {
+  const cur = shapeCurvesOf(name)
+  if (cur) return cur
+  convertToCurves(name)
+  return shapeCurvesOf(name)
+}
+
+/** Make anchors of a Shape smooth, corners, or straight (D252); a points shape becomes curves first. */
+export function setShapeAnchorKind(name: string, indices: number[], kind: AnchorKind): void {
+  beginGesture()
+  try {
+    const cur = shapeAsCurves(name)
+    if (!cur) return
+    writeCurvesAsIs(cur, kind === 'smooth' ? smoothAnchors(cur.written, indices) : kind === 'corner' ? cornerAnchors(cur.written, indices) : straightenAnchors(cur.written, indices))
+  } finally {
+    endGesture()
+  }
+}
+
+/** Make a segment of a Shape a curve or a line (D252); a points shape becomes curves first, where `seg` is the index of the point the segment ends at. */
+export function setShapeSegment(name: string, seg: number, kind: 'curve' | 'line'): void {
+  beginGesture()
+  try {
+    const cur = shapeAsCurves(name)
+    if (!cur) return
+    writeCurvesAsIs(cur, kind === 'curve' ? curveSegment(cur.written, seg) : straightenSegment(cur.written, seg))
+  } finally {
+    endGesture()
+  }
+}
+
+/** Put an anchor into a Shape's curves on a segment, a fraction of the way along it, the curve kept as it was (D240). Returns the new anchor's index. */
+export function insertShapeAnchor(name: string, seg: number, t: number): number | null {
+  const cur = shapeCurvesOf(name)
+  if (!cur) return null
+  const { segs, anchor } = splitSegment(cur.written, seg, t)
+  if (segs === cur.written) return null
+  writeCurvesAsIs(cur, segs)
+  return anchor
+}
+
+/**
+ * Write a points Shape as curves (D239, D249): its lines as lines, or its smooth curve as the
+ * cubic curves it is, exactly. The points, `smooth`, and `closed` go; an open line keeps its
+ * look with `fill: 'none'`, since curves fill as SVG does.
+ */
+export function convertToCurves(name: string, smoothen?: boolean): void {
+  const e = shapeLiteralOf(name)
+  if (!e) return
+  const own = shapeOwnPoints(e.model, e.obj, state().time)
+  if (own.length < 2) return
+  const closed = e.obj.attrs['closed'] !== false
+  const smooth = smoothen ?? e.obj.attrs['smooth'] === true
+  const segs = smooth && own.length >= 3 ? smoothPathData(own, closed) : polygonPathData(own, closed)
+  // Curves are centered by the box around their line, which a smooth curve bulges beyond the points' box, so x and y follow the center as every write of curves has them (D238).
+  const c = pathDataBounds(segs)
+  // Inside a gesture already, the conversion joins it, so an edit of one point or segment undoes as one step (D252).
+  const started = !gestureOpen()
+  if (started) beginGesture()
+  try {
+    applyEdits([setPropText(e.source, e.obj.decl!, 'curves', formatCurves(serializePathData(translatePathData(segs, -c.x, -c.y)), e.obj.decl!.indent)), ...centerShift(e.source, e.obj, { x: c.x, y: c.y })], objectsSelected([name]))
+    const fresh = state()
+    const decl = fresh.model?.objects.find((o) => o.name === name)?.decl
+    if (!decl) return
+    const edits: TextEdit[] = []
+    for (const key of ['points', 'smooth', 'closed']) {
+      const edit = removeProp(fresh.source, decl, key)
+      if (edit) edits.push(edit)
+    }
+    applyEdits(edits, objectsSelected([name]))
+    if (!closed && e.obj.attrs['fill'] !== 'none') setObjectProp(name, 'fill', 'none')
+  } finally {
+    if (started) endGesture()
+  }
+  foldShapes()
+}
+
+/**
+ * Put an SVG's drawing into the scene (D241): its elements as objects, grouped as the file
+ * groups them, centered on `at`, beginning at the playhead and lasting as the preferences say,
+ * as placed objects do; the whole drawing is selected after. What could not be kept is said in
+ * the preview.
+ */
+export function importSvg(text: string, fileName: string, at: Point): void {
+  const { model, time } = state()
+  const notice = useStore.getState().setNotice
+  if (!model) {
+    notice('Open a project before importing.')
+    return
+  }
+  let read: ReturnType<typeof readSvg>
+  try {
+    read = readSvg(text, fileName, takenNames(model))
+  } catch (err) {
+    notice(`Could not read the SVG: ${err instanceof Error ? err.message : String(err)}`)
+    return
+  }
+  if ('error' in read) {
+    notice(read.error)
+    return
+  }
+  // A small drawing, an icon, would be lost at one unit a pixel: it comes in at a fifth of the frame's height (D241).
+  const side = Math.max(read.width, read.height)
+  const scale = side > 0 && side < 100 ? Math.round((useStore.getState().settings.height / 5 / side) * 100) / 100 : 1
+  const items = scale !== 1 ? scaleImported(read.items, scale) : read.items
+  const blocks: string[] = []
+  let count = 0
+  const length = useStore.getState().prefs.objectLength
+  // Each thing says the file it came in from, which the object pane tags (D241).
+  const from = `${fileName}.svg`
+  const emit = (item: ImportedItem): void => {
+    if (item.kind === 'group') {
+      item.members.forEach(emit)
+      blocks.push(blockText(`${item.name} = ${GROUP}`, { members: item.members.map((m) => m.name).join(' '), imported: from }))
+      return
+    }
+    const attrs = { ...item.attrs }
+    if (typeof attrs['x'] === 'number') attrs['x'] = Math.round(attrs['x'] + at.x)
+    if (typeof attrs['y'] === 'number') attrs['y'] = Math.round(attrs['y'] + at.y)
+    attrs['imported'] = from
+    if (time > 0) attrs['at'] = roundSeconds(time)
+    if (length !== null) attrs['until'] = roundSeconds(time + length)
+    blocks.push(blockText(`${item.name} = ${item.className}`, attrs))
+    count++
+  }
+  items.forEach(emit)
+  if (blocks.length === 0) {
+    notice(`Nothing to import${read.dropped.length > 0 ? `: ${read.dropped.join(', ')} not supported` : ''}.`)
+    return
+  }
+  applyEdits([insertDeclaration(model.lastDeclEnd, blocks.join('\n\n'))], objectsSelected(items.map((i) => i.name)))
+  foldShapes()
+  // Select shows what came in, with its box.
+  useStore.getState().setTool('select')
+  notice(`Imported ${count} ${count === 1 ? 'object' : 'objects'}${scale !== 1 ? ` at ${scale}×` : ''}${read.dropped.length > 0 ? `; dropped ${read.dropped.join(', ')}` : ''}.`)
+}
+
+/**
+ * Close a Shape or open it (D233, D253): the close goes in or comes out, and that is all; its
+ * fill and its stroke are its own, so a closed line stays hollow and an opened polygon keeps
+ * its fill. Opening takes the segment drawn back to the start with the close, so the ends part.
+ * Closed is the default of a points shape, so closing removes the key.
+ */
+export function setShapeClosed(name: string, closed: boolean): void {
+  const cur = shapeCurvesOf(name)
+  if (cur) {
+    const segs = closed ? closePath(cur.written) : openPath(cur.written)
+    if (segs !== cur.written) writeCurvesAsIs(cur, segs)
+    return
+  }
+  setObjectProp(name, 'closed', closed ? null : false)
+}
+
+export function setShapeSmooth(name: string, smooth: boolean): void {
+  setObjectProp(name, 'smooth', smooth ? true : null)
+}
+
+/**
+ * Start a Shape with the Shape tool (D233, D253): one point where the pointer is, drawn as a
+ * line, a stroke and no fill, until it is closed. Returns its name.
+ */
+export function beginShape(x: number, y: number): string | null {
+  const { model, time } = state()
+  if (!model) return null
+  const name = uniqueName('shape')
+  // Drawn as curves, the one form the GUI writes (D249): a move to the first corner, lines to the rest, smoothed where a line was drawn.
+  const attrs: Record<string, AttrValue> = { x: Math.round(x), y: Math.round(y), curves: 'M 0 0', fill: 'none', stroke: '#ffffff', strokeWidth: 3 }
+  if (time > 0) attrs['at'] = roundSeconds(time)
+  const length = useStore.getState().prefs.objectLength
+  if (length !== null) attrs['until'] = roundSeconds(time + length)
+  applyEdits([insertDeclaration(model.lastDeclEnd, blockText(`${name} = ${SHAPE}`, attrs))], objectsSelected([name]))
+  return name
+}
+
+/** Add corners to a Shape being drawn, at places in the scene (D233): lines to them on curves, before the close if there is one (D249), or points on a points shape. */
+export function appendShapePoints(name: string, worlds: Point[]): void {
+  const cur = shapeCurvesOf(name)
+  if (cur) {
+    const lines = worlds.map((w): Seg => {
+      const p = writtenCurvePoint(cur, w)
+      return { c: 'L', x: p.x, y: p.y }
+    })
+    const segs = [...cur.written]
+    const at = segs.length > 0 && segs[segs.length - 1]!.c === 'Z' ? segs.length - 1 : segs.length
+    segs.splice(at, 0, ...lines)
+    writeCurvesAsIs(cur, segs)
+    return
+  }
+  const e = shapeLiteralOf(name)
+  if (!e) return
+  insertShapePoints(name, e.shape.points.length, worlds)
+}
+
+/** Smooth a run of anchors of a Shape's curves: those just drawn and the one they left (D249). */
+export function smoothShapeRun(name: string, indices: number[]): void {
+  const cur = shapeCurvesOf(name)
+  if (!cur) return
+  writeCurvesAsIs(cur, smoothAnchors(cur.written, indices))
+}
+
+/** How many corners a Shape is drawn with: its anchors, or its points. */
+export function shapeAnchorCount(name: string): number {
+  const cur = shapeCurvesOf(name)
+  if (cur) return pathAnchors(cur.written).length
+  return shapeLiteralOf(name)?.shape.points.length ?? 0
+}
+
+/** Whether a Shape is closed: its curves end with a close, or its points are not open. */
+export function isShapeClosed(name: string): boolean {
+  const cur = shapeCurvesOf(name)
+  if (cur) return cur.written.length > 0 && cur.written[cur.written.length - 1]!.c === 'Z'
+  return findObject(name)?.attrs['closed'] !== false
+}
+
+/** Make a Shape smooth (D249): every anchor of its curves smooth, its controls in line along the way from the anchor before to the one after; a points shape becomes curves, the spline through its points. */
+export function smoothShape(name: string): void {
+  const cur = shapeCurvesOf(name)
+  if (cur) {
+    writeCurvesAsIs(cur, smoothAnchors(cur.written, pathAnchors(cur.written).map((_, i) => i)))
+    return
+  }
+  convertToCurves(name, true)
+}
+
+/** Make a Shape straight (D249): every segment of its curves a line; a points shape loses `smooth`. */
+export function straightenShape(name: string): void {
+  const cur = shapeCurvesOf(name)
+  if (cur) {
+    writeCurvesAsIs(cur, straightenAll(cur.written))
+    return
+  }
+  setObjectProp(name, 'smooth', null)
+}
+
+/**
+ * Finish a Shape being drawn (D233): closed and filled, its stroke dropped, or left as a line;
+ * recentered on its points so that its x and y are their middle; one with too few points goes.
+ */
+export function finishShape(name: string, close: boolean): void {
+  const cur = shapeCurvesOf(name)
+  if (cur) {
+    if (pathAnchors(cur.written).length < (close ? 3 : 2)) {
+      deleteObjects([name], true)
+      return
+    }
+    beginGesture()
+    try {
+      // Centered on its line, as every whole write leaves it (D235), with a close when asked.
+      const segs = close ? closePath(cur.written) : cur.written
+      writeShapeCurves(cur, translatePathData(segs, -cur.center.x, -cur.center.y))
+      if (close) {
+        // Closed, it is a polygon (D253): filled, its drawing stroke gone.
+        const fresh = findObject(name)
+        if (!fresh?.decl) return
+        const { source } = state()
+        const edits: TextEdit[] = [setProp(source, fresh.decl, 'fill', '#4f8cff')]
+        for (const key of ['stroke', 'strokeWidth']) {
+          const edit = removeProp(source, fresh.decl, key)
+          if (edit) edits.push(edit)
+        }
+        applyEdits(edits, objectsSelected([name]))
+      }
+    } finally {
+      endGesture()
+    }
+    foldShapes()
+    return
+  }
+  const e = shapeLiteralOf(name)
+  if (!e) return
+  if (e.shape.points.length < (close ? 3 : 2)) {
+    deleteObjects([name], true)
+    return
+  }
+  beginGesture()
+  try {
+    // Centered on its points, as every write leaves it (D235).
+    writeShapePoints(e, shapeOwnPoints(e.model, e.obj, state().time))
+    if (close) {
+      const fresh = shapeLiteralOf(name)
+      if (!fresh) return
+      const edits: TextEdit[] = []
+      for (const key of ['closed', 'stroke', 'strokeWidth']) {
+        const edit = removeProp(fresh.source, fresh.obj.decl!, key)
+        if (edit) edits.push(edit)
+      }
+      if (edits.length > 0) applyEdits(edits, objectsSelected([name]))
+    }
+  } finally {
+    endGesture()
+  }
+  foldShapes()
+}
+
+/**
+ * Make a Rect or a Circle a Shape with the same look (D234): its corners as points, or the
+ * oval as a path of four curves, exact (D238); the name, place, fill, and animations stay, and
+ * a size it animated gets a note from the evaluator, since a Shape has none.
+ */
+export function convertToShape(name: string): void {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl || (obj.className !== 'Rect' && obj.className !== 'Circle')) return
+  const num = (key: string): number => {
+    const v = valueAt(model, obj, key, obj.at)
+    return typeof v === 'number' && Number.isFinite(v) ? v : 0
+  }
+  let geometry: { key: 'points'; points: Point[] } | { key: 'curves'; d: string }
+  if (obj.className === 'Rect') {
+    const w = num('width') / 2
+    const h = num('height') / 2
+    geometry = {
+      key: 'points',
+      points: [
+        { x: -w, y: -h },
+        { x: w, y: -h },
+        { x: w, y: h },
+        { x: -w, y: h },
+      ],
+    }
+  } else geometry = { key: 'curves', d: serializePathData(ellipsePathData(num('width') / 2, num('height') / 2)) }
+  const decl = obj.decl
+  const head = source.slice(decl.range.from, decl.propsOpen)
+  const at = head.lastIndexOf(`${obj.className}(`)
+  if (at < 0) return
+  beginGesture()
+  try {
+    // The kind and the sizes first, then the points into the block as it then is, so no two edits overlap.
+    const first: TextEdit[] = [{ from: decl.range.from + at, to: decl.range.from + at + obj.className.length, insert: SHAPE }]
+    for (const key of ['width', 'height', 'radius']) {
+      const edit = removeProp(source, decl, key)
+      if (edit) edits(first, edit)
+    }
+    applyEdits(first, objectsSelected([name]))
+    const fresh = state()
+    const again = fresh.model?.objects.find((o) => o.name === name)?.decl
+    if (!fresh.model || !again) return
+    const indent = again.indent
+    const text = geometry.key === 'points' ? `[\n${geometry.points.map((p) => `${indent}  ${pointText(Math.round(p.x), Math.round(p.y))},`).join('\n')}\n${indent}]` : formatCurves(geometry.d, again.indent)
+    applyEdits([setPropText(fresh.source, again, geometry.key, text)], objectsSelected([name]))
+  } finally {
+    endGesture()
+  }
+  foldShapes()
+}
+
+function edits(list: TextEdit[], edit: TextEdit): void {
+  list.push(edit)
 }
 
 /** Make the object exist from here: base opacity 0, then a fade to 1 at this time, or a pop with `instant`. */

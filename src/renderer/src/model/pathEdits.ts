@@ -41,11 +41,11 @@ function numberOf(node: Node | null, source: string): number | null {
 }
 
 /**
- * The `shape` of a path statement as literal points, each with its text range, or null when
- * the shape is missing or is code: a function, a name, or anything but numbers.
+ * The `shape` of a path statement, or a Shape's `points` (D232), as literal points, each with its
+ * text range, or null when the list is missing or is code: a function, a name, or anything but numbers.
  */
-export function shapeLiteral(source: string, block: BlockInfo): ShapeLiteral | null {
-  const prop = block.props.find((p) => p.key === 'shape')
+export function shapeLiteral(source: string, block: BlockInfo, key = 'shape'): ShapeLiteral | null {
+  const prop = block.props.find((p) => p.key === key)
   if (!prop) return null
   let node: Node
   try {
@@ -75,6 +75,21 @@ export function shapeLiteral(source: string, block: BlockInfo): ShapeLiteral | n
     if (/^\s*$/.test(lead)) indent = lead
   }
   return { prop, range: { from: node.start, to: node.end }, points, multiline, indent }
+}
+
+/** A string written as a literal, with where it lives, or null when the key is missing or is code (D238). */
+export function stringLiteral(source: string, block: BlockInfo, key: string): { prop: PropInfo; range: Range; value: string } | null {
+  const prop = block.props.find((p) => p.key === key)
+  if (!prop) return null
+  let node: Node & { value?: unknown; expressions?: unknown[]; quasis?: { value: { cooked: string | null } }[] }
+  try {
+    node = acorn.parseExpressionAt(source.slice(0, prop.valueRange.to), prop.valueRange.from, { ecmaVersion: 'latest' }) as unknown as typeof node
+  } catch {
+    return null
+  }
+  if (node.type === 'Literal' && typeof node.value === 'string') return { prop, range: { from: node.start, to: node.end }, value: node.value }
+  if (node.type === 'TemplateLiteral' && node.expressions?.length === 0 && node.quasis?.length === 1 && typeof node.quasis[0]!.value.cooked === 'string') return { prop, range: { from: node.start, to: node.end }, value: node.quasis[0]!.value.cooked }
+  return null
 }
 
 export function pointText(x: number, y: number): string {

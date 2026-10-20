@@ -14,6 +14,8 @@ const api: Api = {
     load: (path) => ipcRenderer.invoke('project:load', path) as Promise<ProjectData>,
     last: () => ipcRenderer.invoke('project:last') as Promise<string | null>,
     write: (path, file, source) => ipcRenderer.invoke('project:write', path, file, source) as Promise<void>,
+    importSvg: () => ipcRenderer.invoke('project:importSvg') as Promise<{ name: string; text: string } | null>,
+    readFile: (path) => ipcRenderer.invoke('project:readFile', path) as Promise<string>,
     onChanged: (callback) => {
       const listener = (_event: IpcRendererEvent, change: FileChange) => callback(change)
       ipcRenderer.on('project:changed', listener)

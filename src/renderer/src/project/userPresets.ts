@@ -2,6 +2,7 @@ import { applyEdits, beginGesture, endGesture } from '../code/editor'
 import { formatNumber, insertDeclaration, type TextEdit } from '../model/edits'
 import { groupCarries } from '../model/groups'
 import { parseScene } from '../model/parse'
+import { flattenPathData, hasPathData, parsePathData, pathDataBounds } from '../model/pathData'
 import { classes, GROUP, VERB_NAMES } from '../model/registry'
 import { renameMembers, replaceIdentifiers } from '../model/rename'
 import { positionAt } from '../model/sample'
@@ -21,8 +22,8 @@ import { applyClasses, freeName, roundSeconds } from './operations'
 /** What an animation leaves behind when saved: its place in time, and a class statement it overrode. */
 const PLACING = new Set(['at', 'until', 'delay', 'overrides'])
 /** What an object leaves behind: where it is and when it exists. A group keeps its x and y, which shift its members. */
-const PLACE_AND_LIFE = new Set(['x', 'y', 'at', 'until'])
-const LIFE = new Set(['at', 'until'])
+const PLACE_AND_LIFE = new Set(['x', 'y', 'at', 'until', 'imported'])
+const LIFE = new Set(['at', 'until', 'imported'])
 const CLASS_NAMES: ReadonlySet<string> = new Set(Object.keys(classes))
 
 /** An identifier for a preset's label, for the names it writes: its words run together, the first lower-case, letters and digits only; `preset` when nothing is left. */
@@ -71,6 +72,11 @@ function lookOf(obj: SceneObject): UserPreset['look'] {
     const v = obj.attrs[key]
     if (typeof v === 'string') look[key] = v
   }
+  const points = obj.attrs['points']
+  if (Array.isArray(points)) look.points = points
+  // A path shape's picture is the line it draws (D238).
+  const d = obj.attrs['d']
+  if (hasPathData(d)) look.points = flattenPathData(parsePathData(d)).flatMap((sp) => sp.points.map((p) => [p.x, p.y]))
   return look
 }
 
@@ -94,6 +100,17 @@ function itemOf(source: string, obj: SceneObject, base: number): PresetItem {
 /** The drawn size of an object as declared, for its ghost. */
 function sizeOf(obj: SceneObject): { width: number; height: number } {
   const num = (key: string): number => (typeof obj.attrs[key] === 'number' ? (obj.attrs[key] as number) : 0)
+  const d = obj.attrs['d']
+  if (hasPathData(d)) {
+    const box = pathDataBounds(parsePathData(d))
+    return { width: Math.max(1, box.width), height: Math.max(1, box.height) }
+  }
+  const points = obj.attrs['points']
+  if (Array.isArray(points) && points.length > 0) {
+    const xs = points.map((p) => (typeof p[0] === 'number' ? p[0] : 0))
+    const ys = points.map((p) => (typeof p[1] === 'number' ? p[1] : 0))
+    return { width: Math.max(1, Math.max(...xs) - Math.min(...xs)), height: Math.max(1, Math.max(...ys) - Math.min(...ys)) }
+  }
   if (num('radius') > 0) return { width: num('radius') * 2, height: num('radius') * 2 }
   if (num('width') > 0 || num('height') > 0) return { width: num('width'), height: num('height') }
   const fontSize = num('fontSize') || 48

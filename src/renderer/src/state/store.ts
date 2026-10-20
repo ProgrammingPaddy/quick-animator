@@ -15,11 +15,13 @@ export interface ProjectSettings {
 }
 
 /** The kinds of object the GUI adds. */
-export type ObjectKind = 'Rect' | 'Circle' | 'Text'
-export const OBJECT_KINDS: ObjectKind[] = ['Rect', 'Circle', 'Text']
+export type ObjectKind = 'Rect' | 'Circle' | 'Text' | 'Shape'
+export const OBJECT_KINDS: ObjectKind[] = ['Rect', 'Circle', 'Text', 'Shape']
 
 /** The preview's tool (D203): Select, the default, acts on objects and on the selected path's points; Object places one of the chosen kind per click (D163); Path starts a path on an object, draws points, and moves the path and its points. A tool stays until put away. */
-export type Tool = 'select' | 'object' | 'path'
+export type Tool = 'select' | 'object' | 'path' | 'shape'
+/** What a press picks (D247). */
+export type Pick = 'object' | 'group' | 'class'
 
 /**
  * What the preview's handles do to the selection (D86). `all` shows every handle: the body
@@ -192,7 +194,7 @@ export interface UserPreset {
   size?: { width: number; height: number }
   /** An object: its kind, and how it looks, for its picture. A class: its name and its statements. */
   className?: string
-  look?: { width?: number; height?: number; radius?: number; fontSize?: number; fill?: string; text?: string }
+  look?: { width?: number; height?: number; radius?: number; fontSize?: number; fill?: string; text?: string; points?: number[][] }
   statements?: string[]
 }
 
@@ -388,6 +390,12 @@ interface State {
   tool: Tool
   /** With the Path tool: edit a path's points, or move whole paths (D208). */
   pathMode: 'edit' | 'move'
+  /** The Shape tool draws a new shape, or edits the points of the selected one (D236). */
+  shapeMode: 'create' | 'edit'
+  /** What a press on an object picks, in Select and in the Path tool: the object, the outermost group that holds it, or its class (D247). */
+  pick: Pick
+  /** A line about the last import, shown in the preview for a moment (D241). */
+  notice: string | null
   /** Show the selected object's paths without one being selected (D209); persisted. */
   showPaths: boolean
   /** Paths hidden for now, while the Path tool is on, as object:index (D209). */
@@ -428,6 +436,8 @@ interface State {
   setPush: (on: boolean) => void
   setSoft: (name: string, soft: boolean) => void
   setAnchored: (name: string, anchored: boolean) => void
+  /** Forget anchors of objects the scene no longer has, so a new object with an old name starts free (D161). */
+  pruneAnchored: (names: string[]) => void
   setPin: (pin: Pin) => void
   setChain: (chain: boolean) => void
   openLinksDialog: (target: LinksTarget) => void
@@ -443,6 +453,9 @@ interface State {
   closeClassesDialog: () => void
   setTool: (tool: Tool) => void
   setPathMode: (mode: 'edit' | 'move') => void
+  setShapeMode: (mode: 'create' | 'edit') => void
+  setPick: (pick: Pick) => void
+  setNotice: (notice: string | null) => void
   toggleShowPaths: () => void
   setPathHidden: (key: string, hidden: boolean) => void
   setPathPoints: (indices: number[]) => void
@@ -514,6 +527,9 @@ function createAppStore() {
       error: null,
       tool: 'select',
       pathMode: 'edit',
+      shapeMode: 'create',
+      pick: 'object',
+      notice: null,
       showPaths: loadChoice<'on' | 'off'>(SHOW_PATHS_KEY, ['on', 'off'], 'on') === 'on',
       hiddenPaths: [],
       addKind: 'Rect',
@@ -605,6 +621,13 @@ function createAppStore() {
           saveNames(ANCHORED_KEY, s.project?.path ?? '', next)
           return { anchored: next }
         }),
+      pruneAnchored: (names) =>
+        set((s) => {
+          const next = s.anchored.filter((n) => names.includes(n))
+          if (next.length === s.anchored.length) return {}
+          saveNames(ANCHORED_KEY, s.project?.path ?? '', next)
+          return { anchored: next }
+        }),
       setPin: (pin) => {
         saveChoice(PIN_KEY, pin)
         set({ pin })
@@ -632,8 +655,22 @@ function createAppStore() {
       setAllCollapsed: (pane, keys) => set((s) => ({ collapsed: { ...s.collapsed, [pane]: keys ? Object.fromEntries(keys.map((k) => [k, true as const])) : {} } })),
       openClassesDialog: (classesDialog) => set({ classesDialog, contextMenu: null }),
       closeClassesDialog: () => set((s) => (s.classesDialog ? { classesDialog: null } : s)),
-      setTool: (tool) => set((s) => ({ tool, hiddenPaths: tool === 'path' ? s.hiddenPaths : [] })),
+      // The Shape tool opens in Edit when one Shape is selected, alone or with one of its morphs, else in Create (D236 revised, D257).
+      setTool: (tool) =>
+        set((s) => {
+          const shape = s.selection.length === 1 ? s.model?.objects.find((o) => o.name === s.selection[0] && o.className === 'Shape') : undefined
+          const ref = s.selectedActions[0]
+          const withMorph = s.selectedActions.length === 1 && !!ref && !!shape && ref.object === shape.name && shape.actions[ref.index]?.verb === 'morph'
+          return {
+            tool,
+            hiddenPaths: tool === 'path' ? s.hiddenPaths : [],
+            ...(tool === 'shape' ? { shapeMode: shape && (s.selectedActions.length === 0 || withMorph) ? ('edit' as const) : ('create' as const) } : {}),
+          }
+        }),
       setPathMode: (pathMode) => set({ pathMode }),
+      setShapeMode: (shapeMode) => set({ shapeMode }),
+      setPick: (pick) => set({ pick }),
+      setNotice: (notice) => set({ notice }),
       toggleShowPaths: () =>
         set((s) => {
           saveChoice(SHOW_PATHS_KEY, s.showPaths ? 'off' : 'on')

@@ -176,6 +176,7 @@ watcher event. In both cases the playhead and the selection, by object name, are
 - Coordinates: origin at the center of the camera frame, y up, units are pixels at project resolution, rotation in degrees (D21).
 - Anti-aliasing by multisampling. Text is drawn to a canvas at twice the size and shown as a texture; CP1 keeps signed distance fields in reserve if zooming shows it soft.
 - An object whose opacity is zero is not sampled, drawn, or hit (D52). Visibility costs nothing.
+- A Shape is drawn from the pieces of its line, in `model/sample.ts` (`shapePieces`): its points, straight or smooth, or its `curves`, SVG path data read by `model/pathData.ts` into moves, lines, cubics, quadratics, and closes, flattened per piece. The fill is one `ShapeGeometry` from a `ShapePath` of the filled pieces, so a piece inside another is a hole; the stroke is a ribbon of quads with round joins, a second mesh (D232, D238). Both are centered on the box around the line at draw time (D235). A whole-shape write centers what it writes and moves `x, y` to match; a point edit writes that point alone and moves `x, y` by the center's shift, to a hundredth, so nothing else moves (D243). A path's `shape` may be the same path data; `pathFrame` then flattens it into the travelled line and keeps where each point came from, so the Path tool can put an anchor in (D246).
 - Rendering is on demand: when the playhead, the model, the selection, or the view changes. Playback renders once per display frame.
 
 ## World and camera (D40)
@@ -232,9 +233,13 @@ my-animation/
 
 External material is never imported in code. A file dropped on the preview or the object pane is
 copied into `assets/` and referenced by name: `Image({ src: 'logo.png' })`,
-`Video({ src: 'clip.mp4' })`, `Shape({ src: 'icon.svg' })` for an imported outline, and
-`font: 'Inter'` for a font in `assets/fonts` or installed on the system. The app resolves the
-names, caches decoded media, and reports a missing file inline where it is referenced.
+`Video({ src: 'clip.mp4' })`, and `font: 'Inter'` for a font in `assets/fonts` or installed on
+the system. The app resolves the names, caches decoded media, and reports a missing file inline
+where it is referenced. An SVG is the exception: it is geometry, so it becomes objects in the
+code (D241). `project/svgImport.ts` mounts the file out of sight and reads it through the
+browser's SVG engine, computed styles, matrices, and text boxes, into Rects, Circles, Texts,
+Shapes, and Groups, and `importSvg` in `project/operations.ts` writes them as declarations; the
+main process only picks and reads the file (`project:importSvg`).
 
 ## Dev mode (D34)
 

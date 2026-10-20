@@ -101,6 +101,8 @@ function rangeParts(value: Node): [Range, Range] | null {
 
 function propKind(value: Node): PropInfo['kind'] {
   if (value.type === 'Literal') return 'literal'
+  // A template string with nothing computed in it is a string: curves are written so (D244).
+  if (value.type === 'TemplateLiteral' && (value as unknown as { expressions: unknown[] }).expressions.length === 0) return 'literal'
   if (value.type === 'UnaryExpression') {
     const u = value as UnaryExpression
     if ((u.operator === '-' || u.operator === '+') && u.argument.type === 'Literal') return 'literal'

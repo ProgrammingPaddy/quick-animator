@@ -46,6 +46,7 @@ const VERB_DOCS: Record<Verb, string> = {
   fade: 'Change opacity over time. Opacity 0 means the object does not exist.',
   to: 'Change any attributes over time.',
   path: 'Take the object along a path over time: shape is points [[x, y], ...] or a function of the progress, (p) => [x, y]; orient turns the object with the path; offset shifts the whole path (D192).',
+  morph: "Take a Shape's outline to another over time: to is curves 'M 0 0 C ...', points [[x, y], ...], a word such as Shape.star(5, 100, 50), or a link such as () => other.curves (D257).",
 }
 
 /** The keys of a path block besides its timing (D192). */
@@ -86,15 +87,47 @@ function timingCompletion(key: string): Completion {
 }
 
 /** A whole object with every attribute at its default, Tab through the values. With or without the `name = ` part. */
+/** What a kind is sized or made by: the attributes a new block of it writes besides its place, fill, and life (D250). */
+const DEFINING: Record<string, string[]> = { Rect: ['width', 'height'], Circle: ['radius'], Text: ['text', 'fontSize'], Shape: ['points'] }
+
+/**
+ * What a new object's block writes (D250): what defines its first state, its place, size or
+ * text or points, fill, and when it lives; the rest stays a ghost line until wanted. `until`
+ * is the start plus the default duration from the preferences, or nothing when there is none.
+ */
+export function objectSnippetAttrs(className: string): { name: string; value: string }[] {
+  const schema = classes[className]
+  if (!schema) return []
+  const length = useStore.getState().prefs.objectLength
+  const wanted = className === 'Group' ? ['members'] : ['x', 'y', ...(DEFINING[className] ?? []), 'fill', 'at', 'until']
+  const out: { name: string; value: string }[] = []
+  for (const name of wanted) {
+    const attr = schema.attrs.find((a) => a.name === name)
+    if (!attr) continue
+    if (name === 'until') {
+      if (length !== null) out.push({ name, value: formatValue(length) })
+      continue
+    }
+    if (name === 'points') {
+      out.push({ name, value: '[[0, 60], [-60, -40], [60, -40]]' })
+      continue
+    }
+    out.push({ name, value: formatValue(attr.default) })
+  }
+  return out
+}
+
 function classSnippet(className: string, withName: boolean): Completion {
   const schema = classes[className]!
   const f = new Fields()
   const head = withName ? `${f.field(className.toLowerCase())} = ${className}` : className
-  const lines = schema.attrs.filter((a) => !a.derive).map((a) => `  ${a.name}: ${f.field(formatValue(a.default))},`).join('\n')
+  const lines = objectSnippetAttrs(className)
+    .map((a) => `  ${a.name}: ${f.field(a.value)},`)
+    .join('\n')
   return snippetCompletion(`${head}({\n${lines}\n})`, {
     label: className,
     detail: 'new object',
-    info: `${schema.doc} Expands to a full block.`,
+    info: `${schema.doc} Expands to a block of what defines it; the rest shows as ghost lines.`,
     type: 'class',
   })
 }
@@ -105,6 +138,7 @@ function verbSnippet(verb: Verb, className: string | undefined): Completion {
   const allowed = VERB_ATTRS[verb]
   if (verb === 'to') lines.push(`  ${f.field('')}`)
   else if (verb === 'path') lines.push('  shape: [', `    [${f.field('0')}, ${f.field('0')}],`, `    [${f.field('200')}, ${f.field('0')}],`, '  ],')
+  else if (verb === 'morph') lines.push(`  to: ${f.field('Shape.star(5, 100, 50)')},`)
   else if (allowed && className) {
     const schema = classes[className]
     const attrs = allowed.filter((a) => schema?.attrs.some((s) => s.name === a)).slice(0, verb === 'move' ? 2 : 1)

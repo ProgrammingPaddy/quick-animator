@@ -1,5 +1,6 @@
-import { CLASS_NAMES, GROUP, TIMING_KEY_NAMES, VERB_ALIASES, VERB_ATTRS, VERB_NAMES, VERB_PARAMS, canonicalVerb, classes, type Verb } from './registry'
+import { CLASS_NAMES, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ALIASES, VERB_ATTRS, VERB_NAMES, VERB_PARAMS, canonicalVerb, classes, type Verb } from './registry'
 import { parseScene } from './parse'
+import { ellipsePathData, serializePathData } from './pathData'
 import { forgetSampling, samplingContext, stateStretches, valueAt, type Stretch } from './sample'
 import { STATE_DIRECTIONS, STATE_NAMES, type Action, type ActionInfo, type AttrSource, type ClassAction, type SceneError, type SceneModel, type SceneObject, type StateDirection, type StateName, type TimeRef, type Timing } from './types'
 
@@ -141,8 +142,8 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
         continue
       }
       if (VERB_PARAMS[verb].includes(key)) {
-        // Only a group pivots: for anything else the point is meaningless and is dropped with a note. A path's shape and its settings belong to any object's path (D192).
-        if (className === GROUP || verb === 'path') changes[key] = value as AttrSource
+        // Only a group pivots: for anything else the point is meaningless and is dropped with a note. A path's shape and its settings belong to any object's path (D192), and a morph's target to its morph (D257).
+        if (className === GROUP || verb === 'path' || verb === 'morph') changes[key] = value as AttrSource
         else warn(`${owner}.${verb}: ${key} applies to a group's ${verb}`)
         continue
       }
@@ -190,7 +191,10 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
     const mark = raised.length
     const block = readBlock(obj.name, verb, obj.className, args)
     // A path is nothing without its shape: points, or a function of the progress (D192).
-    if (verb === 'path' && !('shape' in block.changes)) warn(`${obj.name}.path needs a shape: points [[x, y], ...] or a function of the progress, (p) => [x, y]`)
+    if (verb === 'path' && !('shape' in block.changes)) warn(`${obj.name}.path needs a shape: points [[x, y], ...], curves 'M 0 0 C ...', or a function of the progress, (p) => [x, y]`)
+    // Only a Shape morphs (D257): a kind becomes one first, by Convert to shape.
+    if (verb === 'morph' && obj.className !== SHAPE) warn(`${obj.name}.morph: only a Shape morphs; right-click a Rect or a Circle for Convert to shape`)
+    else if (verb === 'morph' && !('to' in block.changes)) warn(`${obj.name}.morph needs a target: to: curves 'M 0 0 C ...', points [[x, y], ...], a word such as Shape.star(5, 100, 50), or a link such as () => other.curves`)
     const action = makeAction(obj, verb, block, null)
     claim(mark, action)
     if (block.overrides !== undefined) {
@@ -294,6 +298,25 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
       return objectHandle(obj)
     }
   }
+
+  // Lists of points a Shape or a morph can take as a word rather than a list (D234): on the class, so no object's name can shadow them.
+  const round = (v: number): number => Math.round(v * 100) / 100
+  const ring = (count: number, radius: (i: number) => number, phase = -Math.PI / 2): number[][] => Array.from({ length: count }, (_, i) => {
+    const a = phase + (i / count) * 2 * Math.PI
+    return [round(radius(i) * Math.cos(a)), round(-radius(i) * Math.sin(a))]
+  })
+  Object.assign(api['Shape'] as object, {
+    rect: (width = 200, height = 120) => [
+      [-width / 2, -height / 2],
+      [width / 2, -height / 2],
+      [width / 2, height / 2],
+      [-width / 2, height / 2],
+    ],
+    // A circle is curves, exact (D249).
+    circle: (radius = 60) => serializePathData(ellipsePathData(radius, radius)),
+    polygon: (sides = 6, radius = 60) => ring(Math.max(3, Math.round(sides)), () => radius),
+    star: (points = 5, outer = 100, inner = 50) => ring(Math.max(2, Math.round(points)) * 2, (i) => (i % 2 === 0 ? outer : inner)),
+  })
 
   /**
    * A stand-in for a name that is not declared yet (D148): its times, `start`, `end`, and
