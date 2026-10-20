@@ -96,7 +96,6 @@ function ClassesDialog({ names, model, close }: { names: string[]; model: SceneM
         }}
       >
         <div className="dialog-title">{title}</div>
-        <div className="dialog-message">Like CSS classes: an object can have several, and an action on all('name') applies to every member.</div>
         <ul className="dialog-items class-list">
           {all.length === 0 && <li className="dim">No classes yet. Create one below.</li>}
           {all.map((c) => (

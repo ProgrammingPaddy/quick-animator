@@ -10,7 +10,7 @@ import { ownBounds, pathControlsWorld, pathHolds, positionAt, shapeOwnAnchors, s
 import type { SceneModel, SceneObject } from '../model/types'
 import { newProject, pickProject } from '../project/controller'
 import { DEFAULT_EASE_FRACTION, easingFor, unease } from '../model/easing'
-import { addMorph, addObject, addPath, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, inProgressActions, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, pathDragTarget, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestClasses, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
+import { addMorph, addObject, addPath, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, inProgressActions, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, pathDragTarget, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestClasses, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, settleMorph, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphRunning, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
 import { requestSavePreset } from '../project/userPresets'
 import { makeMover, outlineOf, resetMover, walk, type Mover, type Polygon, type Pushing } from '../preview/collide'
 import { SceneRenderer, type ControlHandle, type Frame, type GuideLine, type Handle } from '../preview/SceneRenderer'
@@ -943,16 +943,21 @@ export function PreviewPane() {
         return
       }
       beginGesture()
-      if (morph && !shapeMorphSelected(name)) {
+      // The pressed point, with every other picked one (D233), whatever the drag writes.
+      indices = s.pathPoints.includes(point) ? s.pathPoints : [point]
+      if (morph && !shapeMorphRunning(name)) {
         // Shift with a point writes a morph from the playhead, for the proposed length, and the drag shapes its target (D257).
         const gesture = gestureRef.current
         if (addMorph(name, gesture ? gesture.from : s.time, gesture?.duration) === null) {
           endGesture()
           return
         }
-        indices = [point]
-      } else indices = s.pathPoints.includes(point) ? s.pathPoints : [point]
+      } else {
+        // While a morph runs, the playhead goes to its end first, where the outline is the target the drag writes (D257).
+        settleMorph(name)
+      }
     } else if (insert !== null) {
+      if (settleMorph(name)) return
       beginGesture()
       if (insert.kind === 'points') {
         insertShapePoints(name, insert.at, [gridded(world)])
@@ -995,10 +1000,22 @@ export function PreviewPane() {
   }
 
   /** Drag a control of an anchor of a curves shape (D240): a smooth anchor's other control turns to stay in line, except while Alt is held, whenever in the drag that is, when this one moves alone; a corner's moves alone (D252). */
-  const beginShapeHandleDrag = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, name: string, handle: AnchorHandle, world: Point) => {
+  const beginShapeHandleDrag = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, name: string, pressed: AnchorHandle, at: Point) => {
     const viewport = viewportRef.current
     if (!viewport) return
     const bounds = host.getBoundingClientRect()
+    let handle = pressed
+    let world = at
+    // While a morph runs, the playhead goes to its end first, and the handle is the target's there (D257).
+    if (settleMorph(name)) {
+      const s = useStore.getState()
+      const obj = s.model?.objects.find((o) => o.name === name)
+      const anchor = shapeEditAnchors(name)[handle.index]
+      const control = anchor ? (handle.which === 'in' ? anchor.in : anchor.out) : null
+      if (!s.model || !obj || !anchor || !control) return
+      handle = { ...handle, anchor: shapeWorldOf(s.model, obj, s.time, anchor), point: shapeWorldOf(s.model, obj, s.time, control) }
+      world = handle.point
+    }
     const base = shapeEditBase(name) ?? undefined
     const joined = shapeAnchorSmooth(name, handle.index)
     beginGesture()
@@ -1881,6 +1898,7 @@ export function PreviewPane() {
     }
     // A selected Shape's points and line (D233): delete the point under the pointer, or add one on the line there.
     const shape = shapeRef.current
+    if (shape?.editable && settleMorph(shape.name)) return
     if (shape?.editable) {
       const point = nearestPoint(shape.frame.anchors, world, 8 * pixel)
       if (point !== null) {

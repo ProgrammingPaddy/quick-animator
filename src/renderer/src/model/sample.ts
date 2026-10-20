@@ -1,6 +1,7 @@
 import { attrSchema, defaultFor, GROUP, SHAPE, type AttrType, type AttrValue } from './registry'
 import { easingFor, unease, type Easing } from './easing'
-import { boundsOf, flattenPathData, hasPathData, parsePathData, pathAnchors, placeBetween, translatePathData, type Anchor, type Seg, type Subpath } from './pathData'
+import { boundsOf, flattenPathData, hasPathData, parsePathData, pathAnchors, placeBetween, polygonPathData, smoothPathData, translatePathData, type Anchor, type Seg, type Subpath } from './pathData'
+import { blendMorph, morphPairs, type MorphPair } from './morph'
 import type { Action, AttrSource, SceneModel, SceneObject, StateDirection, StateName } from './types'
 
 /**
@@ -77,8 +78,8 @@ interface Cache {
   motions: Map<number, { time: number; motion: Motion; shift: Point }>
   /** The line an object travels during each of its paths, by action id (D223). */
   travels: Map<number, PathFrame | null>
-  /** The pairs of resampled outlines a morph blends, aligned once, by action id (D257). */
-  morphs: Map<number, MorphPairs>
+  /** The pairs of outlines a morph blends, matched and aligned once, by action id (D257). */
+  morphs: Map<number, { from: Seg[]; to: Seg[]; pairs: MorphPair[] }>
 }
 
 const cache = new WeakMap<SceneModel, Cache>()
@@ -728,7 +729,9 @@ export interface ShapePiece {
 /** The pieces a Shape is drawn with, in its own space (D238): its path's subpaths, each filled as SVG fills them, or its points as one piece, filled when closed (D232); with morphs, the outline they have taken it to by this time (D257). */
 export function shapePieces(model: SceneModel, obj: SceneObject, time: number): ShapePiece[] {
   const morphs = morphActions(obj)
-  return morphs.length > 0 ? morphedPieces(model, obj, time, morphs, morphs.length) : shapeOwnPieces(model, obj, time)
+  if (morphs.length === 0) return shapeOwnPieces(model, obj, time)
+  const segs = morphedSegs(model, obj, time, morphs, NONE)
+  return segs ? piecesOfSegs(segs) : []
 }
 
 /** The pieces of a Shape's own outline, its curves or its points, with no morph applied. */
@@ -744,166 +747,119 @@ function morphActions(obj: SceneObject): Action[] {
   return obj.actions.filter((a) => a.verb === 'morph' && !a.overridden).sort(byStack)
 }
 
-const targetCurvesCache = new Map<string, ShapePiece[]>()
-const targetPointsCache = new WeakMap<object, ShapePiece[]>()
+const targetPointsSegs = new WeakMap<object, Seg[]>()
 
-/** The pieces a morph's target draws, where it is written about the shape's x and y (D257): curves as path data, or points as one closed piece; null when the target draws nothing. */
-export function morphTargetPieces(model: SceneModel, action: Action, time: number): ShapePiece[] | null {
+/** The target of a morph as path data, where it is written about the shape's x and y (D257): curves as they are, points as a closed polygon; null when the target draws nothing. */
+export function morphTargetSegs(model: SceneModel, action: Action, time: number): Seg[] | null {
   const raw = action.changes['to']
   const value = raw === undefined ? undefined : resolveSource(model, raw, time, '')
-  if (hasPathData(value)) {
-    let pieces = targetCurvesCache.get(value)
-    if (!pieces) {
-      if (targetCurvesCache.size > 256) targetCurvesCache.clear()
-      pieces = flattenPathData(parsedPathData(value)).map((sp) => ({ curve: sp.points, closed: sp.closed, filled: sp.points.length >= 3, at: sp.at }))
-      targetCurvesCache.set(value, pieces)
-    }
-    return pieces
-  }
+  if (hasPathData(value)) return parsedPathData(value)
   if (typeof value !== 'object' || value === null) return null
-  let pieces = targetPointsCache.get(value)
-  if (!pieces) {
+  let segs = targetPointsSegs.get(value)
+  if (!segs) {
     const points = pointsOf(value)
     if (points.length < 2) return null
-    pieces = [{ curve: [...points, points[0]!], closed: true, filled: points.length >= 3 }]
-    targetPointsCache.set(value, pieces)
+    segs = polygonPathData(points, true)
+    targetPointsSegs.set(value, segs)
   }
-  return pieces
+  return segs
 }
 
-/** The outline of a morphing Shape at a time, among the first `count` of its morphs (D257): the one running has its say, else the last to end holds its target; before any, the shape's own; a target that draws nothing leaves the morph out. */
-function morphedPieces(model: SceneModel, obj: SceneObject, time: number, morphs: Action[], count: number): ShapePiece[] {
+const pointsSegsCache = new WeakMap<object, { closed: boolean; smooth: boolean; segs: Seg[] }>()
+
+/** A Shape's own outline as path data in its own space (D257): its curves as drawn, or its points as lines or as their smooth curve; null for none. */
+export function shapeOutlineSegs(model: SceneModel, obj: SceneObject, time: number): Seg[] | null {
+  const own = shapeOwnSegs(model, obj, time)
+  if (own) return own
+  const raw = valueAt(model, obj, 'points', time)
+  const key = typeof raw === 'object' && raw !== null ? raw : null
+  const closed = valueAt(model, obj, 'closed', time) !== false
+  const smooth = valueAt(model, obj, 'smooth', time) === true
+  const cached = key ? pointsSegsCache.get(key) : undefined
+  if (cached && cached.closed === closed && cached.smooth === smooth) return cached.segs
+  const points = centered(pointsOf(raw))
+  if (points.length < 2) return null
+  const segs = smooth && points.length >= 3 ? smoothPathData(points, closed) : polygonPathData(points, closed)
+  if (key) pointsSegsCache.set(key, { closed, smooth, segs })
+  return segs
+}
+
+const NONE: ReadonlySet<Action> = new Set()
+
+/** Which morph, among those not left out, has a say at a time: the one running, the top of the stack among those, else the last to end; -1 before any. With `strictStart`, one at its very start is left out, for edits that set the start state (D102 note). */
+function morphAt(morphs: Action[], time: number, except: ReadonlySet<Action>, strictStart = false): { index: number; running: boolean } {
   let running = -1
   let ended = -1
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < morphs.length; i++) {
     const a = morphs[i]!
-    if (a.start > time) continue
+    if (except.has(a)) continue
+    if (strictStart ? a.start >= time : a.start > time) continue
     if (time < a.end && a.end > a.start) running = i
     else if (ended < 0 || a.end >= morphs[ended]!.end) ended = i
   }
-  const index = running >= 0 ? running : ended
-  if (index < 0) return shapeOwnPieces(model, obj, time)
+  return running >= 0 ? { index: running, running: true } : { index: ended, running: false }
+}
+
+/** The morph that has a say over a Shape's outline at a time (D257), whose target the Shape tool then edits; null before any, and at the very start of the first, where the shape's own outline is what shows. */
+export function morphInForce(obj: SceneObject, time: number): Action | null {
+  const morphs = morphActions(obj)
+  const { index } = morphAt(morphs, time, NONE, true)
+  return index >= 0 ? morphs[index]! : null
+}
+
+/** The morph running at a time, past its very start, if one is. */
+export function morphRunning(obj: SceneObject, time: number): Action | null {
+  const morphs = morphActions(obj)
+  const { index, running } = morphAt(morphs, time, NONE, true)
+  return running ? morphs[index]! : null
+}
+
+/**
+ * The outline of a morphing Shape at a time, the morphs in `except` left out (D257): the one
+ * running has its say, else the last to end holds its target; before any, the shape's own; a
+ * target that draws nothing leaves its morph out. A morph begins from the outline the other
+ * morphs leave at its start, whenever they are written, so a chain reads in time order and
+ * nothing is remembered from when a morph was put down. The blend keeps every anchor and
+ * control, so the morph lands on the target exactly.
+ */
+function morphedSegs(model: SceneModel, obj: SceneObject, time: number, morphs: Action[], except: ReadonlySet<Action>): Seg[] | null {
+  const { index, running } = morphAt(morphs, time, except)
+  if (index < 0) return shapeOutlineSegs(model, obj, time)
   const action = morphs[index]!
-  const target = morphTargetPieces(model, action, time)
-  if (!target) return morphedPieces(model, obj, time, morphs, index)
+  const without = new Set(except).add(action)
+  const target = morphTargetSegs(model, action, time)
+  if (!target) return morphedSegs(model, obj, time, morphs, without)
   const ease = easingFor(action.timing, action.end - action.start)
-  const progress = running < 0 ? ease(1) : ease((time - action.start) / (action.end - action.start))
+  const progress = running ? ease((time - action.start) / (action.end - action.start)) : ease(1)
   if (progress === 1) return target
-  // The outline the morph began from: what the morphs before it had made of the shape by then.
-  const from = morphedPieces(model, obj, action.start, morphs, index)
-  return blendPieces(cacheFor(model), action, from, target, progress)
-}
-
-interface MorphPairs {
-  target: ShapePiece[]
-  pairs: { a: Point[]; b: Point[]; closed: boolean; filled: boolean }[]
-}
-
-/** The blend of two outlines at a progress (D257): each pair of pieces resampled to one count and aligned once per morph, then every point taken straight across. */
-function blendPieces(c: Cache, action: Action, from: ShapePiece[], to: ShapePiece[], p: number): ShapePiece[] {
-  if (p === 0) return from
+  const from = morphedSegs(model, obj, action.start, morphs, without)
+  if (!from) return target
+  if (progress === 0) return from
+  const c = cacheFor(model)
   let entry = c.morphs.get(action.id)
-  if (!entry || entry.target !== to) {
-    entry = { target: to, pairs: pairPieces(from, to) }
+  if (!entry || entry.from !== from || entry.to !== target) {
+    entry = { from, to: target, pairs: morphPairs(from, target) }
     c.morphs.set(action.id, entry)
   }
-  return entry.pairs.map(({ a, b, closed, filled }) => {
-    const curve = a.map((q, i) => ({ x: q.x + (b[i]!.x - q.x) * p, y: q.y + (b[i]!.y - q.y) * p }))
-    if (closed && curve.length > 0) curve.push(curve[0]!)
-    return { curve, closed, filled }
-  })
+  return blendMorph(entry.pairs, progress)
 }
 
-/** Two outlines paired piece by piece (D257): each pair resampled along its length to one count, a piece with no partner shrinking to or growing from the other's middle; a closed pair's target reversed when it runs the other way round and turned to where the points travel least; an open pair's target reversed when its ends match better that way. */
-function pairPieces(from: ShapePiece[], to: ShapePiece[]): MorphPairs['pairs'] {
-  const out: MorphPairs['pairs'] = []
-  const n = Math.max(from.length, to.length)
-  for (let i = 0; i < n; i++) {
-    const f = from[i] ?? collapsed(to[i]!)
-    const t = to[i] ?? collapsed(from[i]!)
-    if (f.curve.length === 0 || t.curve.length === 0) continue
-    const closed = f.closed || t.closed
-    const count = Math.max(32, Math.min(256, Math.max(f.curve.length, t.curve.length)))
-    const a = closed ? resampled(ringOf(f.curve), count) : resampledOpen(f.curve, count)
-    let b = closed ? resampled(ringOf(t.curve), count) : resampledOpen(t.curve, count)
-    if (closed) {
-      if (signedArea(a) * signedArea(b) < 0) b = b.slice().reverse()
-      b = turnedToFit(a, b)
-    } else {
-      const a0 = a[0]!
-      const aN = a[a.length - 1]!
-      const b0 = b[0]!
-      const bN = b[b.length - 1]!
-      if (Math.hypot(a0.x - b0.x, a0.y - b0.y) + Math.hypot(aN.x - bN.x, aN.y - bN.y) > Math.hypot(a0.x - bN.x, a0.y - bN.y) + Math.hypot(aN.x - b0.x, aN.y - b0.y)) b = b.slice().reverse()
-    }
-    out.push({ a, b, closed, filled: (f.filled || t.filled) && closed })
+/** A Shape's outline as path data at a time, in its own space (D257): its own, or what its morphs have made of it by then, which the Shape tool shows; null for a shape that draws nothing. */
+export function shapeSegsAt(model: SceneModel, obj: SceneObject, time: number): Seg[] | null {
+  const morphs = morphActions(obj)
+  return morphs.length > 0 ? morphedSegs(model, obj, time, morphs, NONE) : shapeOutlineSegs(model, obj, time)
+}
+
+const piecesCache = new WeakMap<Seg[], ShapePiece[]>()
+
+/** The pieces path data draws, each point with where it came from; kept per path, so an outline or a target costs nothing twice. */
+function piecesOfSegs(segs: Seg[]): ShapePiece[] {
+  let pieces = piecesCache.get(segs)
+  if (!pieces) {
+    pieces = flattenPathData(segs).map((sp) => ({ curve: sp.points, closed: sp.closed, filled: sp.points.length >= 3, at: sp.at }))
+    piecesCache.set(segs, pieces)
   }
-  return out
-}
-
-/** A piece shrunk to its middle: where a piece with no partner comes from or goes to. */
-function collapsed(piece: ShapePiece): ShapePiece {
-  const pts = piece.curve
-  const m = pts.reduce((s, p) => ({ x: s.x + p.x / pts.length, y: s.y + p.y / pts.length }), { x: 0, y: 0 })
-  return { curve: pts.map(() => ({ x: m.x, y: m.y })), closed: piece.closed, filled: piece.filled }
-}
-
-/** A closed piece's points once round: the return to its start, when drawn, dropped. */
-function ringOf(curve: Point[]): Point[] {
-  const first = curve[0]!
-  const last = curve[curve.length - 1]!
-  return curve.length > 1 && Math.hypot(last.x - first.x, last.y - first.y) < 1e-9 ? curve.slice(0, -1) : curve
-}
-
-/** Points along an open line, `n` of them evenly by distance, its ends included. */
-function resampledOpen(points: Point[], n: number): Point[] {
-  if (points.length === 1) return Array.from({ length: n }, () => points[0]!)
-  const cumulative = [0]
-  for (let i = 1; i < points.length; i++) cumulative.push(cumulative[i - 1]! + Math.hypot(points[i]!.x - points[i - 1]!.x, points[i]!.y - points[i - 1]!.y))
-  const total = cumulative[cumulative.length - 1]!
-  if (total <= 0) return Array.from({ length: n }, () => points[0]!)
-  const out: Point[] = []
-  let k = 0
-  for (let i = 0; i < n; i++) {
-    const target = (total * i) / (n - 1)
-    while (k < cumulative.length - 2 && cumulative[k + 1]! < target) k++
-    const a = points[k]!
-    const b = points[k + 1]!
-    const length = cumulative[k + 1]! - cumulative[k]!
-    const t = length > 1e-9 ? (target - cumulative[k]!) / length : 0
-    out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })
-  }
-  return out
-}
-
-function signedArea(points: Point[]): number {
-  let area = 0
-  for (let i = 0; i < points.length; i++) {
-    const p = points[i]!
-    const q = points[(i + 1) % points.length]!
-    area += p.x * q.y - q.x * p.y
-  }
-  return area / 2
-}
-
-/** The ring `b` started where its points travel least to reach `a`'s, so a morph has no seam (D257). */
-function turnedToFit(a: Point[], b: Point[]): Point[] {
-  const n = a.length
-  let best = 0
-  let bestCost = Infinity
-  for (let k = 0; k < n; k++) {
-    let cost = 0
-    for (let i = 0; i < n && cost < bestCost; i++) {
-      const p = a[i]!
-      const q = b[(i + k) % n]!
-      cost += (p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y)
-    }
-    if (cost < bestCost) {
-      bestCost = cost
-      best = k
-    }
-  }
-  return best === 0 ? b : [...b.slice(best), ...b.slice(0, best)]
+  return pieces
 }
 
 /** Every point of the line a Shape is drawn with, in its own space, for its box and its hull. */

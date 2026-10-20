@@ -4,7 +4,7 @@ import { appendStatement, blockText, formatNumber, insertDeclaration, lineEdit, 
 import { isMember } from '../model/evaluate'
 import { memberRef, normalizeSelection } from '../model/groups'
 import { classes, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
-import { absoluteAt, anchorTime, memberBox, pathFrame, pathHolds, pathShift, pointsCenter, positionAt, rawFromWorld, shapeCurves, shapeOwnFromWorld, shapeOwnPoints, shapeOwnSegs, travelFrame, type Point, type ShapePiece } from '../model/sample'
+import { absoluteAt, anchorTime, memberBox, pathFrame, pathHolds, pathShift, pointsCenter, positionAt, rawFromWorld, morphInForce, morphRunning, morphTargetSegs, shapeCurves, shapeOwnFromWorld, shapeOwnPoints, shapeSegsAt, travelFrame, type Point, type ShapePiece } from '../model/sample'
 import { anchorCurved, anchorKind, closePath, cornerAnchors, curveSegment, dragAnchorHandle, ellipsePathData, flattenPathData, formatCurves, hasPathData, moveAnchor, openPath, parsePathData, pathAnchors, pathDataBounds, polygonPathData, removeAnchor, scalePathData, segmentKind, serializePathData, smoothAnchors, smoothPathData, splitSegment, straightenAll, straightenAnchors, straightenSegment, translatePathData, type Anchor, type AnchorKind, type Seg } from '../model/pathData'
 import { insertPointsEdit, pointText, removePointEdit, setPointEdit, shapeLiteral, stringLiteral, type ShapeLiteral } from '../model/pathEdits'
 import { readSvg, scaleImported, type ImportedItem } from './svgImport'
@@ -485,29 +485,12 @@ function startingValues(model: SceneModel, obj: SceneObject, verb: Verb, time: n
   return attrs
 }
 
-/** The outline a new morph starts from, as path data in the shape's own space (D257): the target of the morph in force at the time, else the shape's own curves, or its points as lines or as their smooth curve. */
-function outlineSegsAt(model: SceneModel, obj: SceneObject, time: number): Seg[] | null {
-  const inForce = obj.actions.filter((a) => a.verb === 'morph' && !a.overridden && a.start <= time).sort((a, b) => a.id - b.id).pop()
-  const raw = inForce?.changes['to']
-  if (hasPathData(raw)) return parsePathData(raw)
-  if (Array.isArray(raw)) {
-    const points = (raw as unknown[]).filter((p): p is number[] => Array.isArray(p) && typeof p[0] === 'number' && typeof p[1] === 'number').map((p) => ({ x: p[0]!, y: p[1]! }))
-    if (points.length >= 2) return polygonPathData(points, true)
-  }
-  const own = shapeOwnSegs(model, obj, time)
-  if (own) return own
-  const points = shapeOwnPoints(model, obj, time)
-  if (points.length < 2) return null
-  const closed = valueAt(model, obj, 'closed', time) !== false
-  return valueAt(model, obj, 'smooth', time) === true && points.length >= 3 ? smoothPathData(points, closed) : polygonPathData(points, closed)
-}
-
-/** Add a morph to a Shape (D257): its target the outline as it is then, written as curves, the morph selected and the playhead at its end, so the Shape tool's handles then shape the target. Returns the morph's index, or null. */
+/** Add a morph to a Shape (D257): its target the outline as it is then, the actual one at the playhead, written as curves, the morph selected and the playhead at its end, so the Shape tool's handles then shape the target. Returns the morph's index, or null. */
 export function addMorph(name: string, time: number, length = 1, pin: Pin = 'start'): number | null {
   const { source, model } = state()
   const obj = model?.objects.find((o) => o.name === name)
   if (!model || !obj?.decl || obj.className !== SHAPE) return null
-  const segs = outlineSegsAt(model, obj, time)
+  const segs = shapeSegsAt(model, obj, time)
   if (!segs) return null
   const { at, duration } = pinnedSpan(pin, time, length)
   const index = obj.actions.length
@@ -550,7 +533,7 @@ export function addClassAction(className: string, verb: Verb, time: number): voi
   }
   if (verb === 'morph') {
     // Every member morphs to the same target, which starts as the first member's outline (D257).
-    const segs = first.className === SHAPE ? outlineSegsAt(model, first, roundSeconds(time)) : null
+    const segs = first.className === SHAPE ? shapeSegsAt(model, first, roundSeconds(time)) : null
     if (!segs) return
     applyEdits([appendStatement(source, blockText(`all('${className}').morph`, { to: serializePathData(segs), at: roundSeconds(time), duration: 1 }))], actionSelected(first.name, first.actions.length))
     foldShapes()
@@ -962,67 +945,96 @@ interface EditableShapeCurves {
   source: string
   model: SceneModel
   obj: SceneObject
-  literal: { prop: PropInfo; range: Range; value: string }
+  /** Where the path is written: a curves string, or, for a morph's target that is a word or points, the value to write curves over (D257). */
+  range: Range
   /** The path as written, which the shape draws with the center of its box at its x and y (D235); a morph's target as written, drawn where it is (D257). */
   written: Seg[]
   /** The center of the box around the written path's line; the origin for a morph's target. */
   center: Point
-  /** The morph whose target this is, when one of the shape's morphs is selected (D257). */
+  /** The morph whose target this is, when one has a say at the playhead (D257). */
   target?: Action
+  /** The target is a word or points, which the first write turns into curves (D257). */
+  bake?: boolean
 }
 
-/** The morph of a Shape that is selected, when one is and it is written in the object's own statement (D257). */
-function selectedMorph(obj: SceneObject): Action | null {
-  const { selectedActions } = useStore.getState()
-  const ref = selectedActions.length === 1 ? selectedActions[0]! : null
-  if (!ref || ref.object !== obj.name) return null
-  const action = obj.actions[ref.index]
-  return action && action.verb === 'morph' && !action.overridden && !action.classAction && action.stmt ? action : null
-}
-
-/** Whether one of a Shape's morphs is selected, so the Shape tool edits its target (D257). */
+/** Whether the selected animation is one of a Shape's morphs, so a press on the shape keeps it selected (D257). */
 export function shapeMorphSelected(name: string): boolean {
   const obj = findObject(name)
-  return !!obj && selectedMorph(obj) !== null
+  const ref = useStore.getState().selectedActions[0]
+  return !!obj && !!ref && ref.object === name && obj.actions[ref.index]?.verb === 'morph'
 }
 
-/** A Shape whose curves are written as a literal string in its declaration, which the GUI edits anchor by anchor (D240); with one of its morphs selected, that morph's target when it is written as curves (D257). */
+/**
+ * A Shape whose curves are written as a literal string in its declaration, which the GUI edits
+ * anchor by anchor (D240); when one of its morphs has a say at the playhead, that morph's target
+ * (D257): written as curves, or as a word or points that become curves when a point is edited.
+ * A target that is a link, or a class's, is edited in the code.
+ */
 function shapeCurvesOf(name: string): EditableShapeCurves | null {
   const { source, model, time } = state()
   const obj = model?.objects.find((o) => o.name === name)
   if (!model || !obj?.decl || obj.className !== SHAPE) return null
-  const target = selectedMorph(obj)
-  if (target) {
-    const literal = stringLiteral(source, target.stmt!, 'to')
-    if (!literal || !hasPathData(literal.value)) return null
-    return { source, model, obj, literal, written: parsePathData(literal.value), center: { x: 0, y: 0 }, target }
+  const morph = morphInForce(obj, time)
+  if (morph) {
+    if (!morph.stmt || morph.classAction) return null
+    const prop = morph.stmt.props.find((p) => p.key === 'to')
+    if (!prop || prop.kind === 'function') return null
+    const literal = stringLiteral(source, morph.stmt, 'to')
+    const written = literal && hasPathData(literal.value) ? parsePathData(literal.value) : morphTargetSegs(model, morph, time)
+    if (!written) return null
+    return { source, model, obj, range: literal ? literal.range : prop.valueRange, written, center: { x: 0, y: 0 }, target: morph, bake: !literal }
   }
   if (shapeCurves(model, obj, time) === null) return null
   const literal = stringLiteral(source, obj.decl, 'curves')
   if (!literal || !hasPathData(literal.value)) return null
   const written = parsePathData(literal.value)
   const b = pathDataBounds(written)
-  return { source, model, obj, literal, written, center: { x: b.x, y: b.y } }
+  return { source, model, obj, range: literal.range, written, center: { x: b.x, y: b.y } }
 }
 
-/** What the preview can edit of a Shape: its points, written as a list (D233), its curves, written as a string (D240), or nothing; a selected morph whose target is not written as curves is edited in the code (D257). */
+/** What the preview can edit of a Shape: its points, written as a list (D233), its curves, written as a string (D240), or nothing; with a morph in force whose target cannot be written, nothing (D257). */
 export function shapeEditable(name: string): 'points' | 'curves' | null {
   if (shapeCurvesOf(name)) return 'curves'
   const obj = findObject(name)
-  if (obj && selectedMorph(obj)) return null
+  if (obj && morphInForce(obj, state().time)) return null
   return shapeLiteralOf(name) ? 'points' : null
 }
 
-/** The anchors the Shape tool edits, in the shape's own space (D257): the selected morph's target, or the shape's own curves as they are drawn. */
-export function shapeEditAnchors(name: string): Anchor[] {
+/** The outline the Shape tool shows at the playhead, in the shape's own space (D257): its own as drawn, or what its morphs have made of it by then, the target itself once one has ended. */
+function shownSegs(name: string): Seg[] | null {
+  const { model, time } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj) return null
+  if (obj.actions.some((a) => a.verb === 'morph' && !a.overridden)) return shapeSegsAt(model, obj, time)
   const cur = shapeCurvesOf(name)
-  return cur ? pathAnchors(translatePathData(cur.written, -cur.center.x, -cur.center.y)) : []
+  return cur ? translatePathData(cur.written, -cur.center.x, -cur.center.y) : null
 }
 
-/** The pieces of the outline the Shape tool edits, in the shape's own space, each point with where it came from (D257). */
+/** The anchors the Shape tool shows and edits, in the shape's own space (D257): those of the outline at the playhead. */
+export function shapeEditAnchors(name: string): Anchor[] {
+  const segs = shownSegs(name)
+  return segs ? pathAnchors(segs) : []
+}
+
+/** The pieces of the outline the Shape tool shows, in the shape's own space, each point with where it came from (D257). */
 export function shapeEditPieces(name: string): ShapePiece[] {
-  const cur = shapeCurvesOf(name)
-  return cur ? flattenPathData(translatePathData(cur.written, -cur.center.x, -cur.center.y)).map((sp) => ({ curve: sp.points, closed: sp.closed, filled: sp.points.length >= 3, at: sp.at })) : []
+  const segs = shownSegs(name)
+  return segs ? flattenPathData(segs).map((sp) => ({ curve: sp.points, closed: sp.closed, filled: sp.points.length >= 3, at: sp.at })) : []
+}
+
+/** Whether a morph of a Shape is running at the playhead (D257). */
+export function shapeMorphRunning(name: string): boolean {
+  const obj = findObject(name)
+  return !!obj && morphRunning(obj, state().time) !== null
+}
+
+/** Before an edit of a Shape's points while a morph runs, the playhead goes to the morph's end, where the outline is the target the edit writes (D257), as a drag during a move edits its end. Returns whether it moved. */
+export function settleMorph(name: string): boolean {
+  const obj = findObject(name)
+  const running = obj ? morphRunning(obj, state().time) : null
+  if (!running) return false
+  useStore.getState().setTime(running.end)
+  return true
 }
 
 /** Whether the preview can edit a Shape's points: they are a literal list in its declaration. */
@@ -1074,7 +1086,7 @@ function writeShapeCurves(e: EditableShapeCurves, own: Seg[], origin?: Point): v
   }
   const c = pathDataBounds(own)
   const edits: TextEdit[] = []
-  const edit = lineEdit(e.source, e.literal.range.from, e.literal.range.to, formatCurves(serializePathData(translatePathData(own, -c.x, -c.y)), e.obj.decl!.indent))
+  const edit = lineEdit(e.source, e.range.from, e.range.to, formatCurves(serializePathData(translatePathData(own, -c.x, -c.y)), e.obj.decl!.indent))
   if (edit) edits.push(edit)
   edits.push(...centerShift(e.source, e.obj, { x: c.x, y: c.y }, origin))
   if (edits.length > 0) applyEdits(edits)
@@ -1083,7 +1095,7 @@ function writeShapeCurves(e: EditableShapeCurves, own: Seg[], origin?: Point): v
 /** Write a Shape's curves as they are, the anchors that did not move keeping their numbers (D243), by the lines that changed, so the fold over them stays (D254): x and y take the shift of the center, from the base of the gesture when there is one. */
 function writeCurvesAsIs(e: EditableShapeCurves, segs: Seg[], base?: ShapeEditBase): void {
   const edits: TextEdit[] = []
-  const edit = lineEdit(e.source, e.literal.range.from, e.literal.range.to, formatCurves(serializePathData(segs), e.target ? e.target.stmt!.indent : e.obj.decl!.indent))
+  const edit = lineEdit(e.source, e.range.from, e.range.to, formatCurves(serializePathData(segs), e.target ? e.target.stmt!.indent : e.obj.decl!.indent))
   if (edit) edits.push(edit)
   // A morph's target is drawn where it is written, so x and y stay (D257).
   if (!e.target) {
@@ -1092,6 +1104,8 @@ function writeCurvesAsIs(e: EditableShapeCurves, segs: Seg[], base?: ShapeEditBa
     edits.push(...centerShift(e.source, e.obj, { x: c.x - ref.x, y: c.y - ref.y }, base?.origin))
   }
   if (edits.length > 0) applyEdits(edits)
+  // A word or points written as curves for the first time fold like any curves (D244).
+  if (e.bake && edits.length > 0) foldShapes()
 }
 
 /** A place in the scene as a Shape's points are written: against the center of their box as it is written now (D243). */

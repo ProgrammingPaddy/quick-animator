@@ -10,7 +10,7 @@ import { HelpOverlay } from './components/HelpOverlay'
 import { Layout } from './Layout'
 import { runHeadless } from './export/headless'
 import { initProject } from './project/controller'
-import { copySelection, cutSelection, deleteActions, deleteObjects, duplicateObjects, importSvg, nudgeActions, nudgeObjects, nudgeObjectsInTime, pasteClipboard, removePathPoints, removeShapePoints, requestRename } from './project/operations'
+import { copySelection, cutSelection, deleteActions, deleteObjects, duplicateObjects, importSvg, nudgeActions, nudgeObjects, nudgeObjectsInTime, pasteClipboard, removePathPoints, removeShapePoints, settleMorph, requestRename } from './project/operations'
 import { useClock } from './state/clock'
 import { dropTargets } from './state/dropTargets'
 import { useStore } from './state/store'
@@ -181,9 +181,9 @@ export function App() {
             removePathPoints(selectedActions[0]!, store.pathPoints)
             store.setPathPoints([])
           } else if (store.pathPoints.length > 0 && selection.length === 1 && store.model?.objects.some((o) => o.name === selection[0] && o.className === 'Shape')) {
-            // A selected Shape's picked points (D233).
+            // A selected Shape's picked points (D233); while a morph runs, its end first (D257).
             e.preventDefault()
-            removeShapePoints(selection[0]!, store.pathPoints)
+            if (!settleMorph(selection[0]!)) removeShapePoints(selection[0]!, store.pathPoints)
             store.setPathPoints([])
           } else if (selectedActions.length > 0) {
             e.preventDefault()

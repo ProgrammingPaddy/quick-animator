@@ -160,14 +160,17 @@ the object pane shows as an I.
 A Shape morphs: `blob.morph({ to: Shape.star(5, 100, 50), duration: 1 })` takes its outline to
 the target's over the span, with the usual timing and easing, and holds it after, like any
 animation. `to` is curves, `'M ...'`, points, `[[x, y], ...]`, one of the Shape's words, or a
-link such as `() => other.curves`, drawn where it is written about the shape's `x, y`. The
-outlines are flattened and resampled along their length to one count, a closed target turned
-to where the points travel least, and each point travels straight; after the morph the outline
-is the target as written. Only a Shape morphs: a Rect or a Circle becomes one first, by Convert
-to shape. In the GUI, Add on a Shape offers Morph, whose target starts as the outline then and
-is shaped by the Shape tool's handles while the morph is selected; Shift with a point in the
-Shape tool, or with the resize handles in Select, writes a morph whose target is the outline as
-dragged.
+link such as `() => other.curves`, drawn where it is written about the shape's `x, y`. Both
+outlines are cubics; the one with fewer segments is split until the counts match, a closed
+target is turned to where the anchors travel least, and every anchor and control goes straight
+across, so two states of one shape tween point by point and the morph lands on the target
+exactly. Only a Shape morphs: a Rect or a Circle becomes one first, by Convert to shape. In the
+GUI, Add on a Shape offers Morph, whose target starts as the outline then; the Shape tool shows
+the outline at the playhead, before, during, or after, and a drag edits the target of the morph
+in force there, the playhead going to the morph's end first while it runs; Shift with a point
+in the Shape tool, or with the resize handles in Select, writes a morph whose target is the
+outline as dragged. A target written as a word or as points becomes curves when a point of it
+is dragged.
 
 ## Lifetime and visibility
 
