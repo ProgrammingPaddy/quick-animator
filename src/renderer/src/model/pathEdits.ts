@@ -12,12 +12,19 @@ interface ArrayNode extends Node {
   type: 'ArrayExpression'
   elements: (Node | null)[]
 }
+interface CallNode extends Node {
+  type: 'CallExpression'
+  callee: Node & { name?: string }
+  arguments: Node[]
+}
 
 /** One `[x, y]` of a path's shape as written, with where it lives in the source. */
 export interface PointLiteral {
   range: Range
   x: number
   y: number
+  /** Written as `at(x, y)`: a place in the scene, not the shape's own (D266). */
+  tied?: boolean
 }
 
 /** A path's shape when it is written as a list of point literals (D194), which the GUI can edit point by point. */
@@ -57,13 +64,15 @@ export function shapeLiteral(source: string, block: BlockInfo, key = 'shape'): S
   if (node.type !== 'ArrayExpression') return null
   const points: PointLiteral[] = []
   for (const element of (node as ArrayNode).elements) {
-    if (!element || element.type !== 'ArrayExpression') return null
-    const parts = (element as ArrayNode).elements
-    if (parts.length !== 2) return null
+    if (!element) return null
+    // A point tied to the scene, `at(x, y)` (D266), beside the plain pairs.
+    const tied = element.type === 'CallExpression' && (element as CallNode).callee.type === 'Identifier' && (element as CallNode).callee.name === 'at'
+    const parts = tied ? (element as CallNode).arguments : element.type === 'ArrayExpression' ? (element as ArrayNode).elements : null
+    if (!parts || parts.length !== 2) return null
     const x = numberOf(parts[0]!, source)
     const y = numberOf(parts[1]!, source)
     if (x === null || y === null) return null
-    points.push({ range: { from: element.start, to: element.end }, x, y })
+    points.push({ range: { from: element.start, to: element.end }, x, y, ...(tied ? { tied: true } : {}) })
   }
   const text = source.slice(node.start, node.end)
   const multiline = text.includes('\n')
@@ -96,11 +105,16 @@ export function pointText(x: number, y: number): string {
   return `[${formatNumber(x)}, ${formatNumber(y)}]`
 }
 
-/** Replace one point's literal. */
+/** A point tied to the scene as written, `at(x, y)` (D266). */
+export function tiedText(x: number, y: number): string {
+  return `at(${formatNumber(x)}, ${formatNumber(y)})`
+}
+
+/** Replace one point's literal: a pair, or `at(x, y)` for a point tied to the scene, which stays tied (D266). */
 export function setPointEdit(shape: ShapeLiteral, index: number, x: number, y: number): TextEdit | null {
   const point = shape.points[index]
   if (!point) return null
-  return { from: point.range.from, to: point.range.to, insert: pointText(x, y) }
+  return { from: point.range.from, to: point.range.to, insert: point.tied ? tiedText(x, y) : pointText(x, y) }
 }
 
 /**

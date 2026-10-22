@@ -70,7 +70,7 @@ Every object has these attributes, with these defaults:
 |-------|-----------------------------|
 | `Rect` | `width` 200, `height` 120 |
 | `Circle` | `radius` 60; `width` and `height`, each twice the radius unless set, for an oval |
-| `Text` | `text` `'Text'`, `fontSize` 48, `font` `'Segoe UI'` |
+| `Text` | `text` `'Text'`, lines broken by `\n`; `fontSize` 48; `font` `'Segoe UI'`, an installed family or a file in `assets/fonts` by its name; `weight` 400; `italic` false; `align` `'center'`; `lineHeight` 1.2; `letterSpacing` 0. See Text |
 | `Shape` | `points` `[]`, the corners around `x, y`; `curves` `''`, SVG path data, drawn instead of the points when set; `closed` true; `smooth` false; `stroke` `'#ffffff'`, `strokeWidth` 0. See Shapes |
 | `Group` | only these: `members` `''`; `x`, `y` 0, how far the group has shifted its members; `rotation` 0 and `scale` 1, how far it has turned and scaled them; `pivotX`, `pivotY`, what its own rotation and scale pivot on, unset the center of the members' box at time zero. See Groups |
 
@@ -84,9 +84,14 @@ their box at its `x, y`, and turns and scales about that center, so it moves, tu
 groups as any object and a list written anywhere means the same shape. `closed`, true unless
 written false, joins the last point to the first and fills it with `fill`; false draws an open
 line, which needs a `stroke` and a `strokeWidth` to be seen. `smooth` makes a curve through the
-points, as paths have, round and back for a closed shape. Four words on the class give lists of
+points, as paths have, round and back for a closed shape. Words on the class give lists of
 points: `Shape.rect(width, height)`, `Shape.polygon(sides, radius)`, and `Shape.star(points,
-outer, inner)`; `Shape.circle(radius)` gives curves, an exact circle.
+outer, inner)`; `Shape.circle(radius)` gives curves, an exact circle, and `Shape.blob(radius,
+wobble)` curves too, a soft blob whose radius wavers by the share given, 0.2 unless said. A
+point written `at(x, y)` is tied to the scene: that corner is drawn at that place whatever the
+shape's `x, y`, rotation, scale, or group, while the other points stay the shape's own, centered
+on their own box; `points: () => [[-120, -40], [120, -40], at(c.x, c.y)]` is a band that reaches
+to wherever `c` goes. A morph's target may hold such points too.
 
 `curves` is SVG path data, the full form: `'M 0 -60 C 60 -140 160 -60 0 60 Z'`, with every
 command SVG has, absolute or relative, arcs included. Set, it is drawn instead of the points, and
@@ -167,7 +172,8 @@ across, so two states of one shape tween point by point and the morph lands on t
 exactly. Only a Shape morphs: a Rect or a Circle becomes one first, by Convert to shape. In the
 GUI, Add on a Shape offers Morph, whose target starts as the outline then; the Shape tool shows
 the outline at the playhead, before, during, or after, and a drag edits the target of the morph
-in force there, the playhead going to the morph's end first while it runs; Shift with a point
+in force there, the top one running, through its last frame; in the middle of a morph a point
+edit first writes a morph from the morph's start to the playhead and shapes that; Shift with a point
 in the Shape tool, or with the resize handles in Select, writes a morph whose target is the
 outline as dragged. A target written as a word or as points becomes curves when a point of it
 is dragged.
@@ -231,12 +237,49 @@ Timing keys, allowed in every action block:
 - `duration`: seconds. Omitted: 1.
 - `until`: an end time or time reference, instead of `duration`.
 - `easeIn`, `easeOut`: seconds of easing at each end. Omitted: 30% of the duration each.
-- `ease`: `'linear'`, `'bounce'` (bounces at the end), `'back'` (overshoots at the end), `'elastic'` (springs at the end), or `'snap'` (fast start, settles); or a function of the progress, `(p) => p * p`, giving the eased progress, 0 to 1. Replaces `easeIn` and `easeOut`.
+- `ease`: `'linear'`, `'bounce'` (bounces at the end), `'back'` (overshoots at the end), `'elastic'` (springs at the end), or `'snap'` (fast start, settles); or a function of the progress, `(p) => p * p`, giving the eased progress, 0 to 1; or one of the `Ease` curves: `Ease.ramps(easeIn, easeOut, duration)`, the ramps as a curve; `Ease.part(ease, from, to)`, the part of a curve between two points of its progress, stretched to a whole curve; `Ease.share(ease, from, to)`, the share of the change the curve covers there, which stops part of the way; `ease` a name, a function, or another `Ease` curve. These are what a sliced animation runs on, and go beyond 0 and 1 where `'bounce'` or `'back'` does; a function of your own is kept within 0 and 1. Replaces `easeIn` and `easeOut`.
 - `relative`: `true` makes the values changes from where the object is when the action starts. Omitted: `false`.
 - `overrides`: the name of a class action this action replaces for its object. See Classes.
 
-A number can be written as a range, `[from, to]`: the action begins from the first number
-instead of from where the object is, and goes to the second. The start holds before the action
+An action never dictates its start. It begins from the state the object is in when its first
+frame is active, whatever other animations and edits made that state, in time order, whichever
+way the actions are written; all an action writes is its end. Two actions that begin at the
+same moment both begin from what came before them. Overlapping actions stack as written: the
+top one running has the say, through its last frame, and the one below shows through from its
+own course when the top one ends.
+
+A value written as a function with a parameter is a function of the progress: `x: (p, t) =>
+Math.sin(t * 40) * 12` is called with the plain progress, 0 to 1 with nothing eased, and the
+seconds since the action began, and what it gives is the value, relative or not, so a shake or
+a blink is one line; a plain number at the top of the function is a rate of its own, `fill:
+(p, t, speed = 0.5) => Color.hue(t * speed)`. The ease is the function's envelope: `'linear'`,
+or ramps of nothing, apply it in full throughout; ramps bring it in over `easeIn` and out over
+`easeOut`, the speed the ramps give, so the thing ends as it began; a named curve weighs it by
+what the curve gives. A function without a parameter, `() => other.x`, stays a link, sampled
+as a value and interpolated to.
+
+Any time can be written as frames at the project's rate: `at: frames(15)`, `duration:
+frames(5)`, `until: frames(240)`; it is the same as the seconds, and stays frames when the GUI
+retimes it. The code pane notes every time's frames, and frames' seconds, beside the line.
+
+An action can be cut in two at a time, which the timeline's razor does: the first piece, the
+statement itself, ends at the cut and goes to the state its course reaches there; the second,
+written right after it, starts at the cut, goes to the end, and begins from the state the first
+leaves, as any action begins. Together they run as the whole did. Plain ramps stay ramps where
+those say the same, written out in seconds; elsewhere, and on a named curve or a function, a
+piece runs on `Ease.part`. A written number or color is cut into the value reached; a relative
+change into the change so far and the rest; a range stays on the first piece, and the second
+begins from where the first leaves it; a change that is a function stays a function on both
+pieces, the first stopping part of the way on `Ease.share`. A path's line is cut where the object
+is then, a smooth one as the curves it is; a morph's first piece gets the outline reached as its
+target. The name stays on the first piece, so `name.start` still names the start and what
+followed `name.end` now follows the cut; a linked end becomes the cut on the first piece. A
+class action is not cut, nor a path from a formula.
+
+A number can be written as a range, `[from, to]`: the one exception, which sets the state at the
+first frame itself. The action begins from the first number
+instead of from where the object is, and goes to the second; an action on the same attribute
+that runs before it begins from that held start, since that is what the object shows. The start holds before the action
 as the end holds after it: an absolute action holds its start from the object's beginning until
 it begins, so long as no other action on that attribute has the say, and a relative one adds its
 start until it begins. With `relative: true` both numbers are changes from where the object is,
@@ -330,6 +373,64 @@ An easing that rises and falls makes one action go and come back: `ease: (p) => 
 on `resize({ scale: 0.2, relative: true })` is a pulse. After an action ends, its attribute holds
 the value the easing reached at the end: the target for the usual easings, and for one that
 falls back, where it fell back to.
+
+## Text
+
+A `Text` is one line or several: a line break in `text` starts a new line, written as `\n`
+inside the quotes, `'Quick\nAnimator'`, which is how the app writes it, or as a template string
+with real line breaks between its backticks, which reads the same. `align` sets the lines left,
+center, or right in the block, which is the widest line by the lines' height, centered at
+`x, y`. `fontSize` is in pixels; `lineHeight` is a multiple of it; `letterSpacing` is pixels
+between letters; `weight` is 100 to 900, 700 bold; `italic` slants. `font` names a family
+installed on the system, or a font file in the project's `assets/fonts` folder by its file
+name without the extension, `'Inter'` for `assets/fonts/Inter.ttf`, loaded when the project
+opens; a font from the web is such a file put there.
+
+An action of a Text can run on its units instead of the whole: `by: 'char'`, `'word'`, or
+`'line'`, each unit in turn, `stagger` seconds after the one before, 0.05 unless written, or
+the seconds a function of the unit's index gives, `stagger: (i) => 0.04 + (i % 3) / 100`; a
+space is no character. A unit's natural state is no offset, full size, solid, the text's fill,
+and its own text: `x`, `y`, and `rotation` are offsets from where it sits, `scale` and
+`opacity` factors on what it is, `fill` its own color, `text` what it shows. Unit actions stack
+as an object's do: the latest begun has the say and begins from what the earlier ones left, or
+from the natural state; a range names where the unit begins, and before any action begins the
+first's range start holds, so `opacity: [0, 1]` keeps every character unseen until it fades in,
+while a later fade to 0 runs the text out from what it was. A word's or a line's action goes to
+each of its characters. A value written as a function with a parameter is a function of the
+unit's turn: it is called with the plain progress of the turn, the unit's index, the unit's own
+text, the seconds since the turn began, and how many units there are, `(p, i, c, t, n) =>
+...`, and what it returns is the value, the ease its envelope as on an object, so `fill: (p, i,
+c, t, speed = 0.5) => Color.hue(t * speed + i / 8)` colors every letter its own hue turning at
+`speed` and `text: (p, i, c, t, n, settle = 2) => (t < 0.4 + (i / n) * settle ?
+Text.scramble(i, t) : c)` spins every character from the start and lands them one after
+another. `Color.hue(hue, saturation, lightness)` is a color a fraction of the way round the
+wheel, as `'#rrggbb'`; `Text.scramble(index, seconds, alphabet)` a letter or digit that
+changes as the seconds go, the same for the same index and moment. A `path` by unit is its
+shape as changes from the unit's place, `orient` turning the unit. The action lasts until the
+last unit is done, `duration + the gaps`, which is its `end`; the text's own attributes are
+untouched. A `morph` has no `by`, nor has any object but a Text.
+
+Right-click a Text for Shape, Convert to shape: its letters become `curves`, the outlines of
+its glyphs read from its font's file, the project's or the installed one, where the text was;
+what ran on the text alone, by unit or on a size or a word a shape has not, is listed and
+removed first, since a shape cannot run it.
+
+```js
+title = Text({
+  text: 'Quick\nAnimator',
+  fontSize: 150,
+  weight: 700,
+  font: 'Inter',
+})
+
+title.to({
+  opacity: [0, 1],
+  y: [-20, 0],
+  by: 'word',
+  stagger: 0.08,
+  duration: 0.4,
+})
+```
 
 ## Relative and overlapping actions
 
@@ -499,12 +600,28 @@ GUI also removes the `opacity` written in its declaration, so it is back at 1. T
 and the Add menus write a declaration with the kind's starting attributes, at the playhead; the
 Path tool writes a path, one point per line, and moves its points as the drags say. A preset
 writes one named animation at the end of the file, an arrival as a relative move written as a
-range and a fade in as an opacity range, and touches nothing else. A preset of the user's own,
+range and a fade in as an opacity range, and touches nothing else; a morph preset writes a
+morph to a word, `Shape.circle(r)`, `Shape.rect(2r, 2r)`, `Shape.polygon(sides, r)`,
+`Shape.star(points, r, r/2)`, or `Shape.blob(r)`, `r` half the larger side of the object, and
+turns a Rect or a Circle into a Shape first, as Convert to shape does; a text preset writes a
+fade or a `to` by character, word, or line with its stagger, on a Text alone, some with
+functions of the progress; the miscellaneous ones, a color change, a shake, a blink, a grow, and
+a shrink, write a `to`, a relative move or resize, or a fade for any object. A preset of the user's own,
 saved by right-click, is an animation's block without its place in time, an object's declaration
 and animations without its place and its life, a group with everything it carries, or a class's
 statements, written back as they were and named after the preset. A drag of an object puts it where the pointer is whatever is placed on it: a move's
 end, a path's point, the start an action was given, or the declaration, whichever has the say at
-that moment. A value that is code of its own, a shape from a formula or a custom ease, is marked
+that moment. In the middle of an action, more than half a frame from either end, a drag, a
+nudge, or a value typed in the Selected pane first writes an action of its own from that action's
+start to the playhead, with the values as they are, and then edits that one, so it meets the new
+state; the playhead stays; the original is untouched and runs on from the state at its own
+first frame, so the object snaps back to its course when the new one ends, and placed after it
+instead, the new one's end is where the original begins. The new action is a plain one, the verb
+of the attributes and the default ramps; it has its say at the playhead, its last frame, so a
+further edit there goes to it. A point of a Shape dragged, added, or removed in the middle of a
+morph writes a morph from the morph's start to the playhead the same way, its target the
+outline at the playhead, and edits that target. The timeline's razor cuts an action in two, as
+Actions says. A value that is code of its own, a shape from a formula or a custom ease, is marked
 with a small ƒ in the timeline and the objects pane, and a path drawn from code is dashed; the
 code pane is where they change.
 

@@ -1,9 +1,10 @@
 import { beginGesture, endGesture } from '../code/editor'
 import { formatNumber } from '../model/edits'
-import { attrSchema, type Verb } from '../model/registry'
-import { valueAt } from '../model/sample'
+import { attrSchema, SHAPE, type Verb } from '../model/registry'
+import { ownBounds, valueAt } from '../model/sample'
+import { DEFAULT_STAGGER, unitCount } from '../model/text'
 import type { SceneModel, SceneObject } from '../model/types'
-import { appendActionText, freeName, frameSeconds, roundSeconds } from './operations'
+import { appendActionText, convertToShape, freeName, frameSeconds, roundSeconds } from './operations'
 import { presetIdent } from './userPresets'
 import { useStore, type UserPreset } from '../state/store'
 
@@ -26,6 +27,8 @@ export interface AnimationPreset {
   duration: number
   place: 'start' | 'end'
   variants?: readonly Variant[]
+  /** The family the pane lists it under when that is not its verb's: Text, for the ones by character, word, or line (D268). */
+  family?: string
 }
 
 export const ANIMATION_PRESETS: readonly AnimationPreset[] = [
@@ -63,7 +66,75 @@ export const ANIMATION_PRESETS: readonly AnimationPreset[] = [
   },
   { id: 'pulse', label: 'Pulse', title: 'Grows a fifth and settles back, 0.6 s', verb: 'resize', duration: 0.6, place: 'start' },
   { id: 'orbit', label: 'Orbit', title: 'A circle around a center beside it, 3 s', verb: 'path', duration: 3, place: 'start' },
+  // Morphs (D265): the outline becomes a figure as big as the object; a Rect or a Circle becomes a Shape first.
+  { id: 'morphCircle', label: 'Circle', title: 'The outline becomes a circle, 1 s', verb: 'morph', duration: 1, place: 'start' },
+  { id: 'morphSquare', label: 'Square', title: 'The outline becomes a square, 1 s', verb: 'morph', duration: 1, place: 'start' },
+  {
+    id: 'morphPolygon',
+    label: 'Polygon',
+    title: 'The outline becomes a polygon, 1 s',
+    verb: 'morph',
+    duration: 1,
+    place: 'start',
+    variants: [
+      { id: '6', label: 'hexagon' },
+      { id: '3', label: 'triangle' },
+      { id: '5', label: 'pentagon' },
+      { id: '8', label: 'octagon' },
+    ],
+  },
+  {
+    id: 'morphStar',
+    label: 'Star',
+    title: 'The outline becomes a star, 1 s',
+    verb: 'morph',
+    duration: 1,
+    place: 'start',
+    variants: [
+      { id: '5', label: '5 points' },
+      { id: '4', label: '4 points' },
+      { id: '6', label: '6 points' },
+      { id: '8', label: '8 points' },
+    ],
+  },
+  { id: 'morphBlob', label: 'Blob', title: 'The outline becomes a soft blob, 1 s', verb: 'morph', duration: 1, place: 'start' },
+  // Text, by character, word, or line (D268); the length is the first unit's, the whole takes the stagger more for each unit after it.
+  { id: 'typeOn', label: 'Type on', title: 'The characters appear one by one, 0.05 s apart', verb: 'fade', duration: 0.03, place: 'start', family: 'Text' },
+  { id: 'riseByWord', label: 'Rise by word', title: 'Each word fades in as it rises into place, 0.08 s apart', verb: 'to', duration: 0.4, place: 'start', family: 'Text' },
+  { id: 'lettersDrop', label: 'Letters drop', title: 'The characters drop in from above and bounce, 0.03 s apart', verb: 'to', duration: 0.5, place: 'start', family: 'Text' },
+  { id: 'linesIn', label: 'Lines in', title: 'Each line slides in from the left as it fades in, 0.15 s apart', verb: 'to', duration: 0.5, place: 'start', family: 'Text' },
+  { id: 'fadeOutByWord', label: 'Fade out by word', title: 'The words fade out one after another over the last moments', verb: 'fade', duration: 0.3, place: 'end', family: 'Text' },
+  { id: 'codeTyping', label: 'Code typing', title: 'The characters are typed in, the gaps between them uneven', verb: 'fade', duration: 0.02, place: 'start', family: 'Text' },
+  { id: 'enchanted', label: 'Enchanted', title: 'Every letter cycles through the rainbow and wiggles, in and out over 4 s', verb: 'to', duration: 4, place: 'start', family: 'Text' },
+  { id: 'slotMachine', label: 'Slot machine', title: 'Every character spins from the start and lands on its own, the first soon, the last after 2 s more', verb: 'to', duration: 3, place: 'start', family: 'Text' },
+  // Miscellaneous (D272): for any object.
+  {
+    id: 'colorChange',
+    label: 'Color change',
+    title: 'The fill becomes the color, 0.5 s',
+    verb: 'to',
+    duration: 0.5,
+    place: 'start',
+    family: 'to',
+    variants: [
+      { id: 'red', label: 'red' },
+      { id: 'orange', label: 'orange' },
+      { id: 'yellow', label: 'yellow' },
+      { id: 'green', label: 'green' },
+      { id: 'blue', label: 'blue' },
+      { id: 'purple', label: 'purple' },
+      { id: 'white', label: 'white' },
+      { id: 'rainbow', label: 'rainbow, turning' },
+    ],
+  },
+  // Each under its verb's family (D278).
+  { id: 'shake', label: 'Shake', title: 'Shakes side to side and settles, 0.6 s', verb: 'move', duration: 0.6, place: 'start' },
+  { id: 'blink', label: 'Blink', title: 'Off and on three times, 0.6 s', verb: 'fade', duration: 0.6, place: 'start' },
+  { id: 'grow', label: 'Grow', title: 'Grows to half as big again, 0.5 s', verb: 'resize', duration: 0.5, place: 'start' },
+  { id: 'shrink', label: 'Shrink', title: 'Shrinks to half, 0.5 s', verb: 'resize', duration: 0.5, place: 'start' },
 ]
+
+const COLORS: Record<string, string> = { red: '#ff5a5a', orange: '#ff9f43', yellow: '#ffd166', green: '#2ecc71', blue: '#4f8cff', purple: '#a855f7', white: '#ffffff' }
 
 /** What a preset needs to write for an object: the names, when, and how big the frame and the object are. */
 interface Context {
@@ -116,6 +187,49 @@ const WRITERS: Record<string, (c: Context, variant: string | undefined, fps: num
     start: c.at,
     end: c.at + 3,
   }),
+  // The morphs (D265): a target as a word, as big as the object is, so the outline keeps its size.
+  morphCircle: (c) => morphTo(c, `Shape.circle(${f(reach(c))})`),
+  morphSquare: (c) => morphTo(c, `Shape.rect(${f(2 * reach(c))}, ${f(2 * reach(c))})`),
+  morphPolygon: (c, variant) => morphTo(c, `Shape.polygon(${variant ?? '6'}, ${f(reach(c))})`),
+  morphStar: (c, variant) => morphTo(c, `Shape.star(${variant ?? '5'}, ${f(reach(c))}, ${f(Math.round(reach(c) / 2))})`),
+  morphBlob: (c) => morphTo(c, `Shape.blob(${f(reach(c))})`),
+  // Text by unit (D268): a fade or a to on each character, word, or line in turn.
+  typeOn: (c) => byUnit(c, 'fade', ['opacity: [0, 1]'], 'char', 0.05, 0.03, []),
+  riseByWord: (c) => byUnit(c, 'to', ['opacity: [0, 1]', 'y: [-20, 0]'], 'word', 0.08, 0.4, []),
+  lettersDrop: (c) => byUnit(c, 'to', ['opacity: [0, 1]', 'y: [120, 0]'], 'char', 0.03, 0.5, ["ease: 'bounce'"]),
+  linesIn: (c) => byUnit(c, 'to', ['opacity: [0, 1]', 'x: [-120, 0]'], 'line', 0.15, 0.5, ['easeIn: 0']),
+  fadeOutByWord: (c) => byUnit(c, 'fade', ['opacity: 0'], 'word', 0.06, 0.3, []),
+  // Typed in with uneven gaps: the stagger a function of the character's index (D269, D272).
+  codeTyping: (c) => byUnit(c, 'fade', ['opacity: [0, 1]'], 'char', '(i) => 0.04 + ((i * 7) % 5) / 100', 0.02, []),
+  // Each letter its own hue cycling at a rate of its own, and a wiggle, from the seconds and the index; the ramps bring it in and out, so the text ends as it began (D277, D278).
+  enchanted: (c) => byUnit(c, 'to', ['fill: (p, i, c, t, speed = 0.5) => Color.hue(t * speed + i / 8)', 'y: (p, i, c, t) => Math.sin(t * 6 + i) * 4'], 'char', 0, 4, []),
+  // Every character spins from the start and lands on its own, the first soon, the last after `settle` seconds more (D278).
+  slotMachine: (c) => byUnit(c, 'to', ['text: (p, i, c, t, n, settle = 2) => (t < 0.4 + (i / n) * settle ? Text.scramble(i, t) : c)'], 'char', 0, 3, ["ease: 'linear'"]),
+  // Miscellaneous (D272): a color, or the rainbow turning at a rate of its own (D278).
+  colorChange: (c, variant) =>
+    variant === 'rainbow'
+      ? { text: statement(c.name, c.object, 'to', ['fill: (p, t, speed = 0.5) => Color.hue(t * speed)', `at: ${f(c.at)}`, 'duration: 4', "ease: 'linear'"]), start: c.at, end: c.at + 4 }
+      : { text: statement(c.name, c.object, 'to', [`fill: '${COLORS[variant ?? 'red'] ?? COLORS['red']}'`, `at: ${f(c.at)}`, 'duration: 0.5']), start: c.at, end: c.at + 0.5 },
+  shake: (c) => ({ text: statement(c.name, c.object, 'move', ['x: (p) => Math.sin(p * 24) * 12 * (1 - p)', 'relative: true', `at: ${f(c.at)}`, 'duration: 0.6', "ease: 'linear'"]), start: c.at, end: c.at + 0.6 }),
+  blink: (c) => ({ text: statement(c.name, c.object, 'fade', ['opacity: (p) => (Math.floor(p * 6) % 2 === 0 ? 0 : 1)', `at: ${f(c.at)}`, 'duration: 0.6', "ease: 'linear'"]), start: c.at, end: c.at + 0.6 }),
+  // A relative scale adds to the factor, as the pulse does: a half more, or a half less.
+  grow: (c) => ({ text: statement(c.name, c.object, 'resize', ['scale: 0.5', 'relative: true', `at: ${f(c.at)}`, 'duration: 0.5']), start: c.at, end: c.at + 0.5 }),
+  shrink: (c) => ({ text: statement(c.name, c.object, 'resize', ['scale: -0.5', 'relative: true', `at: ${f(c.at)}`, 'duration: 0.5']), start: c.at, end: c.at + 0.5 }),
+}
+
+/** An action by character, word, or line (D268); the whole lasts the unit's duration and the stagger more for each unit after the first, which the end reports once the text is known. The stagger is seconds, or code: a function of the unit's index. */
+function byUnit(c: Context, verb: Verb, lines: string[], by: string, stagger: number | string, duration: number, timing: string[]): Written {
+  return { text: statement(c.name, c.object, verb, [...lines, `by: '${by}'`, `stagger: ${typeof stagger === 'number' ? f(stagger) : stagger}`, `at: ${f(c.at)}`, `duration: ${f(duration)}`, ...timing]), start: c.at, end: c.at + duration }
+}
+
+/** A morph to a target, a second long. */
+function morphTo(c: Context, target: string): Written {
+  return { text: statement(c.name, c.object, 'morph', [`to: ${target}`, `at: ${f(c.at)}`, 'duration: 1']), start: c.at, end: c.at + 1 }
+}
+
+/** Half the larger side of the object, so a morph's target is as big as the object is; 60 for one with no size. */
+function reach(c: Context): number {
+  return Math.round(Math.max(c.size.width, c.size.height) / 2) || 60
 }
 
 /** One of the user's own presets by id, or undefined (D227). */
@@ -156,6 +270,10 @@ function sizeOf(model: SceneModel, obj: SceneObject, time: number): { width: num
     return typeof v === 'number' ? v : 0
   }
   const scale = num('scale') || 1
+  if (obj.className === SHAPE) {
+    const b = ownBounds(model, obj, time)
+    return { width: b.width * scale, height: b.height * scale }
+  }
   if (attrSchema(obj.className, 'width')) return { width: num('width') * scale, height: num('height') * scale }
   if (attrSchema(obj.className, 'radius')) return { width: 2 * num('radius') * scale, height: 2 * num('radius') * scale }
   if (attrSchema(obj.className, 'fontSize')) return { width: num('fontSize') * 4 * scale, height: num('fontSize') * 1.2 * scale }
@@ -201,9 +319,19 @@ export function applyAnimationPreset(id: string, variant: string | undefined, ta
   beginGesture()
   try {
     for (const target of targets) {
-      const model = useStore.getState().model
-      const obj = model?.objects.find((o) => o.name === target.object)
+      let model = useStore.getState().model
+      let obj = model?.objects.find((o) => o.name === target.object)
       if (!model || !obj?.decl) continue
+      // By character, word, or line is a Text's (D268).
+      if (preset.family === 'Text' && obj.className !== 'Text') continue
+      // A morph is a Shape's (D257): a Rect or a Circle becomes one first, as Convert to shape does, and anything else does not morph (D265).
+      if (preset.verb === 'morph' && obj.className !== SHAPE) {
+        if (obj.className !== 'Rect' && obj.className !== 'Circle') continue
+        convertToShape(obj.name)
+        model = useStore.getState().model
+        obj = model?.objects.find((o) => o.name === target.object)
+        if (!model || !obj?.decl) continue
+      }
       const at = roundSeconds(target.time ?? defaultTime(preset, obj))
       const written = writer({ object: obj.name, name: freeName(base), at, frame: { width: s.settings.width, height: s.settings.height }, size: sizeOf(model, obj, at) }, variant, s.settings.fps)
       appendActionText(obj.name, written.text, written.start, written.end)
@@ -218,8 +346,17 @@ export function presetDemo(id: string, variant: string | undefined): { source: s
   const preset = presetById(id)
   const writer = writerFor(id)
   if (!preset || !writer) return null
-  const at = preset.place === 'end' ? 0.6 : 0.2
+  // A text preset shows on two lines of text, and its whole run is the units' (D268); a morph on a Shape of the same size, since only a Shape morphs (D265).
+  const text = preset.family === 'Text'
+  const shape = preset.verb === 'morph'
+  const demoText = 'Quick\\nAnimator'
+  const units = text ? Object.fromEntries((['char', 'word', 'line'] as const).map((k) => [k, unitCount(demoText.replace('\\n', '\n'), k)])) : null
+  const at = preset.place === 'end' ? (text ? 1.2 : 0.6) : 0.2
   const written = writer({ object: 'demo', name: WRITERS[id] ? preset.id : presetIdent(preset.label), at, frame: { width: 1920, height: 1080 }, size: { width: 400, height: 240 } }, variant, 60)
-  const attrs = ['x: 0', 'y: 0', 'width: 400', 'height: 240', "fill: '#4f8cff'", `until: ${f(written.end + 0.4)}`]
-  return { source: `demo = Rect({\n${attrs.map((a) => `  ${a},`).join('\n')}\n})\n\n${written.text}\n`, length: written.end + 0.4 }
+  const by = /by: '(\w+)'/.exec(written.text)?.[1] as 'char' | 'word' | 'line' | undefined
+  const stagger = Number(/stagger: ([\d.]+)/.exec(written.text)?.[1] ?? DEFAULT_STAGGER)
+  const end = units && by ? written.end + stagger * Math.max(0, units[by]! - 1) : written.end
+  const kind = text ? 'Text' : shape ? 'Shape' : 'Rect'
+  const attrs = ['x: 0', 'y: 0', ...(text ? [`text: '${demoText}'`, 'fontSize: 150', 'weight: 700'] : shape ? ['points: Shape.rect(400, 240)'] : ['width: 400', 'height: 240']), "fill: '#4f8cff'", `until: ${f(end + 0.4)}`]
+  return { source: `demo = ${kind}({\n${attrs.map((a) => `  ${a},`).join('\n')}\n})\n\n${written.text}\n`, length: end + 0.4 }
 }

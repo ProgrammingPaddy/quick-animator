@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { evaluateScene } from '../model/evaluate'
-import { existsAt, valueAt } from '../model/sample'
+import { flattenPathData } from '../model/pathData'
+import { SHAPE } from '../model/registry'
+import { existsAt, shapeSegsAt, textStyleAt, textUnitStates, valueAt } from '../model/sample'
+import { drawText, layoutOf } from '../model/text'
 import { presetDemo } from '../project/presets'
 
 const WIDTH = 240
@@ -9,9 +12,9 @@ const HEIGHT = 135
 const SCALE = WIDTH / 1920
 
 /**
- * A small scene playing a preset on a sample rectangle, over and over (D219), by a row of the
- * presets pane. It samples the same model the app would, so what it shows is what the preset
- * writes.
+ * A small scene playing a preset on a sample rectangle, or a sample Shape for a morph (D265),
+ * over and over (D219), by a row of the presets pane. It samples the same model the app would,
+ * so what it shows is what the preset writes.
  */
 export function PresetPreview({ id, variant, left, top, label }: { id: string; variant: string | undefined; left: number; top: number; label: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -43,10 +46,24 @@ export function PresetPreview({ id, variant, left, top, label }: { id: string; v
         ctx.rotate((-num('rotation', t) * Math.PI) / 180)
         const s = num('scale', t) || 1
         ctx.scale(s, s)
-        const w = num('width', t) * SCALE
-        const h = num('height', t) * SCALE
         ctx.fillStyle = '#4f8cff'
-        ctx.fillRect(-w / 2, -h / 2, w, h)
+        if (obj.className === 'Text') {
+          // The text as the preview draws it, by character while its units run (D268), the block centered here.
+          const layout = layoutOf(textStyleAt(model, obj, t))
+          drawText(ctx, layout, '#4f8cff', textUnitStates(model, obj, t, layout), SCALE, -layout.width / 2, -layout.height / 2)
+        } else if (obj.className === SHAPE) {
+          // A Shape's outline as it is then, a morph's blend included (D265); up is up on screen.
+          ctx.beginPath()
+          for (const piece of flattenPathData(shapeSegsAt(model, obj, t) ?? [])) {
+            piece.points.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x * SCALE, -p.y * SCALE) : ctx.lineTo(p.x * SCALE, -p.y * SCALE)))
+            ctx.closePath()
+          }
+          ctx.fill()
+        } else {
+          const w = num('width', t) * SCALE
+          const h = num('height', t) * SCALE
+          ctx.fillRect(-w / 2, -h / 2, w, h)
+        }
         ctx.restore()
       }
       // The playhead's share of the loop, along the bottom.

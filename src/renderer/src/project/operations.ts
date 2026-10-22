@@ -1,10 +1,11 @@
 import { applyEdits, beginGesture, endGesture, foldShapes, gestureOpen, scrollToPos } from '../code/editor'
 import { findDependents, type Dependent } from '../model/dependents'
-import { appendStatement, blockText, formatNumber, insertDeclaration, lineEdit, moveStatementEdits, removeProp, removeStatements, setProp, setPropFrom, setPropText, type TextEdit } from '../model/edits'
+import { appendStatement, blockText, formatNumber, formatValue, insertDeclaration, lineEdit, moveStatementEdits, removeProp, removeStatements, setProp, setPropFrom, setPropText, setTimeProp, type TextEdit } from '../model/edits'
+import { DEFAULT_EASE_FRACTION, namedEasings } from '../model/easing'
 import { isMember } from '../model/evaluate'
 import { memberRef, normalizeSelection } from '../model/groups'
 import { classes, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
-import { absoluteAt, anchorTime, memberBox, pathFrame, pathHolds, pathShift, pointsCenter, positionAt, rawFromWorld, morphInForce, morphRunning, morphTargetSegs, shapeCurves, shapeOwnFromWorld, shapeOwnPoints, shapeSegsAt, travelFrame, type Point, type ShapePiece } from '../model/sample'
+import { absoluteAt, actionCourse, anchorTime, memberBox, pathCutAt, pathFrame, pathHolds, pathShift, pointsCenter, positionAt, progressAt, rawFromWorld, morphInForce, morphRunning, morphTargetSegs, shapeCurves, shapeOwnFromWorld, shapeOwnPoints, shapeSegsAt, travelFrame, type Point, type ShapePiece } from '../model/sample'
 import { anchorCurved, anchorKind, closePath, cornerAnchors, curveSegment, dragAnchorHandle, ellipsePathData, flattenPathData, formatCurves, hasPathData, moveAnchor, openPath, parsePathData, pathAnchors, pathDataBounds, polygonPathData, removeAnchor, scalePathData, segmentKind, serializePathData, smoothAnchors, smoothPathData, splitSegment, straightenAll, straightenAnchors, straightenSegment, translatePathData, type Anchor, type AnchorKind, type Seg } from '../model/pathData'
 import { insertPointsEdit, pointText, removePointEdit, setPointEdit, shapeLiteral, stringLiteral, type ShapeLiteral } from '../model/pathEdits'
 import { readSvg, scaleImported, type ImportedItem } from './svgImport'
@@ -75,6 +76,11 @@ function roundAttr(attr: string, value: number): number {
   if (attr === 'scale' || attr === 'opacity') return Math.round(value * 100) / 100
   if (attr === 'rotation') return Math.round(value * 10) / 10
   return Math.round(value)
+}
+
+/** Set a time in a block as it was written (D276): frames stay frames, the rest seconds. */
+function timeProp(source: string, block: BlockInfo, key: string, seconds: number): TextEdit {
+  return setTimeProp(source, block, key, seconds, state().fps)
 }
 
 /** Seconds as written: at most four decimals, so a frame's length and a frame-aligned start survive. */
@@ -164,32 +170,32 @@ function writeTo(source: string, obj: SceneObject, definer: Action | null, attr:
 }
 
 /**
- * The object's own actions still running at this time that define any of these attributes: a
- * drag then edits their end states, and the preview shows the end (D102).
+ * Where an edit at a time falls in the middle of an animation (D263): the start of the earliest
+ * of the object's own animations that has the say over one of the attributes while strictly
+ * inside its span, more than half a frame from either end; null when none has.
  */
-export function inProgressActions(names: string[], attrs: string[], time: number): ActionRef[] {
-  const { model } = state()
-  const refs: ActionRef[] = []
-  if (!model) return refs
-  for (const name of names) {
-    const obj = model.objects.find((o) => o.name === name)
-    if (!obj) continue
-    for (const attr of attrs) {
-      const action = definingAction(obj, attr, time)
-      // One at its own start, with a start of its own, is edited there, not at its end (D221).
-      if (!action?.stmt || action.classAction || time >= action.end || writesFrom(action, attr, time)) continue
-      const index = obj.actions.indexOf(action)
-      if (!refs.some((r) => r.object === name && r.index === index)) refs.push({ object: name, index })
-    }
+function midAnimationStart(name: string, attrs: string[], time: number): number | null {
+  const obj = findObject(name)
+  if (!obj?.decl) return null
+  const slack = frameSeconds(state().fps) / 2
+  let from: number | null = null
+  for (const attr of attrs) {
+    const action = definingAction(obj, attr, time)
+    if (!action?.stmt || action.classAction || action.verb === 'path') continue
+    if (time <= action.start + slack || time >= action.end - slack) continue
+    if (from === null || action.start < from) from = action.start
   }
-  return refs
+  return from
 }
 
 /**
  * A plain drag or nudge: these objects show these values at this time, in one step. When a
  * class action defines one of the values right now, the object first overrides it with its own
- * action, which is what then gets edited (D80). What gets written is whatever makes the shown
- * values true, with everything stacked on top left in place (D122).
+ * action, which is what then gets edited (D80). In the middle of an animation, an animation from
+ * the animation's start to this time is written first, with the values as they are, and is what
+ * then gets edited: it meets the edited state, and the one it was cut from goes on from the state
+ * at its own first frame (D263). What gets written is whatever makes the shown values true, with
+ * everything stacked on top left in place (D122).
  */
 export function setAttrsAtMany(entries: { name: string; attrs: Record<string, number> }[], time: number): boolean {
   const done = new Set<ClassAction>()
@@ -203,6 +209,16 @@ export function setAttrsAtMany(entries: { name: string; attrs: Record<string, nu
       overrideClassAction(name, obj.actions.indexOf(action))
     }
   }
+  const pieces = entries.map(({ name, attrs }) => ({ name, attrs: Object.keys(attrs), from: midAnimationStart(name, Object.keys(attrs), time) })).filter((p) => p.from !== null)
+  const own = pieces.length > 0 && !gestureOpen()
+  if (own) beginGesture()
+  for (const piece of pieces) beginTimed(piece.name, piece.attrs, 'start', piece.from!, time - piece.from!)
+  const changed = writeAttrsAtMany(entries, time)
+  if (own) endGesture()
+  return changed
+}
+
+function writeAttrsAtMany(entries: { name: string; attrs: Record<string, number> }[], time: number): boolean {
   const { model, source } = state()
   if (!model) return false
   const edits: TextEdit[] = []
@@ -376,10 +392,10 @@ export function coverEdits(source: string, obj: SceneObject, start: number, end:
   }
   const edits: (TextEdit | null)[] = []
   const at = roundSeconds(Math.min(base.at, Math.max(0, start)))
-  if (literal('at') && at !== roundSeconds(obj.at)) edits.push(at <= 0 ? removeProp(source, obj.decl, 'at') : setProp(source, obj.decl, 'at', at))
+  if (literal('at') && at !== roundSeconds(obj.at)) edits.push(at <= 0 ? removeProp(source, obj.decl, 'at') : timeProp(source, obj.decl, 'at', at))
   if (base.until !== null && obj.until !== null && literal('until')) {
     const until = roundSeconds(Math.max(base.until, end))
-    if (until !== roundSeconds(obj.until)) edits.push(setProp(source, obj.decl, 'until', until))
+    if (until !== roundSeconds(obj.until)) edits.push(timeProp(source, obj.decl, 'until', until))
   }
   return edits.filter((e): e is TextEdit => !!e)
 }
@@ -485,14 +501,52 @@ function startingValues(model: SceneModel, obj: SceneObject, verb: Verb, time: n
   return attrs
 }
 
+/** Every edge of the timeline, in order (D259): where each object begins and is removed, and where each animation starts and ends, with the start of time. */
+export function timelineEdges(model: SceneModel): number[] {
+  const edges = new Set<number>([0])
+  for (const o of model.objects) {
+    edges.add(roundSeconds(o.at))
+    if (o.until !== null) edges.add(roundSeconds(o.until))
+    for (const a of o.actions) {
+      if (a.overridden) continue
+      edges.add(roundSeconds(a.start))
+      edges.add(roundSeconds(a.end))
+    }
+  }
+  return [...edges].sort((a, b) => a - b)
+}
+
+/** Move the playhead to the next edge after it, or the one before (D259), whatever is selected; playback stops. Returns the time it went to, or null when there is none that way. */
+export function jumpToEdge(direction: 1 | -1): number | null {
+  const s = useStore.getState()
+  if (!s.model) return null
+  const slack = frameSeconds(state().fps) / 2
+  const edges = timelineEdges(s.model)
+  const target = direction > 0 ? edges.find((t) => t > s.time + slack) : [...edges].reverse().find((t) => t < s.time - slack)
+  if (target === undefined) return null
+  s.setPlaying(false)
+  s.setTime(target)
+  return target
+}
+
 /** Add a morph to a Shape (D257): its target the outline as it is then, the actual one at the playhead, written as curves, the morph selected and the playhead at its end, so the Shape tool's handles then shape the target. Returns the morph's index, or null. */
 export function addMorph(name: string, time: number, length = 1, pin: Pin = 'start'): number | null {
+  const { at, duration } = pinnedSpan(pin, time, length)
+  return writeMorph(name, at, duration, time)
+}
+
+/** A morph written from a time to the playhead (D263), its target the outline at the playhead, so nothing moves until the target is shaped: what an edit in the middle of a morph writes to. */
+function addMorphPiece(name: string, from: number, to: number): number | null {
+  const at = roundSeconds(from)
+  return writeMorph(name, at, Math.max(frameSeconds(state().fps), roundSeconds(to - at)), to)
+}
+
+function writeMorph(name: string, at: number, duration: number, targetAt: number): number | null {
   const { source, model } = state()
   const obj = model?.objects.find((o) => o.name === name)
   if (!model || !obj?.decl || obj.className !== SHAPE) return null
-  const segs = shapeSegsAt(model, obj, time)
+  const segs = shapeSegsAt(model, obj, targetAt)
   if (!segs) return null
-  const { at, duration } = pinnedSpan(pin, time, length)
   const index = obj.actions.length
   applyEdits([appendStatement(source, blockText(`${name}.morph`, { to: serializePathData(segs), at, duration })), ...coverEdits(source, obj, at, at + duration)], actionSelected(name, index))
   useStore.getState().setTime(at + duration)
@@ -1028,13 +1082,12 @@ export function shapeMorphRunning(name: string): boolean {
   return !!obj && morphRunning(obj, state().time) !== null
 }
 
-/** Before an edit of a Shape's points while a morph runs, the playhead goes to the morph's end, where the outline is the target the edit writes (D257), as a drag during a move edits its end. Returns whether it moved. */
+/** Before an edit of a Shape's points in the middle of a morph (D263): a morph from the morph's start to the playhead, whose target begins as the outline there, is written and selected, so the edit shapes that target and the morph it was cut from goes on from the outline at its own first frame. Returns whether one was written. */
 export function settleMorph(name: string): boolean {
   const obj = findObject(name)
   const running = obj ? morphRunning(obj, state().time) : null
   if (!running) return false
-  useStore.getState().setTime(running.end)
-  return true
+  return addMorphPiece(name, running.start, state().time) !== null
 }
 
 /** Whether the preview can edit a Shape's points: they are a literal list in its declaration. */
@@ -1134,11 +1187,15 @@ function ownPoint(e: EditableShapePoints, world: Point): Point {
  * the GUI writes it, and nothing moves.
  */
 function writeShapePoints(e: EditableShapePoints, own: Point[], origin?: Point): void {
-  const c = pointsCenter(own)
-  const points = own.map((p) => ({ x: Math.round(p.x - c.x), y: Math.round(p.y - c.y) }))
+  const c = pointsCenter(own.map((p, i) => (e.shape.points[i]?.tied ? { ...p, tied: true as const } : p)))
+  // A point tied to the scene stays as written: it sits where it says, whatever the shape does (D266).
+  const texts = own.map((p, i) => {
+    const literal = e.shape.points[i]
+    return literal?.tied ? e.source.slice(literal.range.from, literal.range.to) : pointText(Math.round(p.x - c.x), Math.round(p.y - c.y))
+  })
   const decl = e.obj.decl!
   const indent = decl.indent
-  const text = e.shape.multiline ? `[\n${points.map((p) => `${indent}  ${pointText(p.x, p.y)},`).join('\n')}\n${indent}]` : `[${points.map((p) => pointText(p.x, p.y)).join(', ')}]`
+  const text = e.shape.multiline ? `[\n${texts.map((t) => `${indent}  ${t},`).join('\n')}\n${indent}]` : `[${texts.join(', ')}]`
   const edits: TextEdit[] = []
   const edit = lineEdit(e.source, e.shape.range.from, e.shape.range.to, text)
   if (edit) edits.push(edit)
@@ -1166,12 +1223,15 @@ export function setShapePoints(name: string, entries: { index: number; world: Po
   }
   const e = shapeLiteralOf(name)
   if (!e) return
-  const points = (base?.kind === 'points' ? base.points : e.shape.points).map((p) => ({ x: p.x, y: p.y }))
+  const points = (base?.kind === 'points' ? base.points : e.shape.points).map((p, i) => (e.shape.points[i]?.tied ? { x: p.x, y: p.y, tied: true as const } : { x: p.x, y: p.y }))
   const edits: TextEdit[] = []
   for (const { index, world } of entries) {
     if (index < 0 || index >= points.length) continue
-    points[index] = writtenPoint(e, world)
-    const edit = setPointEdit(e.shape, index, points[index]!.x, points[index]!.y)
+    // A point tied to the scene is written where it is dropped, in the scene's coordinates (D266).
+    const tied = !!e.shape.points[index]?.tied
+    const written = tied ? { x: Math.round(world.x), y: Math.round(world.y) } : writtenPoint(e, world)
+    points[index] = tied ? { ...written, tied: true as const } : written
+    const edit = setPointEdit(e.shape, index, written.x, written.y)
     if (edit && e.source.slice(edit.from, edit.to) !== edit.insert) edits.push(edit)
   }
   const c = pointsCenter(points)
@@ -1703,10 +1763,10 @@ export function setActionTiming(name: string, index: number, timing: { at?: numb
   const action = obj?.actions[index]
   if (!obj || !action?.stmt || action.classAction) return
   const edits: TextEdit[] = []
-  if (timing.at !== undefined) edits.push(setProp(source, action.stmt, 'at', roundSeconds(timing.at)))
-  if (timing.duration !== undefined) edits.push(setProp(source, action.stmt, 'duration', roundSeconds(timing.duration)))
-  if (timing.easeIn !== undefined) edits.push(setProp(source, action.stmt, 'easeIn', roundSeconds(timing.easeIn)))
-  if (timing.easeOut !== undefined) edits.push(setProp(source, action.stmt, 'easeOut', roundSeconds(timing.easeOut)))
+  if (timing.at !== undefined) edits.push(timeProp(source, action.stmt, 'at', roundSeconds(timing.at)))
+  if (timing.duration !== undefined) edits.push(timeProp(source, action.stmt, 'duration', roundSeconds(timing.duration)))
+  if (timing.easeIn !== undefined) edits.push(timeProp(source, action.stmt, 'easeIn', roundSeconds(timing.easeIn)))
+  if (timing.easeOut !== undefined) edits.push(timeProp(source, action.stmt, 'easeOut', roundSeconds(timing.easeOut)))
   // The object's life widens to hold the animation where it now is (D146).
   const delay = action.timing.delay ?? 0
   const start = timing.at !== undefined ? timing.at + delay : action.start
@@ -1715,14 +1775,236 @@ export function setActionTiming(name: string, index: number, timing: { at?: numb
   applyEdits(edits)
 }
 
+/**
+ * The ramps an action runs on, in seconds, as the sampler takes them (D39): as written, or the
+ * default share of the duration, and shrunk to fit when the two overlap.
+ */
+function rampsOf(action: Action): { easeIn: number; easeOut: number } {
+  const duration = action.end - action.start
+  let easeIn = Math.max(0, action.timing.easeIn ?? duration * DEFAULT_EASE_FRACTION)
+  let easeOut = Math.max(0, action.timing.easeOut ?? duration * DEFAULT_EASE_FRACTION)
+  if (easeIn + easeOut > duration && easeIn + easeOut > 0) {
+    const fit = duration / (easeIn + easeOut)
+    easeIn *= fit
+    easeOut *= fit
+  }
+  return { easeIn: roundSeconds(easeIn), easeOut: roundSeconds(easeOut) }
+}
+
+/** The ease an action runs on, as code (D264): its named curve, its own function as written, or its ramps. */
+function easeCode(action: Action): string {
+  const prop = action.stmt?.props.find((p) => p.key === 'ease')
+  const ease = action.timing.ease
+  if (typeof ease === 'string' && namedEasings[ease]) return `'${ease}'`
+  if (typeof ease === 'function' && prop) return prop.raw
+  const { easeIn, easeOut } = rampsOf(action)
+  return `Ease.ramps(${formatNumber(easeIn)}, ${formatNumber(easeOut)}, ${formatNumber(roundSeconds(action.end - action.start))})`
+}
+
+/** How a piece of a sliced animation eases (D264): as ramps, where those say the same, else as code. */
+type EasePlan = { easeIn: number; easeOut: number } | { ease: string }
+
+/**
+ * The eases of the two pieces of an animation cut at a time (D264), so that together they run
+ * exactly as the whole did. Values written out get the part of the ease on each side, stretched
+ * to an ease of its own; plain ramps stay ramps as long as the cut is not inside the one that
+ * slows down, for the first piece, or the one that speeds up, for the second. A change that stays
+ * a function keeps its full value on both pieces, so the first runs on its share of the ease, to
+ * stop where the cut was, and the second on the part after it, or, when relative, on its share.
+ */
+function easePlans(action: Action, at: number, functional: boolean): { first: EasePlan; second: EasePlan } {
+  const fraction = formatNumber((at - action.start) / (action.end - action.start))
+  const code = easeCode(action)
+  if (functional) return { first: { ease: `Ease.share(${code}, 0, ${fraction})` }, second: { ease: action.timing.relative ? `Ease.share(${code}, ${fraction}, 1)` : `Ease.part(${code}, ${fraction}, 1)` } }
+  const ease = action.timing.ease
+  const plain = !(typeof ease === 'string' && namedEasings[ease]) && typeof ease !== 'function'
+  if (!plain) return { first: { ease: `Ease.part(${code}, 0, ${fraction})` }, second: { ease: `Ease.part(${code}, ${fraction}, 1)` } }
+  const { easeIn, easeOut } = rampsOf(action)
+  const d1 = roundSeconds(at - action.start)
+  const d2 = roundSeconds(action.end - at)
+  const first: EasePlan = d2 < easeOut - 1e-9 ? { ease: `Ease.part(${code}, 0, ${fraction})` } : { easeIn: Math.min(easeIn, d1), easeOut: 0 }
+  const second: EasePlan = d1 < easeIn - 1e-9 ? { ease: `Ease.part(${code}, ${fraction}, 1)` } : { easeIn: 0, easeOut: Math.min(easeOut, d2) }
+  return { first, second }
+}
+
+/** What a piece of a sliced animation is given, in two steps so that nothing is put in where something is taken out: the keys that go, then the values set, as numbers or as code. */
+interface PieceEdits {
+  remove: string[]
+  set: Record<string, AttrValue>
+  setText: Record<string, string>
+}
+
+function pieceEdits(): PieceEdits {
+  return { remove: [], set: {}, setText: {} }
+}
+
+function easeInto(piece: PieceEdits, plan: EasePlan): void {
+  if ('ease' in plan) {
+    piece.setText['ease'] = plan.ease
+    piece.remove.push('easeIn', 'easeOut')
+  } else {
+    piece.set['easeIn'] = plan.easeIn
+    piece.set['easeOut'] = plan.easeOut
+    piece.remove.push('ease')
+  }
+}
+
+/** Apply a piece's edits to an action's statement, the removals first, each step on the statement as it then is. */
+function applyPieceEdits(name: string, index: number, piece: PieceEdits, extra: (source: string, stmt: ActionInfo) => TextEdit[] = () => [], select?: SelectionState): void {
+  const fresh = (): { source: string; stmt: ActionInfo } | null => {
+    const { source } = state()
+    const stmt = findObject(name)?.actions[index]?.stmt
+    return stmt ? { source, stmt } : null
+  }
+  const a = fresh()
+  if (!a) return
+  const removals = [...piece.remove.map((key) => removeProp(a.source, a.stmt, key)), ...extra(a.source, a.stmt)].filter((e): e is TextEdit => !!e)
+  if (removals.length > 0) applyEdits(removals)
+  const b = fresh()
+  if (!b) return
+  const sets = [...Object.entries(piece.set).map(([key, value]) => setProp(b.source, b.stmt, key, value)), ...Object.entries(piece.setText).map(([key, text]) => setPropText(b.source, b.stmt, key, text))]
+  applyEdits(sets, select)
+}
+
+/**
+ * Slice an animation at a time into two (D264), as the razor does: the first goes to the state
+ * its course reaches there and holds it; the second, written right after it, continues from that
+ * point to the end, and begins from the state the first leaves, as any animation begins. The
+ * eases of the two run together as the whole ran. Values written out are cut into literal
+ * values; a change that stays a function keeps it on both pieces, the first stopping part of the
+ * way (`Ease.share`), the second running the rest (`Ease.part`); a start given as a range stays
+ * on the first and goes from the second. A relative change is cut into the change so far and the
+ * rest. A path's line is cut where the object is then, a smooth one as the curves it is; a morph's
+ * first piece gets the outline reached as its target. The name moves to the second piece, so
+ * what followed the whole's end still does; a linked end becomes the cut on the first piece. A
+ * class animation is not cut, nor a path from a formula. Returns whether it was cut.
+ */
+export function sliceAction(name: string, index: number, time: number): boolean {
+  const { model, fps } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  const action = obj?.actions[index]
+  if (!model || !obj || !action?.stmt || action.classAction) return false
+  // An action by character, word, or line runs on each unit in turn: there is no one course to cut (D268).
+  if (action.timing.by !== undefined) return false
+  const stmt = action.stmt
+  const frame = frameSeconds(fps)
+  const at = roundSeconds(time)
+  const start = roundSeconds(action.start)
+  const end = roundSeconds(action.end)
+  if (at < start + frame - 1e-9 || at > end - frame + 1e-9) return false
+  const functional = Object.values(action.changes).some((v) => typeof v === 'function')
+  const first = pieceEdits()
+  const second = pieceEdits()
+  // The pieces' values.
+  if (action.verb === 'path') {
+    if (functional || !slicePathInto(obj, action, index, at, first, second)) return false
+  } else if (action.verb === 'morph' && !functional) {
+    const segs = shapeSegsAt(model, obj, at)
+    if (!segs) return false
+    first.set['to'] = serializePathData(segs)
+  } else if (!functional) {
+    for (const [attr, raw] of Object.entries(action.changes)) {
+      const course = actionCourse(model, obj, action, attr, at)
+      first.set[attr] = typeof course === 'number' ? roundAttr(attr, course) : course
+      if (action.timing.relative && typeof raw === 'number' && typeof course === 'number') second.set[attr] = roundAttr(attr, raw - course)
+    }
+  }
+  // A start given as a range stays on the first piece; the second begins from where the first leaves it (D258).
+  for (const attr of Object.keys(action.from)) if (!(attr in second.set) && typeof action.changes[attr] === 'number') second.setText[attr] = formatValue(action.changes[attr] as number)
+  // The pieces' timing: the first ends at the cut, a linked end becoming it; the second starts there, without the delay, and ends where the whole did.
+  if (stmt.props.some((p) => p.key === 'until')) first.set['until'] = at
+  else first.set['duration'] = roundSeconds(at - start)
+  second.set['at'] = at
+  second.remove.push('delay')
+  if (!stmt.props.some((p) => p.key === 'until')) second.set['duration'] = roundSeconds(end - at)
+  const plans = easePlans(action, at, functional)
+  easeInto(first, plans.first)
+  easeInto(second, plans.second)
+  const joined = gestureOpen()
+  if (!joined) beginGesture()
+  // The second piece is a copy of the whole, written right after it, without the name, which stays on the first (owner, D264 revised); then each piece is given its own.
+  applyPieceEdits(name, index, first, (src, s) => {
+    const head = src.slice(s.range.from, s.propsOpen)
+    const object = Math.max(0, head.indexOf(`${name}.`))
+    return [{ from: s.range.to, to: s.range.to, insert: `\n\n${src.slice(s.range.from + object, s.range.to)}` }]
+  })
+  applyPieceEdits(name, index + 1, second, () => [], actionSelected(name, index + 1))
+  if (action.verb === 'path' || action.verb === 'morph') foldShapes()
+  if (!joined) endGesture()
+  return true
+}
+
+/**
+ * The shapes of the two pieces of a path cut at a time (D264): its line cut where the object is
+ * then, by the distance its eased progress has covered, with an anchor put in there. Lines
+ * between points stay points; a smooth curve becomes the curves it is, on both pieces, so the
+ * cut keeps its shape; curves are cut as curves. A relative path's second piece starts from
+ * nothing, since the first holds its change. Returns false for a shape the GUI cannot write.
+ */
+function slicePathInto(obj: SceneObject, action: Action, index: number, at: number, first: PieceEdits, second: PieceEdits): boolean {
+  const { model } = state()
+  const ref = { object: obj.name, index }
+  if (!model) return false
+  const cur = editableCurves(ref)
+  const e = cur ? null : editableShape(ref)
+  if (!cur && !e) return false
+  const points = e ? e.shape.points.map((p) => ({ x: p.x, y: p.y })) : null
+  const smooth = !!points && action.changes['smooth'] === true && points.length >= 3
+  const segs = cur ? cur.segs : smooth ? smoothPathData(points!, false) : null
+  const progress = progressAt(action, at)
+  const relative = !!action.timing.relative
+  if (segs) {
+    const cut = pathCutAt(model, action, progress, at, cur ? undefined : segs)
+    if (!cut?.at) return false
+    // A cut at an anchor is made there; elsewhere an anchor is put in.
+    const existing = pathAnchors(segs)
+    const ending = existing.findIndex((a) => a.seg === cut.at!.seg)
+    const atEnd = cut.at.t > 1 - 1e-4 && ending >= 0
+    const atStart = cut.at.t < 1e-4 && ending > 0 && existing[ending - 1]!.seg === cut.at.seg - 1
+    const { segs: split, anchor } = atEnd ? { segs, anchor: ending } : atStart ? { segs, anchor: ending - 1 } : splitSegment(segs, cut.at.seg, cut.at.t)
+    const anchors = pathAnchors(split)
+    const hit = anchors[anchor]
+    if (!hit) return false
+    let subpathStart: Point = { x: 0, y: 0 }
+    for (let i = 0; i <= hit.seg; i++) {
+      const s = split[i]!
+      if (s.c === 'M') subpathStart = { x: s.x, y: s.y }
+    }
+    const before = split.slice(0, hit.seg + 1)
+    // A close in the second piece drew back to the whole's start: it becomes a line to it.
+    const after: Seg[] = [{ c: 'M', x: hit.x, y: hit.y }, ...split.slice(hit.seg + 1).map((s): Seg => (s.c === 'Z' ? { c: 'L', x: subpathStart.x, y: subpathStart.y } : s))]
+    const indent = (cur ?? e!).stmt.indent
+    first.setText['shape'] = formatCurves(serializePathData(before), indent)
+    second.setText['shape'] = formatCurves(serializePathData(relative ? translatePathData(after, -hit.x, -hit.y) : after), indent)
+    if (smooth) {
+      first.remove.push('smooth')
+      second.remove.push('smooth')
+    }
+    return true
+  }
+  const cut = pathCutAt(model, action, progress, at)
+  if (!cut || !points) return false
+  const i = Math.min(cut.segment, points.length - 2)
+  const a = points[i]!
+  const b = points[i + 1] ?? a
+  const hundredth = (v: number): number => Math.round(v * 100) / 100
+  const point = { x: hundredth(a.x + (b.x - a.x) * cut.t), y: hundredth(a.y + (b.y - a.y) * cut.t) }
+  const before = cut.t < 1e-6 ? points.slice(0, i + 1) : cut.t > 1 - 1e-6 ? points.slice(0, i + 2) : [...points.slice(0, i + 1), point]
+  const after = cut.t < 1e-6 ? points.slice(i) : cut.t > 1 - 1e-6 ? points.slice(i + 1) : [point, ...points.slice(i + 1)]
+  const origin = after[0] ?? point
+  first.set['shape'] = before.map((p) => [p.x, p.y])
+  second.set['shape'] = (relative ? after.map((p) => ({ x: hundredth(p.x - origin.x), y: hundredth(p.y - origin.y) })) : after).map((p) => [p.x, p.y])
+  return true
+}
+
 /** Move or resize a class action's clip: the one statement every member follows. */
 export function setClassActionTiming(id: number, timing: { at?: number; duration?: number }): void {
   const { source, model } = state()
   const classAction = model?.classActions[id]
   if (!classAction?.stmt) return
   const edits: TextEdit[] = []
-  if (timing.at !== undefined) edits.push(setProp(source, classAction.stmt, 'at', roundSeconds(timing.at)))
-  if (timing.duration !== undefined) edits.push(setProp(source, classAction.stmt, 'duration', roundSeconds(timing.duration)))
+  if (timing.at !== undefined) edits.push(timeProp(source, classAction.stmt, 'at', roundSeconds(timing.at)))
+  if (timing.duration !== undefined) edits.push(timeProp(source, classAction.stmt, 'duration', roundSeconds(timing.duration)))
   applyEdits(edits)
 }
 
@@ -1763,15 +2045,15 @@ export function retimeActions(refs: ActionRef[], change: { shift?: number; grow?
       // The end stays put: the duration changes first, and the start follows it, so hitting the
       // one-frame floor never nudges the end.
       const newDuration = Math.max(minimum, duration - change.trimStart)
-      if (!untilProp) edits.push(setProp(source, stmt, 'duration', roundSeconds(newDuration)))
-      if (!atLocked) edits.push(setProp(source, stmt, 'at', roundSeconds(Math.max(0, origin.end - newDuration - delay))))
+      if (!untilProp) edits.push(timeProp(source, stmt, 'duration', roundSeconds(newDuration)))
+      if (!atLocked) edits.push(timeProp(source, stmt, 'at', roundSeconds(Math.max(0, origin.end - newDuration - delay))))
       if (!atLocked && !untilProp) span(action, Math.max(0, origin.end - newDuration), origin.end)
       continue
     }
     const move = change.shift ?? 0
-    if ((move !== 0 || from) && !atLocked) edits.push(setProp(source, stmt, 'at', roundSeconds(Math.max(0, origin.start + move - delay))))
+    if ((move !== 0 || from) && !atLocked) edits.push(timeProp(source, stmt, 'at', roundSeconds(Math.max(0, origin.start + move - delay))))
     const grow = change.grow ?? 0
-    if ((grow !== 0 || (from && change.grow !== undefined)) && !untilProp) edits.push(setProp(source, stmt, 'duration', roundSeconds(Math.max(minimum, duration + grow))))
+    if ((grow !== 0 || (from && change.grow !== undefined)) && !untilProp) edits.push(timeProp(source, stmt, 'duration', roundSeconds(Math.max(minimum, duration + grow))))
     const newStart = atLocked ? origin.start : Math.max(0, origin.start + move)
     span(action, newStart, newStart + (untilProp ? duration : Math.max(minimum, duration + grow)))
   }
@@ -1788,8 +2070,8 @@ export function setLifetime(name: string, life: { at?: number | null; until?: nu
   const obj = model?.objects.find((o) => o.name === name)
   if (!model || !obj?.decl || obj.className === GROUP) return
   const edits: (TextEdit | null)[] = []
-  if (life.at !== undefined) edits.push(life.at === null || life.at <= 0 ? removeProp(source, obj.decl, 'at') : setProp(source, obj.decl, 'at', roundSeconds(life.at)))
-  if (life.until !== undefined) edits.push(life.until === null ? removeProp(source, obj.decl, 'until') : setProp(source, obj.decl, 'until', roundSeconds(life.until)))
+  if (life.at !== undefined) edits.push(life.at === null || life.at <= 0 ? removeProp(source, obj.decl, 'at') : timeProp(source, obj.decl, 'at', roundSeconds(life.at)))
+  if (life.until !== undefined) edits.push(life.until === null ? removeProp(source, obj.decl, 'until') : timeProp(source, obj.decl, 'until', roundSeconds(life.until)))
   applyEdits(edits.filter((e): e is TextEdit => !!e))
 }
 
@@ -1814,15 +2096,15 @@ export function placeObject(name: string, at: number, edge: 'all' | 'start' = 'a
   const target = Math.max(0, roundSeconds(at))
   const shift = target - origin.at
   const until = origin.until === null ? null : edge === 'all' ? origin.until + shift : Math.max(target + frameSeconds(fps), origin.until)
-  const edits: (TextEdit | null)[] = [target <= 0 ? removeProp(source, obj.decl, 'at') : setProp(source, obj.decl, 'at', target)]
-  if (until !== origin.until || from) edits.push(until === null ? removeProp(source, obj.decl, 'until') : setProp(source, obj.decl, 'until', roundSeconds(until)))
+  const edits: (TextEdit | null)[] = [target <= 0 ? removeProp(source, obj.decl, 'at') : timeProp(source, obj.decl, 'at', target)]
+  if (until !== origin.until || from) edits.push(until === null ? removeProp(source, obj.decl, 'until') : timeProp(source, obj.decl, 'until', roundSeconds(until)))
   obj.actions.forEach((action, index) => {
     const stmt = action.stmt
     if (!stmt || action.classAction || action.overridden || action.codeDriven) return
     const atProp = stmt.props.find((p) => p.key === 'at')
     if (!atProp || atProp.kind !== 'literal') return
     const start = origin.actions[`${name}:${index}`]?.start ?? action.start
-    edits.push(setProp(source, stmt, 'at', roundSeconds(Math.max(0, start + shift - (action.timing.delay ?? 0)))))
+    edits.push(timeProp(source, stmt, 'at', roundSeconds(Math.max(0, start + shift - (action.timing.delay ?? 0)))))
   })
   applyEdits(edits.filter((e): e is TextEdit => !!e))
 }
@@ -1896,7 +2178,7 @@ export function setActionProp(ref: ActionRef, key: string, value: AttrValue | nu
   const action = model?.objects.find((o) => o.name === ref.object)?.actions[ref.index]
   if (!model || !action?.stmt || action.classAction) return
   if (asText) rememberReplaced(action.stmt, ref.object, key, ref.index)
-  const edit = value === null ? removeProp(source, action.stmt, key) : asText && typeof value === 'string' ? setPropText(source, action.stmt, key, value) : setProp(source, action.stmt, key, typeof value === 'number' ? (TIMING_KEY_NAMES.has(key) ? roundSeconds(value) : roundAttr(key, value)) : value)
+  const edit = value === null ? removeProp(source, action.stmt, key) : asText && typeof value === 'string' ? setPropText(source, action.stmt, key, value) : typeof value === 'number' && TIMING_KEY_NAMES.has(key) ? timeProp(source, action.stmt, key, roundSeconds(value)) : setProp(source, action.stmt, key, typeof value === 'number' ? roundAttr(key, value) : value)
   if (edit) applyEdits([edit])
 }
 
@@ -1940,8 +2222,8 @@ export function restoreActionProp(ref: ActionRef, key: string): void {
   replacedByLinks.delete(id)
   let edit: TextEdit | null
   if (remembered) edit = setPropText(source, action.stmt, key, remembered)
-  else if (key === 'at') edit = setProp(source, action.stmt, 'at', roundSeconds(action.start - (action.timing.delay ?? 0)))
-  else if (key === 'until') edit = setProp(source, action.stmt, 'until', roundSeconds(action.end))
+  else if (key === 'at') edit = timeProp(source, action.stmt, 'at', roundSeconds(action.start - (action.timing.delay ?? 0)))
+  else if (key === 'until') edit = timeProp(source, action.stmt, 'until', roundSeconds(action.end))
   else edit = removeProp(source, action.stmt, key)
   if (edit) applyEdits([edit])
 }

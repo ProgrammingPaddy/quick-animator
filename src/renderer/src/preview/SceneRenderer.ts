@@ -2,8 +2,10 @@ import * as THREE from 'three'
 import { groupMembers } from '../model/groups'
 import { GROUP } from '../model/registry'
 import { hasPathData } from '../model/pathData'
-import { existsAt, groupBox, opacityAt, parseColor, shapePieces, textMeasurer, valueAt, worldPose, type Pose, type ShapePiece } from '../model/sample'
+import { existsAt, groupBox, opacityAt, parseColor, shapePieces, textPadding, textStyleAt, textUnitStates, valueAt, worldPose, type Pose, type ShapePiece } from '../model/sample'
 import { SHAPE } from '../model/registry'
+import { drawText, estimateMeasure, fontSpec, layoutOf, textMeasure, unitOverflow, type TextMeasure, type TextStyle } from '../model/text'
+import { fontsVersion } from '../project/fonts'
 import type { SceneModel, SceneObject } from '../model/types'
 import type { TransformMode } from '../state/store'
 
@@ -14,6 +16,9 @@ interface Item {
   width: number
   height: number
   textKey?: string
+  /** A Text's canvas, kept and redrawn, and how much of the world its picture covers, which grows past the block as animated characters reach out (D268). */
+  textCanvas?: HTMLCanvasElement
+  drawn?: { width: number; height: number }
   /** A Shape's stroke, its own mesh; the box around its line in its own space, its center offset from the object's x and y; and what its geometry was built from (D232). */
   stroke?: THREE.Mesh
   bounds?: { x: number; y: number; width: number; height: number }
@@ -46,47 +51,22 @@ const unitCircle = new THREE.CircleGeometry(0.5, 96)
 /** Canvas pixels per world pixel for text, so it stays crisp when zoomed in. */
 const TEXT_SCALE = 2
 
-interface TextMetrics {
-  fontSpec: string
-  width: number
-  height: number
-  ascent: number
-  pad: number
-}
-
-const metricsCache = new Map<string, TextMetrics>()
 let measuringContext: CanvasRenderingContext2D | null = null
 
-/** The canvas pixels a text takes at a font size, measured once per text. */
-function textMetrics(text: string, fontSize: number, font: string): TextMetrics {
-  const key = [text, fontSize, font].join('\u0000')
-  const cached = metricsCache.get(key)
-  if (cached) return cached
+/** A run of text measured on a canvas with the style's font (D267): its advance, with the letter spacing, and the font's ascent and descent at the size. The sampler, the preset card, and the drawing all go by this. */
+function canvasMeasure(text: string, style: TextStyle): TextMeasure {
   if (!measuringContext) measuringContext = document.createElement('canvas').getContext('2d')
-  const px = Math.max(1, fontSize) * TEXT_SCALE
-  const fontSpec = `${px}px "${font}", "Segoe UI", sans-serif`
-  let width = px * 0.55 * Math.max(1, text.length)
-  let ascent = px * 0.8
-  let descent = px * 0.2
-  if (measuringContext) {
-    measuringContext.font = fontSpec
-    const m = measuringContext.measureText(text || ' ')
-    width = m.width
-    ascent = m.actualBoundingBoxAscent || ascent
-    descent = m.actualBoundingBoxDescent || descent
-  }
-  const pad = px * 0.1
-  const metrics: TextMetrics = { fontSpec, width: Math.max(1, Math.ceil(width + pad * 2)), height: Math.max(1, Math.ceil(ascent + descent + pad * 2)), ascent, pad }
-  if (metricsCache.size > 2000) metricsCache.clear()
-  metricsCache.set(key, metrics)
-  return metrics
+  const estimate = estimateMeasure(text, style)
+  if (!measuringContext) return estimate
+  const ctx = measuringContext as CanvasRenderingContext2D & { letterSpacing?: string }
+  ctx.font = fontSpec(style)
+  ctx.fontKerning = 'normal'
+  if ('letterSpacing' in ctx) ctx.letterSpacing = `${style.letterSpacing}px`
+  const m = ctx.measureText(text)
+  // The font's own ascent and descent, so every line of a text has one height whatever it says.
+  return { width: m.width, ascent: m.fontBoundingBoxAscent || estimate.ascent, descent: m.fontBoundingBoxDescent || estimate.descent }
 }
-
-// The sampler frames groups with the same measurements the renderer draws with.
-textMeasurer.current = (text, fontSize, font) => {
-  const m = textMetrics(text, fontSize, font)
-  return { width: m.width / TEXT_SCALE, height: m.height / TEXT_SCALE }
-}
+textMeasure.current = canvasMeasure
 const RESIZE_HANDLES: { sx: -1 | 0 | 1; sy: -1 | 0 | 1 }[] = [
   { sx: -1, sy: -1 },
   { sx: 1, sy: -1 },
@@ -1000,7 +980,9 @@ export class SceneRenderer {
       item.height = num('height')
       setColor(material, str('fill'))
     } else if (obj.className === 'Text') {
-      this.applyText(item, str('text'), num('fontSize'), str('font'), str('fill'))
+      this.applyText(item, obj, model, time, str('fill'))
+      mesh.scale.set((item.drawn?.width ?? item.width) * pose.scale, (item.drawn?.height ?? item.height) * pose.scale, 1)
+      return
     } else if (obj.className === SHAPE) {
       this.applyShape(item, obj, model, time, pose, opacity, index, num('z'))
       return
@@ -1008,31 +990,50 @@ export class SceneRenderer {
     mesh.scale.set(item.width * pose.scale, item.height * pose.scale, 1)
   }
 
-  private applyText(item: Item, text: string, fontSize: number, font: string, fill: string): void {
-    const key = [text, fontSize, font, fill].join('\u0000')
+  /**
+   * A Text drawn on a canvas (D267): its lines laid out as the sampler measures them, whole
+   * while nothing runs on its units, else character by character in their states (D268), the
+   * canvas grown around the block so far as the characters reach, and kept, so a frame redraws
+   * into it rather than making another. The box the handles frame stays the block's.
+   */
+  private applyText(item: Item, obj: SceneObject, model: SceneModel, time: number, fill: string): void {
+    const style = textStyleAt(model, obj, time)
+    const layout = layoutOf(style)
+    const states = textUnitStates(model, obj, time, layout)
+    const color = parseColor(fill) ? fill : '#ffffff'
+    const key = [layout.width, layout.height, style.text, style.fontSize, style.font, style.weight, style.italic, style.align, style.lineHeight, style.letterSpacing, color, fontsVersion.current, states ? time : ''].join('\u0000')
     if (item.textKey === key) return
     item.textKey = key
-    const canvas = document.createElement('canvas')
+    const pad = textPadding(style)
+    item.width = layout.width + 2 * pad
+    item.height = layout.height + 2 * pad
+    const over = states ? unitOverflow(layout, states) : { x: 0, y: 0 }
+    const marginX = pad + over.x
+    const marginY = pad + over.y
+    const width = Math.max(1, Math.ceil((layout.width + 2 * marginX) * TEXT_SCALE))
+    const height = Math.max(1, Math.ceil((layout.height + 2 * marginY) * TEXT_SCALE))
+    const material = item.mesh.material as THREE.MeshBasicMaterial
+    let canvas = item.textCanvas
+    if (!canvas || canvas.width !== width || canvas.height !== height) {
+      canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      item.textCanvas = canvas
+      material.map?.dispose()
+      const texture = new THREE.CanvasTexture(canvas)
+      texture.colorSpace = THREE.SRGBColorSpace
+      texture.minFilter = THREE.LinearFilter
+      texture.generateMipmaps = false
+      material.map = texture
+      material.color.set(0xffffff)
+      material.needsUpdate = true
+    }
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    const { fontSpec, width, height, ascent, pad } = textMetrics(text, fontSize, font)
-    canvas.width = width
-    canvas.height = height
-    ctx.font = fontSpec
-    ctx.fillStyle = parseColor(fill) ? fill : '#ffffff'
-    ctx.textBaseline = 'alphabetic'
-    ctx.fillText(text, pad, pad + ascent)
-    const texture = new THREE.CanvasTexture(canvas)
-    texture.colorSpace = THREE.SRGBColorSpace
-    texture.minFilter = THREE.LinearFilter
-    texture.generateMipmaps = false
-    const material = item.mesh.material as THREE.MeshBasicMaterial
-    material.map?.dispose()
-    material.map = texture
-    material.color.set(0xffffff)
-    material.needsUpdate = true
-    item.width = canvas.width / TEXT_SCALE
-    item.height = canvas.height / TEXT_SCALE
+    ctx.clearRect(0, 0, width, height)
+    drawText(ctx, layout, color, states, TEXT_SCALE, marginX, marginY)
+    if (material.map) material.map.needsUpdate = true
+    item.drawn = { width: width / TEXT_SCALE, height: height / TEXT_SCALE }
   }
 }
 

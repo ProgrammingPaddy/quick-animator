@@ -88,6 +88,10 @@ export interface Timing {
   ease?: string | ((progress: number) => number)
   /** Values are changes from where the object is when the action starts (D51). */
   relative?: boolean
+  /** On a Text: the action runs on each character, word, or line in turn, from its own place (D268). */
+  by?: 'char' | 'word' | 'line'
+  /** Seconds between one unit's start and the next, with `by`, 0.05 unless written; or a function of the unit's index giving the gap before that unit (D269). */
+  stagger?: number | ((index: number) => number)
 }
 
 export interface SceneObject {

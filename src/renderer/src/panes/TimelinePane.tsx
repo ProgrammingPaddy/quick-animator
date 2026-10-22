@@ -7,7 +7,7 @@ import { beginGesture, endGesture } from '../code/editor'
 import { actionIdents, activeMembers, classActionIdents, classKey, classSpan, classStandIn, classTree, groupMembers, overrideOf, type ClassNode } from '../model/groups'
 import { attrSchema, GROUP, labelOn, PIVOT_PARAMS, VERB_ATTRS, VERB_COLORS, VERBS } from '../model/registry'
 import { actionLinks, classActionLinks, dependentsByTarget, objectLinks, targetKey, type LinkInfo } from '../model/links'
-import { containers, isVisibleAt, valueAt } from '../model/sample'
+import { containers, isVisibleAt, valueAt, visibleShareAt } from '../model/sample'
 import type { Action, ClassAction, SceneModel, SceneObject } from '../model/types'
 import {
   addAction,
@@ -40,10 +40,12 @@ import {
   roundSeconds,
   selectClass,
   selectClassAction,
+  setActionFrom,
   setActionTiming,
   setActionValues,
   setClassActionTiming,
   setClassActionValues,
+  sliceAction,
   ungroup,
   setAttrsAt,
   setAttrsAtMany,
@@ -112,7 +114,9 @@ export function linkWord(key: string): string {
 
 function clipLabel(action: Action): string {
   const what = action.verb === 'to' ? Object.keys(action.changes).filter((k) => !(PIVOT_PARAMS as readonly string[]).includes(k)).join(', ') || 'to' : action.verb
-  return action.timing.relative ? `${what} (relative)` : what
+  // By character, word, or line, the clip says so (D268).
+  const by = action.timing.by ? `${what} by ${action.timing.by}` : what
+  return action.timing.relative ? `${by} (relative)` : by
 }
 
 /**
@@ -221,8 +225,8 @@ const OpacityLane = memo(function OpacityLane({ model, obj, scrollTime, pps, wid
     if (width <= 0) return ''
     const points: string[] = []
     for (let x = 0; x <= width; x += 3) {
-      const value = valueAt(model, obj, 'opacity', scrollTime + x / pps)
-      const opacity = Math.max(0, Math.min(1, typeof value === 'number' ? value : 0))
+      // What is seen: a Text's opacity times the share of its characters showing while they are animated (D269).
+      const opacity = Math.max(0, Math.min(1, visibleShareAt(model, obj, scrollTime + x / pps)))
       points.push(`${x},${(height - 1 - opacity * (height - 3)).toFixed(1)}`)
     }
     return `M0,${height} L${points.join(' L')} L${width},${height} Z`
@@ -290,7 +294,14 @@ export function TimelinePane() {
   const setWheelStep = useStore((s) => s.setWheelStep)
   const setPlaying = useStore((s) => s.setPlaying)
   const setTime = useStore((s) => s.setTime)
+  const timelineTool = useStore((s) => s.timelineTool)
+  const setTimelineTool = useStore((s) => s.setTimelineTool)
+  const razor = timelineTool === 'razor'
   const gridRef = useRef<HTMLDivElement>(null)
+  // The razor's guide goes with the razor, however it is put away (owner, 2026-10-20).
+  useEffect(() => {
+    if (!razor) setSnapLine(null)
+  }, [razor])
   const rulerRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const rowsRef = useRef<HTMLDivElement>(null)
@@ -672,7 +683,9 @@ export function TimelinePane() {
         setActionTiming(obj.name, target, { at: start - origin.delay, duration: origin.end - start })
         const before = Math.max(0, Math.min(1, origin.before - (ev.clientY - origin.y) / OPACITY_GAIN))
         const now = useStore.getState().model?.objects.find((o) => o.name === obj.name)?.actions[target]
-        if (now) setAttrsAt(obj.name, { opacity: before }, now.start)
+        // A fade by character, word, or line given a start of its own: the handle sets that start, which every unit holds until its turn (D269).
+        if (now?.timing.by !== undefined && now.from['opacity'] !== undefined) setActionFrom({ object: obj.name, index: target }, 'opacity', before)
+        else if (now) setAttrsAt(obj.name, { opacity: before }, now.start)
       } else {
         const end = Math.max(origin.start, snapTime(origin.end + dt, currentModel, action, origin.pps, snapOn))
         const value = Math.max(0, Math.min(1, origin.value - (ev.clientY - origin.y) / OPACITY_GAIN))
@@ -839,6 +852,17 @@ export function TimelinePane() {
 
   const snappedAt = (clientX: number): number => snapTime(rawTimeAt(clientX), model, null, viewRef.current.pps, useStore.getState().snap)
 
+  /** The razor (D264): a click on an animation slices it where the pointer is, snapped as the playhead is; a class animation becomes the object's own first. */
+  const sliceHere = (obj: SceneObject, index: number) => (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    if (!canEdit()) return
+    const at = snappedAt(e.clientX)
+    const own = ownAction(obj.name, index)
+    if (own !== null) sliceAction(obj.name, own, at)
+    setSnapLine(null)
+  }
+
   const classMenu = (node: ClassNode) => (e: ReactMouseEvent) => {
     e.stopPropagation()
     selectClass(node.group.className)
@@ -876,6 +900,8 @@ export function TimelinePane() {
     const atLink = action ? actionLinks(action).find((l) => l.key === 'at') : undefined
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToAction(obj.name, index) },
+      // The playhead to either end of the animation (D259).
+      ...(action ? [{ label: 'Go to start', keyword: timecode(action.start, fps), run: () => useStore.getState().setTime(action.start) }, { label: 'Go to end', keyword: timecode(action.end, fps), run: () => useStore.getState().setTime(action.end) }] : []),
       { label: action?.name ? 'Rename' : 'Name', run: () => requestRename({ object: obj.name, index }) },
       { label: 'Edit links', keyword: atLink ? atLink.text : undefined, run: () => openLinksDialog({ object: obj.name, index }) },
       { label: 'Save as preset', run: () => requestSavePreset({ object: obj.name, index }) },
@@ -932,6 +958,9 @@ export function TimelinePane() {
     const editableObject = !!obj.decl && !obj.codeDriven && canEdit()
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToObject(obj.name) },
+      // The playhead to where the object begins, or where it is removed, else the end of the content (D259).
+      { label: 'Go to start', keyword: timecode(obj.at, fps), run: () => useStore.getState().setTime(obj.at) },
+      ...(obj.until !== null || s.contentEnd !== null ? [{ label: 'Go to end', keyword: timecode(obj.until ?? s.contentEnd ?? 0, fps), run: () => useStore.getState().setTime(obj.until ?? s.contentEnd ?? 0) }] : []),
       { label: 'Rename', run: () => requestRename({ object: obj.name }) },
       ...(isGroup ? [] : [{ label: 'Classes', run: () => requestClasses([obj.name]) }]),
       ...(isGroup || !editableObject
@@ -1099,11 +1128,11 @@ export function TimelinePane() {
         className={`clip${locked ? ' locked' : ''}${derived ? ' derived' : ''}${action.overridden ? ' overridden' : ''}${action.overrides ? ' override' : ''}${isSelected ? ' selected' : ''}${kin ? ' kin' : ''}${carried ? ' carried' : ''}${thin ? ' thin' : ''}${dragging ? ' dragging' : ''}`}
         style={{ left, top, width: clipWidth, background: VERB_COLORS[action.verb], color: labelOn(VERB_COLORS[action.verb]) }}
         {...(own ? { 'data-ref': `${owner.name}:${index}` } : {})}
-        onPointerDown={locked ? undefined : beginClipDrag(owner, index, 'move', own && !thin)}
+        onPointerDown={locked ? undefined : razor ? sliceHere(owner, index) : beginClipDrag(owner, index, 'move', own && !thin)}
         onContextMenu={action.stmt ? clipMenu(owner, index) : undefined}
         title={title}
       >
-        {!locked && !thin && <div className="clip-edge left" onPointerDown={beginClipDrag(owner, index, 'start')} />}
+        {!locked && !thin && !razor && <div className="clip-edge left" onPointerDown={beginClipDrag(owner, index, 'start')} />}
         {!thin && (
           <span className="label">
             {carried && <span className="ident group">{owner.name}</span>}
@@ -1112,7 +1141,7 @@ export function TimelinePane() {
             {!carried && renderLinks(actionLinks(action), dependents.get(targetKey({ action })))}
           </span>
         )}
-        {!locked && !thin && <div className="clip-edge right" onPointerDown={beginClipDrag(owner, index, 'end')} />}
+        {!locked && !thin && !razor && <div className="clip-edge right" onPointerDown={beginClipDrag(owner, index, 'end')} />}
       </div>
     )
   }
@@ -1319,8 +1348,8 @@ export function TimelinePane() {
                 if (action.end <= start || action.start >= end) return null
                 const isSelected = isActionSelected(selectedActions, obj.name, index)
                 return [
-                  <div key={`s${action.id}`} className={`opacity-handle start${isSelected ? ' selected' : ''}`} style={{ left: xAt(action.start) - left, top: opacityY(valueAt(model, obj, 'opacity', action.start)) }} onPointerDown={beginFadeDrag(obj, index, 'start')} title="Drag sideways to move this fade, up or down to set the opacity before it" />,
-                  <div key={`e${action.id}`} className={`opacity-handle end${isSelected ? ' selected' : ''}`} style={{ left: xAt(action.end) - left, top: opacityY(valueAt(model, obj, 'opacity', action.end)) }} onPointerDown={beginFadeDrag(obj, index, 'end')} title="Fade end: drag for length and opacity" />,
+                  <div key={`s${action.id}`} className={`opacity-handle start${isSelected ? ' selected' : ''}`} style={{ left: xAt(action.start) - left, top: opacityY(visibleShareAt(model, obj, action.start)) }} onPointerDown={beginFadeDrag(obj, index, 'start')} title="Drag sideways to move this fade, up or down to set the opacity before it" />,
+                  <div key={`e${action.id}`} className={`opacity-handle end${isSelected ? ' selected' : ''}`} style={{ left: xAt(action.end) - left, top: opacityY(visibleShareAt(model, obj, action.end)) }} onPointerDown={beginFadeDrag(obj, index, 'end')} title="Fade end: drag for length and opacity" />,
                 ]
               })}
           </div>
@@ -1505,6 +1534,40 @@ export function TimelinePane() {
         >
           Frames
         </button>
+        <span className="transport-tools" role="group" aria-label="Timeline tool">
+          <button
+            className={`transport-button${razor ? '' : ' on'}`}
+            onClick={(e) => {
+              setTimelineTool('select')
+              e.currentTarget.blur()
+            }}
+            title="Pointer: select, move, and trim"
+            aria-label="Pointer"
+            aria-pressed={!razor}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M3.5 1.5 L3.5 13 L6.6 10.2 L8.6 14.5 L10.6 13.6 L8.7 9.4 L12.8 9.2 Z" fill="currentColor" />
+            </svg>
+          </button>
+          <button
+            className={`transport-button${razor ? ' on' : ''}`}
+            onClick={(e) => {
+              setTimelineTool('razor')
+              e.currentTarget.blur()
+            }}
+            title="Razor: click an animation to slice it there (R)"
+            aria-label="Razor"
+            aria-pressed={razor}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path
+                fillRule="evenodd"
+                fill="currentColor"
+                d="M2.5 4 H4.3 A1.3 1.3 0 0 0 6.9 4 H9.1 A1.3 1.3 0 0 0 11.7 4 H13.5 A1.5 1.5 0 0 1 15 5.5 V10.5 A1.5 1.5 0 0 1 13.5 12 H11.7 A1.3 1.3 0 0 0 9.1 12 H6.9 A1.3 1.3 0 0 0 4.3 12 H2.5 A1.5 1.5 0 0 1 1 10.5 V5.5 A1.5 1.5 0 0 1 2.5 4 Z M6.6 7.2 H9.4 A0.5 0.5 0 0 1 9.9 7.7 V8.3 A0.5 0.5 0 0 1 9.4 8.8 H6.6 A0.5 0.5 0 0 1 6.1 8.3 V7.7 A0.5 0.5 0 0 1 6.6 7.2 Z M3.2 8 A0.7 0.7 0 1 0 4.6 8 A0.7 0.7 0 1 0 3.2 8 Z M11.4 8 A0.7 0.7 0 1 0 12.8 8 A0.7 0.7 0 1 0 11.4 8 Z"
+              />
+            </svg>
+          </button>
+        </span>
         <NumberField label="Frames per wheel tick with Shift" value={wheelStep} unit="f" onChange={setWheelStep} />
         <span className="time mono">{formatTime(time, fps)}</span>
         <span className="dim">
@@ -1527,7 +1590,7 @@ export function TimelinePane() {
           {playheadVisible && <div className="playhead head" style={{ left: playheadX }} />}
         </div>
         <div className="tl-body" ref={bodyRef}>
-          <div className="tl-rows" ref={rowsRef} onContextMenu={blankMenu}>
+          <div className={`tl-rows${razor ? ' razor' : ''}`} ref={rowsRef} onContextMenu={blankMenu} onPointerMove={razor ? (e) => setSnapLine(snappedAt(e.clientX)) : undefined} onPointerLeave={razor ? () => setSnapLine(null) : undefined}>
             {model && model.objects.length === 0 && <div className="empty">No objects yet.</div>}
             {renderObjectsView()}
             <div className="tl-playhead-layer" aria-hidden="true">
@@ -1537,16 +1600,37 @@ export function TimelinePane() {
           </div>
         </div>
         <div className="tl-hscroll">
-          {width > 0 && (
-            <ScrollBar
-              axis="x"
-              rangeStart={0}
-              rangeEnd={Math.max(contentEnd ?? 0, view.scrollTime + width / view.pps) + (width / view.pps) * 0.25}
-              windowStart={view.scrollTime}
-              windowEnd={view.scrollTime + width / view.pps}
-              onScroll={(start) => setView({ pps: viewRef.current.pps, scrollTime: Math.max(0, start) })}
-            />
-          )}
+          <button className="tl-jump" onClick={() => setView({ pps: viewRef.current.pps, scrollTime: 0 })} title="Scroll to the start" aria-label="Scroll to the start">
+            <svg viewBox="0 0 10 10" aria-hidden="true">
+              <path d="M2 1.5 L2 8.5 M8 1.5 L4 5 L8 8.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <div className="tl-hscroll-track">
+            {width > 0 && (
+              <ScrollBar
+                axis="x"
+                rangeStart={0}
+                rangeEnd={Math.max(contentEnd ?? 0, view.scrollTime + width / view.pps) + (width / view.pps) * 0.25}
+                windowStart={view.scrollTime}
+                windowEnd={view.scrollTime + width / view.pps}
+                onScroll={(start) => setView({ pps: viewRef.current.pps, scrollTime: Math.max(0, start) })}
+              />
+            )}
+          </div>
+          <button
+            className="tl-jump"
+            onClick={() => {
+              // The end of the content sits near the right edge of the view (D262).
+              const v = viewRef.current
+              setView({ pps: v.pps, scrollTime: Math.max(0, (contentEnd ?? 0) - (width / v.pps) * 0.9) })
+            }}
+            title="Scroll to the end"
+            aria-label="Scroll to the end"
+          >
+            <svg viewBox="0 0 10 10" aria-hidden="true">
+              <path d="M8 1.5 L8 8.5 M2 1.5 L6 5 L2 8.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
         </div>
       </div>
     </div>

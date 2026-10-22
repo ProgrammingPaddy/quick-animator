@@ -5,6 +5,7 @@ import type { SceneModel } from '../model/types'
 import { applySelection, currentSelection, loadAnchored, loadSoft, setSelectionSink, useStore, type ProjectSettings } from '../state/store'
 import { SAMPLE_SCENE } from './sample'
 import { dropTargets } from '../state/dropTargets'
+import { loadProjectFonts } from './fonts'
 import { importSvg } from './operations'
 
 /** Where a new version of the scene text came from. */
@@ -103,7 +104,10 @@ export function applyProject(data: ProjectData): void {
 
 export async function openProject(path: string): Promise<void> {
   if (!window.api) return
-  applyProject(await window.api.project.load(path))
+  const data = await window.api.project.load(path)
+  // The project's fonts first, so the scene is measured and drawn with them from its first frame (D267).
+  await loadProjectFonts(data.fonts ?? [])
+  applyProject(data)
 }
 
 export async function pickProject(): Promise<void> {

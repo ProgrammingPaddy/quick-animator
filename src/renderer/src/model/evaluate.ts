@@ -1,6 +1,8 @@
 import { CLASS_NAMES, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ALIASES, VERB_ATTRS, VERB_NAMES, VERB_PARAMS, canonicalVerb, classes, type Verb } from './registry'
+import { easeFrom, easePart, easeShare, namedEasings, ramps } from './easing'
 import { parseScene } from './parse'
-import { ellipsePathData, serializePathData } from './pathData'
+import { UNIT_KINDS, unitBegins, unitCount } from './text'
+import { ellipsePathData, serializePathData, smoothPathData } from './pathData'
 import { forgetSampling, samplingContext, stateStretches, valueAt, type Stretch } from './sample'
 import { STATE_DIRECTIONS, STATE_NAMES, type Action, type ActionInfo, type AttrSource, type ClassAction, type SceneError, type SceneModel, type SceneObject, type StateDirection, type StateName, type TimeRef, type Timing } from './types'
 
@@ -8,6 +10,23 @@ import { STATE_DIRECTIONS, STATE_NAMES, type Action, type ActionInfo, type AttrS
 const HANDLE = Symbol('handle')
 /** Marks a stand-in for a name that is only declared further down (D148). */
 const FORWARD = Symbol('forward')
+
+/** A color from a hue, 0 to 1 round the wheel and wrapping, a saturation, and a lightness, as '#rrggbb' (D272). */
+function hslHex(hue: number, saturation: number, lightness: number): string {
+  const h = ((hue % 1) + 1) % 1
+  const s = Math.max(0, Math.min(1, Number.isFinite(saturation) ? saturation : 0.9))
+  const l = Math.max(0, Math.min(1, Number.isFinite(lightness) ? lightness : 0.6))
+  const c = (1 - Math.abs(2 * l - 1)) * s
+  const x = c * (1 - Math.abs(((h * 6) % 2) - 1))
+  const m = l - c / 2
+  const sector = Math.floor(h * 6) % 6
+  const [r, g, b] = sector === 0 ? [c, x, 0] : sector === 1 ? [x, c, 0] : sector === 2 ? [0, c, x] : sector === 3 ? [0, x, c] : sector === 4 ? [x, 0, c] : [c, 0, x]
+  const hex = (v: number): string =>
+    Math.round((v + m) * 255)
+      .toString(16)
+      .padStart(2, '0')
+  return `#${hex(r)}${hex(g)}${hex(b)}`
+}
 
 /** The 1-based line of a position in the source. */
 function lineAt(source: string, pos: number): number {
@@ -195,6 +214,7 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
     // Only a Shape morphs (D257): a kind becomes one first, by Convert to shape.
     if (verb === 'morph' && obj.className !== SHAPE) warn(`${obj.name}.morph: only a Shape morphs; right-click a Rect or a Circle for Convert to shape`)
     else if (verb === 'morph' && !('to' in block.changes)) warn(`${obj.name}.morph needs a target: to: curves 'M 0 0 C ...', points [[x, y], ...], a word such as Shape.star(5, 100, 50), or a link such as () => other.curves`)
+    checkBy(obj, verb, block.timing)
     const action = makeAction(obj, verb, block, null)
     claim(mark, action)
     if (block.overrides !== undefined) {
@@ -203,6 +223,19 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
       else applyOverride(action, block.overrides)
     }
     return actionHandle([action], action)
+  }
+
+  /** An action by character, word, or line is a Text's, of a move, a turn, a resize, a fade, or a to (D268); elsewhere `by` is dropped with a note. */
+  const checkBy = (obj: SceneObject, verb: Verb, timing: Timing): void => {
+    if (timing.by === undefined && timing.stagger === undefined) return
+    const by = timing.by as unknown
+    if (by !== undefined && !(UNIT_KINDS as readonly unknown[]).includes(by)) warn(`${obj.name}.${verb}: by is 'char', 'word', or 'line'`)
+    else if (obj.className !== 'Text') warn(`${obj.name}.${verb}: by runs on the characters, words, or lines of a Text`)
+    else if (verb === 'morph') warn(`${obj.name}.morph: a morph runs on the whole; by is for move, rotate, resize, fade, path, and to`)
+    else if (by === undefined) warn(`${obj.name}.${verb}: stagger goes with by: 'char', 'word', or 'line'`)
+    else return
+    delete timing.by
+    delete timing.stagger
   }
 
   /** `all('name').verb({ ... })`: one action per member declared so far. */
@@ -214,6 +247,7 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
       if (!isMember(obj, className)) continue
       // Each member reads the block against its own class, so a Text member ignores `radius`.
       const block = readBlock(`all('${className}')`, verb, obj.className, args)
+      checkBy(obj, verb, block.timing)
       classAction.members.push(makeAction(obj, verb, block, classAction))
     }
     claim(mark, classAction)
@@ -316,6 +350,43 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
     circle: (radius = 60) => serializePathData(ellipsePathData(radius, radius)),
     polygon: (sides = 6, radius = 60) => ring(Math.max(3, Math.round(sides)), () => radius),
     star: (points = 5, outer = 100, inner = 50) => ring(Math.max(2, Math.round(points)) * 2, (i) => (i % 2 === 0 ? outer : inner)),
+    // A soft blob (D265): the smooth closed curve through eight points whose radii waver by `wobble` of the radius, the same blob every time, as curves.
+    blob: (radius = 60, wobble = 0.2) => {
+      const waver = [0.5, -0.75, 0.75, -0.5, 0.25, -1, 1, -0.25]
+      const points = ring(8, (i) => radius * (1 + wobble * waver[i]!)).map(([x, y]) => ({ x: x!, y: y! }))
+      return serializePathData(smoothPathData(points, true))
+    },
+  })
+
+  // Frames as seconds (D276): `at: frames(15)` or `duration: frames(5)`, a count of frames at the project's rate, anywhere a time goes.
+  api['frames'] = (count: unknown = 0) => (Number(count) || 0) / fps
+
+  // A point tied to the scene (D266): in a Shape's points or a morph's target, `at(x, y)` sits at that place in the scene, whatever the shape's pose.
+  api['at'] = (x: unknown = 0, y: unknown = 0) => Object.assign([Number(x) || 0, Number(y) || 0], { tied: true })
+
+  // A color by its hue (D272): a fraction of the way round the wheel, wrapping, with a saturation and a lightness, as '#rrggbb'.
+  api['Color'] = Object.freeze({ hue: (hue: unknown = 0, saturation: unknown = 0.9, lightness: unknown = 0.6) => hslHex(Number(hue) || 0, Number(saturation), Number(lightness)) })
+
+  // A letter or digit that changes as the progress goes, the same for the same index and step (D272): what a slot machine shows before a character resolves.
+  Object.assign(api['Text'] as object, {
+    scramble: (index: unknown = 0, progress: unknown = 0, alphabet: unknown = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789') => {
+      const letters = String(alphabet)
+      if (letters.length === 0) return ''
+      const step = Math.floor((Number(progress) || 0) * 24)
+      let x = (Math.imul(Number(index) || 0, 2654435761) + Math.imul(step, 40503)) >>> 0
+      x = (x ^ (x >>> 13)) >>> 0
+      x = Math.imul(x, 0x5bd1e995) >>> 0
+      x = (x ^ (x >>> 15)) >>> 0
+      return letters[x % letters.length]
+    },
+  })
+
+  // The eases as code (D264): the named curves, the ramps, and the part or the share of an ease between two points of its progress, which a sliced animation runs on.
+  api['Ease'] = Object.freeze({
+    ...namedEasings,
+    ramps: (easeIn: unknown = 0, easeOut: unknown = 0, duration: unknown = 1) => ramps(Number(easeIn), Number(easeOut), Number(duration)),
+    part: (ease: unknown, from: unknown = 0, to: unknown = 1) => easePart(easeFrom(ease), Number(from), Number(to)),
+    share: (ease: unknown, from: unknown = 0, to: unknown = 1) => easeShare(easeFrom(ease), Number(from), Number(to)),
   })
 
   /**
@@ -610,6 +681,17 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
     return life
   }
 
+  /** How many units an action by character, word, or line runs on: counted on the text as written; a text that is code is taken as one unit, with a note. */
+  function unitCountOf(action: Action): number {
+    const raw = action.object.attrs['text']
+    const text = raw === undefined ? String(classes['Text']?.attrs.find((a) => a.name === 'text')?.default ?? 'Text') : typeof raw === 'function' ? null : String(raw)
+    if (text === null) {
+      warn(`${action.object.name}.${action.verb}: by needs the text written out; a text that is code runs as one`, action)
+      return 1
+    }
+    return unitCount(text, action.timing.by!)
+  }
+
   function resolveAction(action: Action): [number, number] {
     const memo = resolved.get(action.id)
     if (memo) return memo
@@ -628,6 +710,11 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
     try {
       start = timeOf(action.timing.at, fallbackStart, `${label} at`) + (action.timing.delay ?? 0)
       duration = action.timing.until !== undefined ? Math.max(0, timeOf(action.timing.until, start, `${label} until`) - start) : Math.max(0, action.timing.duration ?? 1)
+      // By character, word, or line, the action lasts until the last unit is done: the gaps before every unit after the first, `stagger` each or what a function of the index gives (D268, D269).
+      if (action.timing.by !== undefined) {
+        const begins = unitBegins(action.timing.stagger, unitCountOf(action))
+        duration += begins.length > 0 ? begins[begins.length - 1]! : 0
+      }
     } catch (err) {
       throw err instanceof TimingError ? err : new TimingError(err instanceof Error ? err.message : String(err), line)
     }

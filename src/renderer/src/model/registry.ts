@@ -19,6 +19,8 @@ export interface AttrSchema {
   derive?: (attrs: Record<string, AttrValue>) => AttrValue
   /** A note kept in the code, such as where an import came from: the panes list it nowhere, and nothing links to it (D241). */
   hidden?: boolean
+  /** The words a string attribute may be, which the Selected pane offers as a list (D267). */
+  options?: readonly string[]
 }
 
 export interface ClassSchema {
@@ -63,12 +65,17 @@ export const classes: Record<string, ClassSchema> = {
   },
   Text: {
     name: 'Text',
-    doc: 'A line of text.',
+    doc: 'Text, in one line or several.',
     attrs: [
       ...common,
-      { name: 'text', type: 'string', default: 'Text', doc: 'The text.', animatable: true },
+      { name: 'text', type: 'string', default: 'Text', doc: 'The text; a line break starts a new line.', animatable: true },
       { name: 'fontSize', type: 'number', default: 48, doc: 'Font size in pixels.', animatable: true },
-      { name: 'font', type: 'string', default: 'Segoe UI', doc: 'Font family.', animatable: false },
+      { name: 'font', type: 'string', default: 'Segoe UI', doc: "Font family: one installed, or a font file in the project's assets/fonts folder, by its file name (D267).", animatable: false },
+      { name: 'weight', type: 'number', default: 400, doc: 'Weight, 100 to 900: 400 regular, 700 bold.', animatable: false },
+      { name: 'italic', type: 'boolean', default: false, doc: 'Slanted.', animatable: false },
+      { name: 'align', type: 'string', default: 'center', doc: 'How the lines line up: left, center, or right.', animatable: false, options: ['left', 'center', 'right'] },
+      { name: 'lineHeight', type: 'number', default: 1.2, doc: 'The distance between lines, as a multiple of the font size.', animatable: true },
+      { name: 'letterSpacing', type: 'number', default: 0, doc: 'Pixels added between letters.', animatable: true },
     ],
   },
   Shape: {
@@ -166,7 +173,7 @@ export const VERB_COLORS: Record<Verb, string> = {
 export const OBJECT_COLOR = '#3b82f6'
 
 /** Keys allowed in every action block that are not attributes: timing, `relative`, and `overrides` (D80). */
-export const TIMING_KEYS = ['at', 'delay', 'duration', 'until', 'easeIn', 'easeOut', 'ease', 'relative', 'overrides'] as const
+export const TIMING_KEYS = ['at', 'delay', 'duration', 'until', 'easeIn', 'easeOut', 'ease', 'relative', 'by', 'stagger', 'overrides'] as const
 export type TimingKey = (typeof TIMING_KEYS)[number]
 export const TIMING_KEY_NAMES: ReadonlySet<string> = new Set(TIMING_KEYS)
 

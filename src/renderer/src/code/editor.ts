@@ -13,6 +13,7 @@ import { easePicks } from './easePicker'
 import { numberScrub } from './scrub'
 import { sceneCompletions } from './completions'
 import { editorHighlight, editorTheme } from './theme'
+import { timeHints } from './timeHints'
 
 /**
  * One editor for the whole app. It outlives the code pane, so collapsing the pane keeps the
@@ -268,6 +269,7 @@ function extensions(): Extension[] {
     autocompletion({ override: [sceneCompletions], icons: false }),
     colorSwatches,
     easePicks,
+    timeHints,
     numberScrub({ begin: beginGesture, end: endGesture }),
     EditorView.lineWrapping,
     javascript(),

@@ -14,11 +14,19 @@ export interface ProjectFile {
   source: string
 }
 
+/** A font file in the project's `assets/fonts` folder: the family it is known by, its file name without the extension, the file, and its bytes (D267). */
+export interface ProjectFont {
+  name: string
+  file: string
+  data: Uint8Array
+}
+
 export interface ProjectData {
   path: string
   name: string
   settings: ProjectSettings
   scenes: ProjectFile[]
+  fonts: ProjectFont[]
 }
 
 export interface FileChange {
@@ -43,6 +51,8 @@ export interface ProjectApi {
   importSvg(): Promise<{ name: string; text: string } | null>
   /** Read a text file by its path, for a file dropped in as a path rather than a file: only an .svg (D241). */
   readFile(path: string): Promise<string>
+  /** The file of an installed font family, with its bytes, for the outlines of a text (D273); null when none is found. */
+  findFont(family: string): Promise<ProjectFont | null>
   /** Changes made to project files from outside the app. Returns an unsubscribe function. */
   onChanged(callback: (change: FileChange) => void): () => void
 }

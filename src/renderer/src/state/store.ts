@@ -136,13 +136,17 @@ const COLLIDE_KEY = 'quick-animator.collide'
 const PUSH_KEY = 'quick-animator.push'
 const PREFS_KEY = 'quick-animator.prefs'
 
-/** App preferences (D145). */
+/** App preferences (D145, D260). */
 export interface Prefs {
   /** Seconds a new object lasts from where it is added, or null to last to the end of the content. */
   objectLength: number | null
+  /** The keys given to hotkeys in place of their defaults, by the hotkey's id (D260). */
+  hotkeys?: Readonly<Record<string, readonly string[]>>
+  /** Whether the code pane shows every time as frames beside it, and frames as seconds (D276); on unless turned off. */
+  timeHints?: boolean
 }
 
-export const DEFAULT_PREFS: Prefs = { objectLength: 2 }
+export const DEFAULT_PREFS: Prefs = { objectLength: 2, timeHints: true }
 
 function loadPrefs(): Prefs {
   try {
@@ -150,7 +154,11 @@ function loadPrefs(): Prefs {
     if (!raw) return DEFAULT_PREFS
     const saved = JSON.parse(raw) as Partial<Prefs>
     const length = saved.objectLength
-    return { objectLength: length === null ? null : typeof length === 'number' && length > 0 ? length : DEFAULT_PREFS.objectLength }
+    const hotkeys: Record<string, readonly string[]> = {}
+    if (saved.hotkeys && typeof saved.hotkeys === 'object') {
+      for (const [id, keys] of Object.entries(saved.hotkeys)) if (Array.isArray(keys) && keys.every((k) => typeof k === 'string')) hotkeys[id] = keys
+    }
+    return { objectLength: length === null ? null : typeof length === 'number' && length > 0 ? length : DEFAULT_PREFS.objectLength, hotkeys, timeHints: saved.timeHints !== false }
   } catch {
     return DEFAULT_PREFS
   }
@@ -392,6 +400,8 @@ interface State {
   pathMode: 'edit' | 'move'
   /** The Shape tool draws a new shape, or edits the points of the selected one (D236). */
   shapeMode: 'create' | 'edit'
+  /** The timeline's pointer, with everything it has always done, or its razor, which slices an animation where it is clicked (D264). */
+  timelineTool: 'select' | 'razor'
   /** What a press on an object picks, in Select and in the Path tool: the object, the outermost group that holds it, or its class (D247). */
   pick: Pick
   /** A line about the last import, shown in the preview for a moment (D241). */
@@ -454,6 +464,7 @@ interface State {
   setTool: (tool: Tool) => void
   setPathMode: (mode: 'edit' | 'move') => void
   setShapeMode: (mode: 'create' | 'edit') => void
+  setTimelineTool: (tool: 'select' | 'razor') => void
   setPick: (pick: Pick) => void
   setNotice: (notice: string | null) => void
   toggleShowPaths: () => void
@@ -472,6 +483,12 @@ interface State {
   /** The user's own presets (D227), kept across projects. */
   userPresets: UserPreset[]
   setUserPresets: (items: UserPreset[]) => void
+  /** The project's fonts by name, from its assets/fonts folder, and the installed families where the browser tells them (D267); the version goes up as fonts arrive. */
+  fonts: string[]
+  systemFonts: string[]
+  fontsVersion: number
+  setFonts: (names: string[], version: number) => void
+  setSystemFonts: (names: string[]) => void
 }
 
 function createAppStore() {
@@ -528,6 +545,7 @@ function createAppStore() {
       tool: 'select',
       pathMode: 'edit',
       shapeMode: 'create',
+      timelineTool: 'select',
       pick: 'object',
       notice: null,
       showPaths: loadChoice<'on' | 'off'>(SHOW_PATHS_KEY, ['on', 'off'], 'on') === 'on',
@@ -669,6 +687,7 @@ function createAppStore() {
         }),
       setPathMode: (pathMode) => set({ pathMode }),
       setShapeMode: (shapeMode) => set({ shapeMode }),
+      setTimelineTool: (timelineTool) => set({ timelineTool }),
       setPick: (pick) => set({ pick }),
       setNotice: (notice) => set({ notice }),
       toggleShowPaths: () =>
@@ -701,6 +720,11 @@ function createAppStore() {
         saveUserPresets(items)
         set({ userPresets: items })
       },
+      fonts: [],
+      systemFonts: [],
+      fontsVersion: 0,
+      setFonts: (fonts, fontsVersion) => set({ fonts, fontsVersion }),
+      setSystemFonts: (systemFonts) => set({ systemFonts }),
       setPrefs: (partial) =>
         set((s) => {
           const prefs = { ...s.prefs, ...partial }

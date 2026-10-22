@@ -2,7 +2,7 @@ import { useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEven
 import { createPortal } from 'react-dom'
 import { showMenu } from '../components/ContextMenu'
 import { PresetPreview } from '../components/PresetPreview'
-import { labelOn, VERB_COLORS } from '../model/registry'
+import { labelOn, VERB_COLORS, type Verb } from '../model/registry'
 import { addObject } from '../project/operations'
 import { ANIMATION_PRESETS, applyAnimationPreset, dropTime, presetById, userAnimationPreset, type AnimationPreset } from '../project/presets'
 import { addUserObject, applyClassPreset, deleteUserPreset } from '../project/userPresets'
@@ -33,6 +33,24 @@ const OBJECT_LOOK: Record<ObjectKind, Look> = {
   Circle: { width: 120, height: 120, fill: '#f59e0b', round: true },
   Text: { width: 106, height: 58, fill: '#ffffff', round: false, text: 'Text' },
   Shape: { width: 120, height: 100, fill: '#4f8cff', round: false, polygon: '50% 0%, 100% 100%, 0% 100%' },
+}
+
+/** The families like animations fall into, by verb or by a family of their own, in the order they are listed (D265, D268); one named here by no family goes with the mixed ones. */
+const FAMILIES: readonly { key: Verb | 'Text'; label: string }[] = [
+  { key: 'fade', label: 'Fades' },
+  { key: 'move', label: 'Moves' },
+  { key: 'rotate', label: 'Turns' },
+  { key: 'resize', label: 'Resizes' },
+  { key: 'path', label: 'Paths' },
+  { key: 'morph', label: 'Morphs' },
+  { key: 'Text', label: 'Text' },
+  { key: 'to', label: 'Miscellaneous' },
+]
+
+/** The family a preset belongs to: its own, else its verb's, else the mixed ones. */
+function familyOf(p: AnimationPreset): string {
+  const key = p.family ?? p.verb
+  return FAMILIES.some((f) => f.key === key) ? key : 'to'
 }
 
 /** A list of points as the corners of its box in percent, for a picture; up is up on screen (D232). */
@@ -103,8 +121,9 @@ function ObjectImage({ look, scale }: { look: Look; scale: number }) {
  * the clip it will be on the timeline; click to apply it to the selected objects at its place,
  * drag it onto a clip in the timeline or an object in the preview. Objects: a still picture of
  * what each adds; click to add it at the middle of the view, drag it into the preview or onto
- * the timeline. Yours: the user's own, saved from the right-click menus, of all those kinds and
- * classes too, which click onto the selection or drop onto an object.
+ * the timeline. Custom: the user's own, saved from the right-click menus, of all those kinds and
+ * classes too, which click onto the selection or drop onto an object. Animations stand in
+ * families by verb, under Animations and under Custom alike (D265).
  */
 export function PresetsPane() {
   const selection = useStore((s) => s.selection)
@@ -122,7 +141,7 @@ export function PresetsPane() {
   const matches = (words: string[]): boolean => q === '' || words.join(' ').toLowerCase().includes(q)
   const animations = ANIMATION_PRESETS.filter((p) => matches([p.label, p.id, p.verb, ...(p.variants?.map((v) => v.label) ?? [])]))
   const objects = OBJECT_KINDS.filter((k) => matches([k]))
-  const yours = userPresets.filter((p) => matches([p.label, p.kind, p.verb ?? '', p.className ?? '']))
+  const custom = userPresets.filter((p) => matches([p.label, p.kind, p.verb ?? '', p.className ?? '']))
 
   /** Apply to the selected objects, each at the preset's default place (D219). */
   const applyToSelection = (p: AnimationPreset) => {
@@ -260,7 +279,7 @@ export function PresetsPane() {
 
   /** A collapsible category: its name folds and unfolds it (owner, 2026-10-18). */
   const section = (key: string, title: string, children: ReactNode) => (
-    <div className="presets-section">
+    <div className={`presets-section presets-${key}`}>
       <button type="button" className="presets-title" onClick={() => setFolded((f) => ({ ...f, [key]: !f[key] }))} aria-expanded={!folded[key]}>
         <span className="caret">{folded[key] ? '▸' : '▾'}</span>
         {title}
@@ -268,6 +287,24 @@ export function PresetsPane() {
       {!folded[key] && children}
     </div>
   )
+
+  /** A family of like animations inside a category, or a kind of the user's own: a smaller heading that folds too (D265). */
+  const subsection = (key: string, title: string, children: ReactNode) => (
+    <div key={key} className="presets-section sub">
+      <button type="button" className="presets-title" onClick={() => setFolded((f) => ({ ...f, [key]: !f[key] }))} aria-expanded={!folded[key]}>
+        <span className="caret">{folded[key] ? '▸' : '▾'}</span>
+        {title}
+      </button>
+      {!folded[key] && children}
+    </div>
+  )
+
+  /** Animations in families by verb, in the families' order, each family only when it has members (D265). */
+  const families = (keyPrefix: string, list: AnimationPreset[], row: (p: AnimationPreset) => ReactNode) =>
+    FAMILIES.map(({ key, label }) => {
+      const members = list.filter((p) => familyOf(p) === key)
+      return members.length > 0 ? subsection(`${keyPrefix}:${key}`, label, <div className="presets-list">{members.map(row)}</div>) : null
+    })
 
   /** One animation's row: the play mark, the name with its variations, and the clip to drag (D219). */
   const animationRow = (p: AnimationPreset, user: boolean, onContextMenu?: (e: ReactMouseEvent) => void) => {
@@ -345,24 +382,30 @@ export function PresetsPane() {
     <div className="presets-body">
       <input className="presets-search" type="search" value={query} placeholder="Search" aria-label="Search presets" onChange={(e) => setQuery(e.target.value)} />
       <div className="presets-scroll">
-        {animations.length > 0 && section('animations', 'Animations', <div className="presets-list">{animations.map((p) => animationRow(p, false))}</div>)}
+        {animations.length > 0 && section('animations', 'Animations', families('animations', animations, (p) => animationRow(p, false)))}
         {objects.length > 0 && section('objects', 'Objects', <div className="presets-list presets-objects">{objects.map((k) => objectRow(k, k, OBJECT_LOOK[k], false, k))}</div>)}
-        {yours.length > 0 &&
+        {custom.length > 0 &&
           section(
-            'yours',
-            'Yours',
-            <div className="presets-list presets-yours">
-              {yours.map((p) => {
-                if (p.kind === 'animation') {
-                  const preset = userAnimationPreset(p)
-                  return preset ? animationRow(preset, true, userMenu(p)) : null
-                }
-                if (p.kind === 'class') return classRow(p)
-                return objectRow(p.id, p.label, lookOf(p), true, p.kind === 'group' ? 'Group' : (p.className ?? 'Object'), userMenu(p))
-              })}
-            </div>,
+            'custom',
+            'Custom',
+            // The user's own by kind (D227, D265): their animations in families, then their objects, groups, and classes.
+            (() => {
+              const byId = new Map(custom.map((p) => [p.id, p]))
+              const own = custom.flatMap((p) => (p.kind === 'animation' ? (userAnimationPreset(p) ?? []) : []))
+              const objs = custom.filter((p) => p.kind === 'object')
+              const groups = custom.filter((p) => p.kind === 'group')
+              const cls = custom.filter((p) => p.kind === 'class')
+              return (
+                <>
+                  {families('custom', own, (p) => animationRow(p, true, userMenu(byId.get(p.id)!)))}
+                  {objs.length > 0 && subsection('custom:objects', 'Objects', <div className="presets-list presets-objects">{objs.map((p) => objectRow(p.id, p.label, lookOf(p), true, p.className ?? 'Object', userMenu(p)))}</div>)}
+                  {groups.length > 0 && subsection('custom:groups', 'Groups', <div className="presets-list presets-objects">{groups.map((p) => objectRow(p.id, p.label, lookOf(p), true, 'Group', userMenu(p)))}</div>)}
+                  {cls.length > 0 && subsection('custom:classes', 'Classes', <div className="presets-list">{cls.map(classRow)}</div>)}
+                </>
+              )
+            })(),
           )}
-        {animations.length === 0 && objects.length === 0 && yours.length === 0 && <div className="presets-empty dim">Nothing matches</div>}
+        {animations.length === 0 && objects.length === 0 && custom.length === 0 && <div className="presets-empty dim">Nothing matches</div>}
       </div>
       {drag &&
         drag.moved &&

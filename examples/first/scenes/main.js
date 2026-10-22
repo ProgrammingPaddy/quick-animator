@@ -1,97 +1,205 @@
-shape1 = Shape({
-  x: -36.48,
-  y: 10.13,
-  curves: `
-    M 21.73 -62.63
-    L 837.31 -228.58
-    L 304.32 -401.14
-  `,
-  fill: 'none',
-  stroke: '#ffffff',
-  strokeWidth: 3,
-  until: 2,
-  rotation: -364.4,
-})
-
-shape2 = Shape({
-  x: 195.59,
-  y: 293.19,
-  curves: `
-    M -195.66 206.27
-    L 325.43 55.74
-    C 312.22 25.07 304.23 -8.42 285.81 -36.28
-    C 269.53 -60.91 246.83 -81.24 223.18 -98.91
-    C 210.76 -108.19 195.15 -113.94 179.73 -115.52
-    C 128.01 -120.82 75.74 -121.79 23.8 -119.36
-    C -6.43 -117.94 -36.34 -111.46 -65.67 -104.02
-    C -95.31 -96.5 -124.78 -87.38 -152.58 -74.63
-    C -191.92 -56.59 -230.64 -36.49 -266.33 -12
-    C -282.73 -0.75 -295.38 15.48 -307.23 31.46
-    C -313.93 40.49 -318.65 51.2 -321.29 62.13
-    C -324.7 76.27 -326.1 91.08 -325.13 105.59
-    C -324.78 110.92 -675.34 129.01 -317.46 123.48
-  `,
-  fill: 'none',
-  stroke: '#ffffff',
-  strokeWidth: 3,
-  until: 2,
-})
-
-shape4 = Shape({
-  x: 257.43,
-  y: -91.63,
-  curves: `
-    M -292.7 68
-    L -376.45 27.11
-    L -290.8 -39.35
-    C -281.75 -77.27 -276.53 -125.48 -261.88 -161.96
-    C -256.52 -175.31 -243.58 -185.92 -230.47 -193.91
-    C -210.06 -206.36 -186.71 -214.83 -163.37 -222.03
-    C -128.45 -232.79 -92.6 -241.5 -56.29 -247.59
-    C -38.98 -250.5 -20.7 -252.14 -3.48 -248.87
-    C 11.74 -245.98 25.75 -238.33 37.93 -229.7
-    C 46.75 -223.46 52.9 -214.4 57.92 -205.41
-    C 66.82 -189.49 72.19 -172.18 79.33 -155.57
-    L 87.52 -59.8
-    L 186.03 18.16
-    L 60.4 83.35
-    L 68.96 218.83
-    L -15.27 121.7
-    L -30.01 239.23
-    L -86.64 143.42
-    C -106.16 196.25 -124.02 249.58 -145.17 301.9
-    C -146.48 305.13 -146.12 295.09 -146.6 291.68
-    L -185.59 123.23
-    C -236.03 166.26 -268.17 216.11 -319.35 258.44
-    C -320.79 259.63 -318.4 255.03 -317.92 253.33
-    Z
-  `,
+// A tour of text: each line shows one way to animate it, and the playhead walks them in turn.
+// The cast: every object, one attribute per line.
+title = Text({
+  x: 0,
+  y: 400,
+  text: 'Quick Animator',
+  fontSize: 120,
+  weight: 700,
   fill: '#4f8cff',
-  until: 2.5,
-  rotation: -3.3,
 })
 
-rect1 = Shape({
-  x: -7,
-  y: 4,
+rise = Text({
+  x: -460,
+  y: 220,
+  text: 'Rise by word',
+  fontSize: 72,
+})
+
+drop = Text({
+  x: 460,
+  y: 220,
+  text: 'Letters drop',
+  fontSize: 72,
+})
+
+lines = Text({
+  x: -460,
+  y: 40,
+  text: 'Lines in\nslide from the left',
+  fontSize: 56,
+  align: 'left',
+})
+
+hop = Text({
+  x: 460,
+  y: 40,
+  text: 'hop along a path',
+  fontSize: 64,
+})
+
+typed = Text({
+  x: -460,
+  y: -150,
+  text: 'code typing...',
+  fontSize: 64,
+  font: 'Consolas',
+})
+
+slot = Text({
+  x: 460,
+  y: -150,
+  text: 'SLOT MACHINE',
+  fontSize: 64,
+  font: 'Consolas',
+})
+
+magic = Text({
+  x: 0,
+  y: -350,
+  text: 'Enchanted',
+  fontSize: 110,
+  weight: 700,
+  until: 11.6667,
+  at: 0.5,
+})
+
+rect1 = Rect({
+  x: 35,
+  y: -126,
+  width: 240,
+  height: 140,
   fill: '#4f8cff',
-  at: 3.0833,
-  until: 5.0833,
-  points: [
-    [-120, -70],
-    [120, -70],
-    [120, 70],
-    [-120, 70],
+  at: 4.75,
+  until: 9.3333,
+})
+
+text1 = Text({
+  x: 50,
+  y: -28,
+  text: '',
+  fontSize: 48,
+  fill: '#ffffff',
+  at: 12.6667,
+  until: 14.6667,
+})
+
+text2 = Text({
+  x: -74,
+  y: -4,
+  text: 'Text',
+  fontSize: 48,
+  fill: '#ffffff',
+  at: 12.6667,
+  until: 14.6667,
+})
+
+// The script, in time order.
+title.to({
+  opacity: [0, 1],
+  y: [-20, 0],
+  by: 'word',
+  stagger: 0.1,
+  at: 0,
+  duration: 0.5,
+})
+
+rise.to({
+  opacity: [0, 1],
+  y: [-20, 0],
+  by: 'word',
+  stagger: 0.08,
+  at: 1,
+  duration: 0.4,
+})
+
+drop.to({
+  opacity: [0, 1],
+  y: [120, 0],
+  by: 'char',
+  stagger: 0.03,
+  at: 1.5,
+  duration: 0.5,
+  ease: 'bounce',
+})
+
+lines.to({
+  opacity: [0, 1],
+  x: [-120, 0],
+  by: 'line',
+  stagger: 0.15,
+  at: 2.5,
+  duration: 0.5,
+  easeIn: 0,
+})
+
+// A path by character is the shape as changes from each character's place: up and back.
+hop.path({
+  shape: [
+    [0, 0],
+    [0, 70],
+    [0, 0],
   ],
+  smooth: true,
+  by: 'char',
+  stagger: 0.05,
+  at: 3.5,
+  duration: 0.6,
 })
 
-shape1.morph({
-  to: `
-    M 11.77 131.04
-    L 407.79 3.3
-    L -125.2 -169.25
-  `,
-  at: 0.25,
+typed.fade({
+  opacity: [0, 1],
+  by: 'char',
+  stagger: (i) => 0.04 + ((i * 7) % 5) / 100,
+  at: 5,
+  duration: 0.02,
+})
+
+// Every character spins from the start and lands on its own, the first soon, the last after `settle` seconds more.
+slot.to({
+  text: (p, i, c, t, n, settle = 2) => (t < 0.4 + (i / n) * settle ? Text.scramble(i, t) : c),
+  by: 'char',
+  stagger: 0,
+  at: 6,
+  duration: 3,
+  ease: 'linear',
+})
+
+// Each letter its own hue turning at `speed`, and a wiggle; the ramps bring it in and out, so the text ends as it began.
+magic.to({
+  fill: (p, i, c, t, speed = 0.5) => Color.hue(t * speed + i / 8),
+  y: (p, i, c, t) => Math.sin(t * 6 + i) * 4,
+  by: 'char',
+  stagger: 0,
+  at: 7.5,
+  duration: 2.3333,
+  easeIn: 0,
+  easeOut: 0,
+})
+
+// The whole title follows a path, up and back, 30 frames long.
+title.path({
+  shape: [
+    [0, 0],
+    [0, 40],
+    [0, 0],
+  ],
+  relative: true,
+  smooth: true,
+  at: 10.5,
+  duration: frames(30), 
+})
+
+rect1.move({
+  x: -66,
+  y: -135,
+  at: 5.1667,
   duration: 1,
 })
 
+colorChange = rect1.to({
+  fill: (p, t, speed = 0.5) => Color.hue(t * speed),
+  at: 5.1667,
+  duration: 3.1666,
+  ease: 'linear',
+})

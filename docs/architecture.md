@@ -235,7 +235,12 @@ External material is never imported in code. A file dropped on the preview or th
 copied into `assets/` and referenced by name: `Image({ src: 'logo.png' })`,
 `Video({ src: 'clip.mp4' })`, and `font: 'Inter'` for a font in `assets/fonts` or installed on
 the system. The app resolves the names, caches decoded media, and reports a missing file inline
-where it is referenced. An SVG is the exception: it is geometry, so it becomes objects in the
+where it is referenced. Fonts (D267): `project:load` reads every font file in `assets/fonts`
+with its bytes; `project/fonts.ts` loads each as a `FontFace` under its file name before the
+scene is applied, drops the last project's, and bumps a version that the text layouts and the
+renderer's drawn texts are keyed by; `model/text.ts` lays a text out with whatever measures,
+the renderer's canvas or an estimate, so the sampler's box, the preview, and the preset card
+agree. An SVG is the exception: it is geometry, so it becomes objects in the
 code (D241). `project/svgImport.ts` mounts the file out of sight and reads it through the
 browser's SVG engine, computed styles, matrices, and text boxes, into Rects, Circles, Texts,
 Shapes, and Groups, and `importSvg` in `project/operations.ts` writes them as declarations; the

@@ -1,12 +1,15 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { beginGesture, endGesture } from '../code/editor'
 import { BakeIcon } from '../components/BakeIcon'
+import { FontField } from '../components/FontField'
 import { LinkIcon } from '../components/LinkIcon'
 import { actionLinks, objectLinks } from '../model/links'
 import { hasPathData, parsePathData, pathAnchors } from '../model/pathData'
 import { EASE_NAMES, GROUP, PIVOT_PARAMS, schemaOf, type AttrSchema, type AttrType, type AttrValue } from '../model/registry'
 import { basePivot, definingAction, isVisibleAt, pathCurves, pathShape, valueAt } from '../model/sample'
+import { DEFAULT_STAGGER, UNIT_KINDS } from '../model/text'
 import type { Action, SceneModel, SceneObject } from '../model/types'
+import { askSystemFonts } from '../project/fonts'
 import { bakeActionProp, bakeObjectProp, canEdit, frameSeconds, roundSeconds, setActionFrom, setActionProp, setAttrsAt, setLifetime, setObjectProp } from '../project/operations'
 import { useStore } from '../state/store'
 import { timecode } from '../state/time'
@@ -75,17 +78,41 @@ function linkBody(text: string): string {
   return text.replace(/^\(\s*\)\s*=>\s*/, '').trim()
 }
 
-/** A text or number field that writes when it loses focus or Enter is pressed, and gives up on Escape. */
-function Commit({ value, type = 'text', step, min, max, disabled, title, placeholder, onCommit }: { value: string; type?: 'text' | 'number'; step?: number; min?: number; max?: number; disabled?: boolean; title?: string; placeholder?: string; onCommit: (text: string) => void }) {
+/** A text or number field that writes when it loses focus or Enter is pressed, and gives up on Escape; a multiline one takes Enter as a line break and writes when it loses focus or on Ctrl + Enter (D267). */
+function Commit({ value, type = 'text', step, min, max, disabled, title, placeholder, list, multiline, onCommit }: { value: string; type?: 'text' | 'number'; step?: number; min?: number; max?: number; disabled?: boolean; title?: string; placeholder?: string; list?: string; multiline?: boolean; onCommit: (text: string) => void }) {
   const [draft, setDraft] = useState(value)
   useEffect(() => setDraft(value), [value])
   const commit = () => {
     if (draft !== value) onCommit(draft)
   }
+  if (multiline) {
+    return (
+      <textarea
+        className="now-input now-area"
+        rows={Math.min(5, Math.max(1, draft.split('\n').length))}
+        disabled={disabled}
+        title={title}
+        placeholder={placeholder}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            commit()
+            e.currentTarget.blur()
+          } else if (e.key === 'Escape') {
+            setDraft(value)
+            e.currentTarget.blur()
+          }
+        }}
+      />
+    )
+  }
   return (
     <input
       className={`now-input ${type}`}
       type="text"
+      list={list}
       inputMode={type === 'number' ? 'decimal' : undefined}
       data-step={step}
       data-min={min}
@@ -186,7 +213,7 @@ function Linked({ expr, shown, disabled, isTime, onCommit, onBake }: { expr: str
 }
 
 /** The control for a plain value by its type; typed code becomes a link (D174, D183). */
-function Field({ type, name, value, model, disabled, doc, range, step, onValue, onCode }: { type: AttrType; name: string; value: AttrValue; model: SceneModel; disabled: boolean; doc?: string; range?: { min: number; max: number; step: number }; step?: number; onValue: (value: AttrValue) => void; onCode: (text: string) => void }) {
+function Field({ type, name, value, model, disabled, doc, range, step, options, families, multiline, onValue, onCode }: { type: AttrType; name: string; value: AttrValue; model: SceneModel; disabled: boolean; doc?: string; range?: { min: number; max: number; step: number }; step?: number; options?: readonly string[]; families?: readonly string[]; multiline?: boolean; onValue: (value: AttrValue) => void; onCode: (text: string) => void }) {
   if (type === 'number') {
     const n = typeof value === 'number' ? value : 0
     return (
@@ -218,11 +245,26 @@ function Field({ type, name, value, model, disabled, doc, range, step, onValue, 
     )
   }
   if (type === 'boolean') return <input type="checkbox" checked={value === true} disabled={disabled} onChange={(e) => onValue(e.target.checked)} />
+  // A font family narrows as you type (D271).
+  if (families) return <FontField value={String(value)} options={families} disabled={disabled} title={doc} onCommit={(f) => onValue(f)} />
+  // A word from a fixed few is a list (D267).
+  if (options) {
+    return (
+      <select className="now-select" value={String(value)} disabled={disabled} title={doc} onChange={(e) => onValue(e.target.value)}>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    )
+  }
   return (
     <Commit
       value={String(value)}
       disabled={disabled}
-      title={NAME_LISTS.has(name) ? `${doc ?? ''} Names separated by spaces.` : `${doc ?? ''} Words, or code such as title.text.`}
+      multiline={multiline}
+      title={NAME_LISTS.has(name) ? `${doc ?? ''} Names separated by spaces.` : multiline ? `${doc ?? ''} Enter starts a new line; click away to keep it.` : `${doc ?? ''} Words, or code such as title.text.`}
       onCommit={(t) => {
         if (NAME_LISTS.has(name)) onValue(t.trim())
         else if (reachesInto(t, model)) onCode(asLink(t))
@@ -265,6 +307,14 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks }: { model: S
   const visible = isVisibleAt(model, obj, time)
   const links = objectLinks(obj)
   const locked = !editable || obj.codeDriven || !obj.decl
+  // The font field offers the project's fonts and the installed families (D267).
+  const isText = obj.className === 'Text'
+  const fonts = useStore((s) => s.fonts)
+  const systemFonts = useStore((s) => s.systemFonts)
+  useEffect(() => {
+    if (isText) askSystemFonts()
+  }, [isText])
+  const families = useMemo(() => (isText ? [...new Set([...fonts, ...systemFonts])] : []), [isText, fonts, systemFonts])
   return (
     <div className="now-values">
       <div className="now-head">
@@ -350,7 +400,7 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks }: { model: S
                 />
               )
             } else {
-              control = <Field type={attr.type} name={attr.name} value={value} model={model} disabled={locked} doc={attr.doc} range={RANGES[attr.name]} step={stepFor(attr.name)} onValue={writeValue} onCode={writeCode} />
+              control = <Field type={attr.type} name={attr.name} value={value} model={model} disabled={locked} doc={attr.doc} range={RANGES[attr.name]} step={stepFor(attr.name)} options={attr.options} families={isText && attr.name === 'font' ? families : undefined} multiline={isText && attr.name === 'text'} onValue={writeValue} onCode={writeCode} />
             }
             return (
               <Row key={attr.name} name={attr.name} status={status} className={defining ? 'animated' : status === 'default' ? 'default' : ''} onLink={locked || NAME_LISTS.has(attr.name) ? undefined : () => openLinks(attr.name)} linkTitle={`Link ${attr.name} to something else`}>
@@ -449,7 +499,14 @@ function ActionView({ model, obj, action, index, fps, editable, openLinks }: { m
         </span>
         {action.name && <span className="ident">{action.name}</span>}
         <span className="dim">
-          {timecode(action.start, fps)} to {timecode(action.end, fps)}, {roundSeconds(span)} s
+          <button className="time-link" title="Go to the start" onClick={() => useStore.getState().setTime(action.start)}>
+            {timecode(action.start, fps)}
+          </button>{' '}
+          to{' '}
+          <button className="time-link" title="Go to the end" onClick={() => useStore.getState().setTime(action.end)}>
+            {timecode(action.end, fps)}
+          </button>
+          , {roundSeconds(span)} s
         </span>
         {derived && <span className="badge">from all('{action.classAction!.className}')</span>}
         {action.overridden && <span className="badge off">off</span>}
@@ -584,6 +641,25 @@ function ActionView({ model, obj, action, index, fps, editable, openLinks }: { m
           <Row name="relative" status={action.timing.relative ? '' : 'default'}>
             <input type="checkbox" checked={!!action.timing.relative} disabled={locked} onChange={(e) => setActionProp(ref, 'relative', e.target.checked ? true : null)} title="Values are changes from where the object is when it starts (D51)" />
           </Row>
+          {obj.className === 'Text' && action.verb !== 'path' && action.verb !== 'morph' && (
+            <Row name="by" status={action.timing.by ? '' : 'default'}>
+              <select className="now-select" value={action.timing.by ?? 'whole'} disabled={locked} onChange={(e) => setActionProp(ref, 'by', e.target.value === 'whole' ? null : e.target.value)} title="The whole text, or each character, word, or line in turn, from its own place (D268)">
+                <option value="whole">whole</option>
+                {UNIT_KINDS.map((kind) => (
+                  <option key={kind} value={kind}>
+                    {kind}
+                  </option>
+                ))}
+              </select>
+            </Row>
+          )}
+          {action.timing.by && typeof action.timing.stagger === 'function' ? (
+            <Row name="stagger" status="by index">
+              <Commit value={raw('stagger') ?? ''} disabled={locked} title="A function of the unit's index giving the seconds before that unit, or a number" onCommit={(t) => t.trim() && setActionProp(ref, 'stagger', t.trim(), true)} />
+            </Row>
+          ) : (
+            action.timing.by && timingNumber('stagger', typeof action.timing.stagger === 'number' ? action.timing.stagger : undefined, DEFAULT_STAGGER, action.timing.stagger === undefined ? 'default' : '', (v) => setActionProp(ref, 'stagger', v === null ? null : Math.max(0, v)), { min: 0, step: 0.01, title: 'Seconds between one unit and the next, or code: a function of the index' })
+          )}
           {action.overrides && (
             <Row name="overrides" status="">
               <span className="mono">{action.overrides.name ?? `all('${action.overrides.className}')`}</span>

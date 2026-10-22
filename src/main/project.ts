@@ -1,7 +1,8 @@
 import { app, dialog, ipcMain, type BrowserWindow } from 'electron'
 import { promises as fs, watch, type FSWatcher } from 'node:fs'
 import { basename, extname, join } from 'node:path'
-import type { ProjectData, ProjectFile, ProjectSettings } from '../shared/api'
+import * as opentype from 'opentype.js'
+import type { ProjectData, ProjectFile, ProjectFont, ProjectSettings } from '../shared/api'
 
 const DEFAULT_SETTINGS: ProjectSettings = { width: 1920, height: 1080, fps: 60, hold: 0, background: '#1c1c1c' }
 
@@ -70,7 +71,14 @@ export async function readProject(path: string): Promise<ProjectData> {
     await fs.writeFile(join(scenesDir, 'main.js'), TEMPLATE_SCENE)
     scenes.push({ file: 'scenes/main.js', source: TEMPLATE_SCENE })
   }
-  return { path, name: basename(path), settings, scenes }
+  // The project's fonts (D267): every font file in assets/fonts, known by its file name.
+  const fontsDir = join(path, 'assets', 'fonts')
+  const fonts: ProjectFont[] = []
+  if (await exists(fontsDir)) {
+    const names = (await fs.readdir(fontsDir)).filter((n) => /\.(ttf|otf|woff2?)$/i.test(n)).sort()
+    for (const name of names) fonts.push({ name: basename(name, extname(name)), file: `assets/fonts/${name}`, data: new Uint8Array(await fs.readFile(join(fontsDir, name))) })
+  }
+  return { path, name: basename(path), settings, scenes, fonts }
 }
 
 export async function createProject(path: string): Promise<void> {
@@ -167,6 +175,8 @@ export function registerProjectIpc(getWindow: () => BrowserWindow | null, option
     return fs.readFile(path, 'utf8')
   })
 
+  ipcMain.handle('project:findFont', async (_event, family: string) => findFont(family))
+
   ipcMain.handle('project:importSvg', async () => {
     const win = getWindow()
     const options: Electron.OpenDialogOptions = { title: 'Import SVG', filters: [{ name: 'SVG', extensions: ['svg'] }], properties: ['openFile'] }
@@ -175,4 +185,60 @@ export function registerProjectIpc(getWindow: () => BrowserWindow | null, option
     if (!path) return null
     return { name: basename(path, extname(path)), text: await fs.readFile(path, 'utf8') }
   })
+}
+
+/** The installed fonts by family, read once per run: each file's names, which takes a moment the first time (D273). */
+let fontIndex: Promise<Map<string, { file: string; regular: boolean }>> | null = null
+
+function fontDirs(): string[] {
+  const dirs = [join(process.env['WINDIR'] ?? 'C:\\Windows', 'Fonts')]
+  if (process.env['LOCALAPPDATA']) dirs.push(join(process.env['LOCALAPPDATA'], 'Microsoft', 'Windows', 'Fonts'))
+  return dirs
+}
+
+function fontName(names: opentype.Font['names'], key: string): string | undefined {
+  for (const platform of ['windows', 'macintosh', 'unicode']) {
+    const entry = names[platform]?.[key]
+    if (entry) return entry['en'] ?? Object.values(entry)[0]
+  }
+  const flat = (names as Record<string, Record<string, string> | undefined>)[key]
+  return flat ? (flat['en'] ?? Object.values(flat)[0]) : undefined
+}
+
+async function indexFonts(): Promise<Map<string, { file: string; regular: boolean }>> {
+  const index = new Map<string, { file: string; regular: boolean }>()
+  const add = (name: string | undefined, file: string, regular: boolean): void => {
+    if (!name) return
+    const key = name.trim().toLowerCase()
+    const known = index.get(key)
+    if (!known || (regular && !known.regular)) index.set(key, { file, regular })
+  }
+  for (const dir of fontDirs()) {
+    if (!(await exists(dir))) continue
+    for (const name of await fs.readdir(dir)) {
+      if (!/\.(ttf|otf)$/i.test(name)) continue
+      const file = join(dir, name)
+      try {
+        const data = await fs.readFile(file)
+        if (data.byteLength > 25 * 1024 * 1024) continue
+        const font = opentype.parse(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), { lowMemory: true })
+        const sub = fontName(font.names, 'fontSubfamily') ?? ''
+        const regular = sub === '' || /^(regular|normal|book|roman)$/i.test(sub)
+        add(fontName(font.names, 'preferredFamily'), file, regular)
+        add(fontName(font.names, 'fontFamily'), file, regular)
+        add(basename(name, extname(name)), file, regular)
+      } catch {
+        // Not a font this reader takes; the next.
+      }
+    }
+  }
+  return index
+}
+
+/** The file of an installed family, with its bytes, or null (D273). */
+async function findFont(family: string): Promise<ProjectFont | null> {
+  if (!fontIndex) fontIndex = indexFonts()
+  const found = (await fontIndex).get(family.trim().toLowerCase())
+  if (!found) return null
+  return { name: family, file: found.file, data: new Uint8Array(await fs.readFile(found.file)) }
 }

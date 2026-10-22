@@ -1,21 +1,27 @@
-import { useEffect, useReducer, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { beginGesture, endGesture } from '../code/editor'
 import { showMenu } from '../components/ContextMenu'
+import { FontField } from '../components/FontField'
 import { NumberField } from '../components/NumberField'
 import { ScrollBar } from '../components/ScrollBar'
 import { groupMembers } from '../model/groups'
 import { anchorIsSmooth, placeBetween, type AnchorKind, type Seg } from '../model/pathData'
-import { GROUP, SHAPE } from '../model/registry'
+import { attrSchema, GROUP, SHAPE, type AttrValue } from '../model/registry'
 import { ownBounds, pathControlsWorld, pathHolds, positionAt, shapeOwnAnchors, shapeOwnPoints, shapeOwnSegs, shapeWorldCurve, shapeWorldFrame, shapeWorldOf, shapeWorldPoints, shownValue, travelFrame, type PathFrame, type Point } from '../model/sample'
 import type { SceneModel, SceneObject } from '../model/types'
 import { newProject, pickProject } from '../project/controller'
+import { askSystemFonts } from '../project/fonts'
+import { convertTextToShape } from '../project/textToShape'
+import { textStyleAt } from '../model/sample'
+import type { TextStyle } from '../model/text'
 import { DEFAULT_EASE_FRACTION, easingFor, unease } from '../model/easing'
-import { addMorph, addObject, addPath, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, inProgressActions, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, pathDragTarget, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestClasses, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, settleMorph, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphRunning, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
+import { addMorph, addObject, addPath, canEdit, setObjectProp, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, pathDragTarget, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestClasses, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, settleMorph, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphRunning, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
 import { requestSavePreset } from '../project/userPresets'
 import { makeMover, outlineOf, resetMover, walk, type Mover, type Polygon, type Pushing } from '../preview/collide'
 import { SceneRenderer, type ControlHandle, type Frame, type GuideLine, type Handle } from '../preview/SceneRenderer'
 import { Viewport } from '../preview/Viewport'
 import { dropTargets } from '../state/dropTargets'
+import { matchHotkey } from '../state/hotkeys'
 import { OBJECT_KINDS, TRANSFORM_MODES, useStore, type ActionRef, type Pick, type TransformMode } from '../state/store'
 import { formatTime } from '../state/time'
 
@@ -322,6 +328,12 @@ export function PreviewPane() {
   const settings = useStore((s) => s.settings)
   const time = useStore((s) => s.time)
   const tool = useStore((s) => s.tool)
+  // The Texts among the selection, for the text bar (D270), and a Text being edited in place.
+  const fonts = useStore((s) => s.fonts)
+  const systemFonts = useStore((s) => s.systemFonts)
+  const [textEdit, setTextEdit] = useState<{ name: string; original: string; value: string; left: number; top: number; width: number; height: number; style: TextStyle; zoom: number } | null>(null)
+  const textEditRef = useRef(textEdit)
+  textEditRef.current = textEdit
   const project = useStore((s) => s.project)
   const model = useStore((s) => s.model)
   const selection = useStore((s) => s.selection)
@@ -350,11 +362,14 @@ export function PreviewPane() {
   // A Shape being drawn ends with Enter, closed, or Escape, as a line (D233); leaving the Shape tool's Create mode ends it as a line.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!shapeDraftRef.current || (e.key !== 'Enter' && e.key !== 'Escape')) return
+      if (!shapeDraftRef.current) return
       const t = e.target
       if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || (t instanceof HTMLElement && t.isContentEditable)) return
-      endShapeDraft(e.key === 'Enter')
-      if (e.key === 'Enter') e.preventDefault()
+      // The keys as the preferences have them (D260): close the shape, or leave it a line.
+      const hit = matchHotkey(e, 'preview', useStore.getState().prefs.hotkeys ?? {})
+      if (hit?.id !== 'closeShape' && hit?.id !== 'escape') return
+      endShapeDraft(hit.id === 'closeShape')
+      if (hit.id === 'closeShape') e.preventDefault()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -953,11 +968,11 @@ export function PreviewPane() {
           return
         }
       } else {
-        // While a morph runs, the playhead goes to its end first, where the outline is the target the drag writes (D257).
+        // In the middle of a morph, a morph from its start to the playhead is written first, whose target the drag then shapes (D263).
         settleMorph(name)
       }
     } else if (insert !== null) {
-      if (settleMorph(name)) return
+      settleMorph(name)
       beginGesture()
       if (insert.kind === 'points') {
         insertShapePoints(name, insert.at, [gridded(world)])
@@ -1006,7 +1021,7 @@ export function PreviewPane() {
     const bounds = host.getBoundingClientRect()
     let handle = pressed
     let world = at
-    // While a morph runs, the playhead goes to its end first, and the handle is the target's there (D257).
+    // In the middle of a morph, a morph from its start to the playhead is written first, and the handle is its target's (D263).
     if (settleMorph(name)) {
       const s = useStore.getState()
       const obj = s.model?.objects.find((o) => o.name === name)
@@ -1079,6 +1094,8 @@ export function PreviewPane() {
     const obj = useStore.getState().model?.objects.find((o) => o.name === name)
     if (!obj) return []
     if (obj.className === 'Rect' || obj.className === 'Circle') return [{ label: 'Convert to shape', run: () => convertToShape(name) }]
+    // A Text becomes its letters as curves, from its font's file (D273).
+    if (obj.className === 'Text') return [{ label: 'Convert to shape', run: () => void convertTextToShape(name) }]
     if (obj.className !== SHAPE || shapeEditable(name) === null) return []
     const closed = isShapeClosed(name)
     const line = obj.attrs['fill'] === 'none'
@@ -1195,13 +1212,13 @@ export function PreviewPane() {
         if (!store.selection.includes(under.name) || (store.selectedActions.length > 0 && !shapeMorphSelected(under.name))) store.select([under.name])
         return
       }
-      // Empty space in Edit mode (D255): a drag boxes the points of the shape in hand, or, past them, the shapes it touches; a click lets the points go.
+      // Empty space in Edit mode (D255): a drag boxes the points of the shape in hand, or, past them, the shapes it touches; a click deselects (D236 revised).
       const extend = e.ctrlKey || e.metaKey
       beginMarquee(host, e, located, (box) => {
         const s = useStore.getState()
         const edited = shapeRef.current
         if (!box) {
-          if (s.pathPoints.length > 0) s.setPathPoints([])
+          s.select([])
           return
         }
         const inside = edited?.editable ? edited.frame.anchors.map((p, i) => (inBox(p, box) ? i : -1)).filter((i) => i >= 0) : []
@@ -1399,7 +1416,6 @@ export function PreviewPane() {
     let showTime: number | null = null
     /** The time whose state the drag sets when the selected animation is what it is about: its start, or with Shift its end (D157). */
     let editAt: number | null = null
-    let runningToSelect: ActionRef[] | null = null
     const selected = store.selectedActions.find((r) => r.object === subject.name)
     const selectedAction = selected ? subject.actions[selected.index] : undefined
     const matches = objects.length === 1 && !!selectedAction && primaryAttrs(subject).some((a) => a in selectedAction.changes)
@@ -1427,15 +1443,8 @@ export function PreviewPane() {
         derived = !!selectedAction!.classAction
         editAt = selectedAction!.end
       } else editAt = selectedAction!.start
-    } else if (!e.shiftKey && objects.length === 1) {
-      // Dragging something mid-animation edits that animation's end state, and shows it (D102).
-      const running = inProgressActions([subject.name], [...primaryAttrs(subject), ...(op === 'resize' ? ['x', 'y'] : [])], store.time)
-      if (running.length > 0) {
-        showTime = Math.max(...running.map((r) => model.objects.find((o) => o.name === r.object)!.actions[r.index]!.end))
-        // The running action is selected once the drag moves; a click keeps the object as what is selected (D147).
-        runningToSelect = running
-      }
     }
+    // A plain drag in the middle of an animation writes an animation from the animation's start to the playhead, which the drag then edits (D263): the playhead stays.
     if (editAt !== null) showTime = editAt
     // A gesture on a group, plain or not, edits the group itself, as on any object (D124).
     const targets = objects
@@ -1572,7 +1581,6 @@ export function PreviewPane() {
             drag.actionIndex = index
             drag.derived = false
           }
-          if (runningToSelect) useStore.getState().selectActions(runningToSelect)
           if (drag.showTime !== null) useStore.getState().setTime(drag.showTime)
           if (drag.kind === 'timed') {
             if (!useStore.getState().selection.includes(drag.primary)) useStore.getState().select([drag.primary])
@@ -1841,6 +1849,59 @@ export function PreviewPane() {
     )
   }
 
+  /** Double-click a Text to edit its words where they are (D270): a box over the text, Enter a line break, Escape giving up, Ctrl + Enter or a click away keeping it. */
+  const onDoubleClick = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (useStore.getState().tool !== 'select') return
+    const located = locate(e.currentTarget, e.clientX, e.clientY)
+    if (!located?.hit) return
+    beginTextEdit(located.hit)
+  }
+
+  const beginTextEdit = (name: string) => {
+    const viewport = viewportRef.current
+    const renderer = rendererRef.current
+    const host = hostRef.current
+    const s = useStore.getState()
+    const obj = s.model?.objects.find((o) => o.name === name)
+    if (!viewport || !renderer || !host || !s.model || !obj?.decl || obj.className !== 'Text' || !canEdit()) return
+    const f = renderer.frameOf(name)
+    if (!f) return
+    const rect = viewport.viewRect()
+    const bounds = host.getBoundingClientRect()
+    const zoom = bounds.width / Math.max(1e-9, rect.right - rect.left)
+    const style = textStyleAt(s.model, obj, s.time)
+    s.select([name])
+    setTextEdit({ name, original: style.text, value: style.text, left: (f.x - f.width / 2 - rect.left) * zoom, top: (rect.top - (f.y + f.height / 2)) * zoom, width: Math.max(40, f.width * zoom), height: Math.max(20, f.height * zoom), style, zoom })
+  }
+
+  const endTextEdit = (keep: boolean) => {
+    const edit = textEditRef.current
+    if (!edit) return
+    setTextEdit(null)
+    if (keep && edit.value !== edit.original) setObjectProp(edit.name, 'text', edit.value)
+  }
+
+  /** The Texts among the selection, with their looks at the playhead, for the text bar (D270). */
+  const selectedTexts = useMemo(() => {
+    if (!model || tool !== 'select') return []
+    return model.objects.filter((o) => o.className === 'Text' && o.decl && selection.includes(o.name)).map((o) => ({ name: o.name, style: textStyleAt(model, o, time) }))
+  }, [model, selection, tool, time])
+  useEffect(() => {
+    if (selectedTexts.length > 0) askSystemFonts()
+  }, [selectedTexts.length])
+  const families = useMemo(() => [...new Set([...fonts, ...systemFonts])], [fonts, systemFonts])
+  /** Write one attribute of the look to every selected Text, a default taking the line away (D228). */
+  const writeTexts = (key: keyof TextStyle, value: AttrValue) => {
+    const fallback = attrSchema('Text', key)?.default
+    beginGesture()
+    try {
+      for (const t of selectedTexts) setObjectProp(t.name, key, value === fallback ? null : value)
+    } finally {
+      endGesture()
+    }
+  }
+  const textSame = <K extends keyof TextStyle>(key: K): TextStyle[K] | null => (selectedTexts.length > 0 && selectedTexts.every((t) => t.style[key] === selectedTexts[0]!.style[key]) ? selectedTexts[0]!.style[key] : null)
+
   const onContextMenu = (e: ReactMouseEvent<HTMLDivElement>) => {
     const located = locate(e.currentTarget, e.clientX, e.clientY)
     if (!located) {
@@ -1898,11 +1959,13 @@ export function PreviewPane() {
     }
     // A selected Shape's points and line (D233): delete the point under the pointer, or add one on the line there.
     const shape = shapeRef.current
-    if (shape?.editable && settleMorph(shape.name)) return
     if (shape?.editable) {
+      // In the middle of a morph, the menu's items shape a morph written from its start to the playhead (D263); the points picked are kept through the writing.
+      const pathPoints = st.pathPoints
+      settleMorph(shape.name)
       const point = nearestPoint(shape.frame.anchors, world, 8 * pixel)
       if (point !== null) {
-        const picked = st.pathPoints.includes(point) && st.pathPoints.length > 1 ? st.pathPoints : [point]
+        const picked = pathPoints.includes(point) && pathPoints.length > 1 ? pathPoints : [point]
         // Smooth, Corner, or Straighten the point (D252), on curves and on points alike.
         const kindItems = pointItems(shapeAnchorKind(shape.name, point), shapeAnchorCurved(shape.name, point), (kind) => setShapeAnchorKind(shape.name, picked, kind))
         showMenu(e, [...kindItems, { label: picked.length > 1 ? `Delete ${picked.length} points` : 'Delete point', run: () => removeShapePoints(shape.name, picked), danger: true }])
@@ -2005,8 +2068,27 @@ export function PreviewPane() {
       onPointerLeave={() => (hoverRef.current = false)}
       onAuxClick={(e) => e.preventDefault()}
       onContextMenu={onContextMenu}
+      onDoubleClick={onDoubleClick}
     >
       <canvas ref={canvasRef} />
+      {textEdit && (
+        <textarea
+          className="preview-text-edit"
+          autoFocus
+          spellCheck={false}
+          style={{ left: textEdit.left, top: textEdit.top, width: textEdit.width, height: textEdit.height, fontFamily: `"${textEdit.style.font}", "Segoe UI", sans-serif`, fontSize: textEdit.style.fontSize * textEdit.zoom, fontWeight: textEdit.style.weight, fontStyle: textEdit.style.italic ? 'italic' : 'normal', textAlign: textEdit.style.align, lineHeight: textEdit.style.lineHeight, letterSpacing: textEdit.style.letterSpacing * textEdit.zoom }}
+          value={textEdit.value}
+          onChange={(e) => setTextEdit({ ...textEdit, value: e.target.value })}
+          onPointerDown={stop}
+          onDoubleClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            e.stopPropagation()
+            if (e.key === 'Escape') endTextEdit(false)
+            else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) endTextEdit(true)
+          }}
+          onBlur={() => endTextEdit(true)}
+        />
+      )}
       {notice && <div className="preview-notice">{notice}</div>}
       {marquee && (
         <div className="preview-marquee" style={{ left: Math.min(marquee.x0, marquee.x1), top: Math.min(marquee.y0, marquee.y1), width: Math.abs(marquee.x1 - marquee.x0), height: Math.abs(marquee.y1 - marquee.y0) }} />
@@ -2058,6 +2140,29 @@ export function PreviewPane() {
             {OBJECT_KINDS.filter((k) => k !== SHAPE).map((k) => (
               <button key={k} className={addKind === k ? 'active' : ''} onClick={() => setAddKind(k)} title={`Each click adds a ${k}`} aria-pressed={addKind === k}>
                 {k}
+              </button>
+            ))}
+          </div>
+        )}
+        {selectedTexts.length > 0 && (
+          <div className="preview-modes text-bar" role="group" aria-label="Text">
+            <FontField compact value={textSame('font') ?? ''} options={families} placeholder={selectedTexts.length > 1 ? 'Mixed' : 'Font'} title="Font family: installed, or a file in assets/fonts" onCommit={(f) => writeTexts('font', f)} />
+            <NumberField label="Font size" value={Math.round(selectedTexts[0]!.style.fontSize)} unit="px" min={1} step={1} onChange={(v) => setAttrsAtMany(selectedTexts.map((t) => ({ name: t.name, attrs: { fontSize: v } })), useStore.getState().time)} />
+            <button className={(textSame('weight') ?? 0) >= 600 ? 'active' : ''} onClick={() => writeTexts('weight', (textSame('weight') ?? 0) >= 600 ? 400 : 700)} title="Bold" aria-pressed={(textSame('weight') ?? 0) >= 600}>
+              <b>B</b>
+            </button>
+            <button className={textSame('italic') ? 'active' : ''} onClick={() => writeTexts('italic', !textSame('italic'))} title="Italic" aria-pressed={!!textSame('italic')}>
+              <i>I</i>
+            </button>
+            {(['left', 'center', 'right'] as const).map((a) => (
+              <button key={a} className={textSame('align') === a ? 'active' : ''} onClick={() => writeTexts('align', a)} title={`Align ${a}`} aria-label={`Align ${a}`} aria-pressed={textSame('align') === a}>
+                <svg viewBox="0 0 14 14" aria-hidden="true">
+                  {[0, 1, 2].map((row) => {
+                    const w = row === 1 ? 7 : row === 2 ? 10 : 12
+                    const x = a === 'left' ? 1 : a === 'right' ? 13 - w : 7 - w / 2
+                    return <rect key={row} x={x} y={2.5 + row * 4} width={w} height={1.6} fill="currentColor" />
+                  })}
+                </svg>
               </button>
             ))}
           </div>

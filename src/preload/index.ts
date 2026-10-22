@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import type { Api, ExportOptions, ExportPreset, ExportResult, FileChange, ProjectData, RenderJob } from '../shared/api'
+import type { Api, ExportOptions, ExportPreset, ExportResult, FileChange, ProjectData, ProjectFont, RenderJob } from '../shared/api'
 
 const api: Api = {
   platform: process.platform,
@@ -16,6 +16,7 @@ const api: Api = {
     write: (path, file, source) => ipcRenderer.invoke('project:write', path, file, source) as Promise<void>,
     importSvg: () => ipcRenderer.invoke('project:importSvg') as Promise<{ name: string; text: string } | null>,
     readFile: (path) => ipcRenderer.invoke('project:readFile', path) as Promise<string>,
+    findFont: (family) => ipcRenderer.invoke('project:findFont', family) as Promise<ProjectFont | null>,
     onChanged: (callback) => {
       const listener = (_event: IpcRendererEvent, change: FileChange) => callback(change)
       ipcRenderer.on('project:changed', listener)

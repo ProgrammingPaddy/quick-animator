@@ -44,7 +44,8 @@ export function formatValue(value: AttrValue): string {
   if (typeof value === 'boolean') return String(value)
   // A list of points, on one line (D232).
   if (Array.isArray(value)) return `[${value.map((p) => `[${p.map(formatNumber).join(', ')}]`).join(', ')}]`
-  return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+  // A line break in a Text's words is written as the escape, so the line of code stays one line (D267).
+  return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, '\\n')}'`
 }
 
 /** Set one attribute in a block: replace its literal, or add a line when it is not there. A number given to a range, `[from, to]`, replaces the `to` (D221). */
@@ -74,6 +75,20 @@ export function setProp(source: string, block: BlockInfo, key: string, value: At
   const prop = block.props.find((p) => p.key === key)
   if (prop?.parts && typeof value === 'number') return { from: prop.parts[1].from, to: prop.parts[1].to, insert: formatValue(value) }
   return setPropText(source, block, key, propText(key, value, block.indent))
+}
+
+/** A time written as frames, `frames(15)`, with its count. */
+const FRAMES = /^frames\(\s*(-?\d+(?:\.\d+)?)\s*\)$/
+
+/** Set a time in a block as it was written (D276): one written as `frames(n)` stays frames, the count whole when the time sits on a frame; any other way, seconds. */
+export function setTimeProp(source: string, block: BlockInfo, key: string, seconds: number, fps: number): TextEdit {
+  const prop = block.props.find((p) => p.key === key)
+  if (prop && FRAMES.test(prop.raw.trim())) {
+    const count = seconds * fps
+    const whole = Math.round(count)
+    return setPropText(source, block, key, `frames(${Math.abs(count - whole) < 1e-6 ? whole : formatNumber(count)})`)
+  }
+  return setProp(source, block, key, seconds)
 }
 
 /** Set where a ranged attribute begins from, the `from` of `[from, to]`; null when the attribute is not written as a range (D221). */

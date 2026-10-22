@@ -24,6 +24,8 @@ const TIMING_DOCS: Record<string, string> = {
   easeOut: 'Seconds of easing at the end. Omitted: 30% of the duration.',
   ease: "A named curve: 'linear', 'bounce', 'back', 'elastic', or 'snap'. Replaces easeIn and easeOut.",
   relative: 'true: the values are changes from where the object is when the action starts, and add on top of other actions.',
+  by: "On a Text: 'char', 'word', or 'line'. The action runs on each unit in turn from its own place: x, y, and rotation as offsets, scale and opacity as factors, fill as its color.",
+  stagger: 'With by: seconds between one unit and the next. Omitted: 0.05.',
   overrides: "The class action this replaces for this object, by name: rise = all('bars').move(...) then box.move({ ..., overrides: rise }). The class action is switched off for the object.",
 }
 
@@ -36,6 +38,8 @@ const TIMING_PLACEHOLDER: Record<string, string> = {
   easeOut: '0.3',
   ease: "'linear'",
   relative: 'true',
+  by: "'char'",
+  stagger: '0.05',
   overrides: '',
 }
 
@@ -79,6 +83,11 @@ function attrCompletion(attr: AttrSchema): Completion {
   const value = formatValue(attr.default)
   const f = new Fields()
   return snippetCompletion(`${attr.name}: ${f.field(value)},`, { label: attr.name, detail: value, info: attr.doc, type: 'property' })
+}
+
+/** A time as a count of frames at the project's rate (D276). */
+function framesCompletion(): Completion {
+  return snippetCompletion('frames(${15})', { label: 'frames', info: "A count of frames at the project's rate, as the time: frames(15) is 15 frames.", type: 'function' })
 }
 
 function timingCompletion(key: string): Completion {
@@ -340,7 +349,18 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
       }
       if (key === 'at' || key === 'until') {
         if (!word) return null
-        return { from: word.from, options: timeReferenceOptions(model), validFor: /^[\w$.()]*$/ }
+        return { from: word.from, options: [...timeReferenceOptions(model), framesCompletion()], validFor: /^[\w$.()]*$/ }
+      }
+      // A time as frames (D276), and a stagger as a function of the index (D269).
+      if (key === 'duration' || key === 'delay' || key === 'easeIn' || key === 'easeOut' || key === 'stagger') {
+        if (!word) return null
+        const options: Completion[] = [framesCompletion()]
+        if (key === 'stagger') options.push(snippetCompletion('(i) => ${0.05},', { label: '(i) => ...', info: 'The seconds before each unit, from its index: an uneven rhythm.', type: 'function' }))
+        return { from: word.from, options, validFor: /^[\w$(]*$/ }
+      }
+      if (key === 'fill') {
+        if (!word) return null
+        return { from: word.from, options: [snippetCompletion('(p, t, speed = ${0.5}) => Color.hue(t * speed),', { label: 'Color.hue', info: 'A color a fraction of the way round the wheel, here turning with the seconds; on a unit, (p, i, c, t) => Color.hue(t * 0.5 + i / 8).', type: 'function' })], validFor: /^[\w$(]*$/ }
       }
       if (key === 'relative') {
         return { from: word?.from ?? pos, options: [{ label: 'true', type: 'constant' }, { label: 'false', type: 'constant' }], validFor: /^[\w$]*$/ }
