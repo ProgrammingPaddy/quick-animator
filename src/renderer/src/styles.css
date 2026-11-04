@@ -482,6 +482,68 @@ button.icon:hover {
   cursor: grabbing;
 }
 
+/* The Paint tool's bar (D293, D294): the well, the dropper, then the colors used lately and the colors the project writes, parted by thin lines. */
+.paint-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding-right: 4px;
+}
+
+.paint-bar input[type='color'] {
+  width: 30px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+
+.paint-bar .dropper {
+  width: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.paint-bar .paint-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+}
+
+.paint-bar .swatch {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.paint-bar .swatch.active {
+  border-color: #ffffff;
+  box-shadow:
+    inset 0 0 0 2px #ffffff,
+    inset 0 0 0 3px rgba(0, 0, 0, 0.6);
+}
+
+/* The tools' own cursors (D301): the bucket, the dropper, the pencil, each with its tip at the point. */
+.preview.painting {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M4 11l7-7 8 8-7 7z' fill='%23fff' stroke='%23000' stroke-width='1.6' stroke-linejoin='round'/%3E%3Cpath d='M3 12h13' fill='none' stroke='%23000' stroke-width='1.6'/%3E%3Cpath d='M19.5 14.5c1.2 1.6 1.8 2.8 1.8 3.7a1.8 1.8 0 0 1-3.6 0c0-.9.6-2.1 1.8-3.7z' fill='%23fff' stroke='%23000' stroke-width='1.2'/%3E%3C/svg%3E") 4 18, cell;
+}
+
+.preview.dropping {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M4 20l1-4 9-9 3 3-9 9z' fill='%23fff' stroke='%23000' stroke-width='1.6' stroke-linejoin='round'/%3E%3Cpath d='M13 6l2-2a2.1 2.1 0 0 1 3 3l-2 2' fill='%23fff' stroke='%23000' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 4 20, crosshair;
+}
+
+.preview.sketching {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M4 20l2-5L17 4l3 3L9 18z' fill='%23fff' stroke='%23000' stroke-width='1.6' stroke-linejoin='round'/%3E%3Cpath d='M14 7l3 3' fill='none' stroke='%23000' stroke-width='1.6'/%3E%3C/svg%3E") 4 20, crosshair;
+}
+
 .preview.placing {
   cursor: crosshair;
 }
@@ -847,6 +909,49 @@ button.icon:hover {
   stroke-width: 1;
 }
 
+/* Markers on the ruler (D296): a line with the name, draggable, and a faint line down the lanes. */
+.tl-ruler .marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  margin-left: -3px;
+  cursor: ew-resize;
+  z-index: 2;
+}
+
+.tl-ruler .marker::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid #f59e0b;
+}
+
+.tl-ruler .marker span {
+  position: absolute;
+  left: 6px;
+  bottom: 1px;
+  padding: 0 3px;
+  border-radius: 2px;
+  background: rgba(245, 158, 11, 0.25);
+  color: #fbbf24;
+  font-size: 10px;
+  line-height: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.tl-marker-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed rgba(245, 158, 11, 0.45);
+  pointer-events: none;
+}
+
 .end-marker {
   position: absolute;
   top: 0;
@@ -922,6 +1027,17 @@ button.icon:hover {
   bottom: 0;
   width: 6px;
   cursor: ew-resize;
+}
+
+/* The hold and the return at the end of an animation that goes back to what it found (D285). */
+.clip-tail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.28) 0 4px, transparent 4px 8px);
+  border-left: 1px dashed rgba(255, 255, 255, 0.7);
 }
 
 .clip-edge.left {
@@ -2159,20 +2275,22 @@ button.chevron:hover {
 }
 
 /* A Text's words edited where they are (D270). */
+/* The words of a Text being edited, in its place and face while the drawn text is hidden (D270): the outline frames the block without moving its lines. */
 .preview-text-edit {
   position: absolute;
   z-index: 20;
   box-sizing: border-box;
-  padding: 0;
   margin: 0;
   resize: none;
   overflow: hidden;
   white-space: pre;
-  background: rgba(0, 0, 0, 0.6);
-  color: #ffffff;
-  border: 1px solid var(--accent);
-  border-radius: 2px;
-  outline: none;
+  background: transparent;
+  border: none;
+  outline: 1px solid var(--accent);
+  outline-offset: 0;
+  border-radius: 0;
+  font-kerning: normal;
+  caret-color: currentColor;
 }
 
 /* A Text's words, on as many lines as they have (D267). */
@@ -2570,7 +2688,8 @@ button.chevron:hover {
 }
 
 .context-menu .keyword {
-  font-weight: 600;
+  font-weight: 400;
+  color: var(--fg-dim);
 }
 
 .menu-item-wrap {
@@ -2804,6 +2923,7 @@ button.chevron:hover {
   border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+/* The handles that trim when the object begins and is removed. Whatever lies on top takes the pointer: an animation at the clip's edge is above them (D279), so the edge is grabbed on the title row or beside the animations. */
 .oclip-edge {
   position: absolute;
   top: 0;
@@ -2811,6 +2931,10 @@ button.chevron:hover {
   width: 7px;
   cursor: ew-resize;
   z-index: 2;
+}
+
+.oclip-body .clip {
+  z-index: 3;
 }
 
 .oclip-edge.left {

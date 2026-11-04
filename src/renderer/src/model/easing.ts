@@ -113,6 +113,11 @@ export function easePart(ease: Easing, from: number, to: number): Easing {
 }
 
 /** The share of the change an ease covers between two points of its progress, from nothing (D264): what a sliced animation keeps of a change that stays a function, so that it stops part of the way, where the cut was. */
+/** The stretch of an ease between two points of its progress, as the curve is there (D290): what a piece of a cut path runs on, so its progress along the whole line carries on from where the cut was. */
+export function easeAlong(ease: Easing, from: number, to: number): Easing {
+  return trust((p) => ease(from + (to - from) * Math.max(0, Math.min(1, p))))
+}
+
 export function easeShare(ease: Easing, from: number, to: number): Easing {
   const a = ease(from)
   return trust((p) => ease(from + (to - from) * Math.max(0, Math.min(1, p))) - a)

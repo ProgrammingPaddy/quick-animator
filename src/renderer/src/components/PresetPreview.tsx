@@ -46,11 +46,14 @@ export function PresetPreview({ id, variant, left, top, label }: { id: string; v
         ctx.rotate((-num('rotation', t) * Math.PI) / 180)
         const s = num('scale', t) || 1
         ctx.scale(s, s)
-        ctx.fillStyle = '#4f8cff'
+        // The fill as it is then, so a color change shows (D291).
+        const fillNow = valueAt(model, obj, 'fill', t)
+        const fill = typeof fillNow === 'string' ? fillNow : '#4f8cff'
+        ctx.fillStyle = fill
         if (obj.className === 'Text') {
           // The text as the preview draws it, by character while its units run (D268), the block centered here.
           const layout = layoutOf(textStyleAt(model, obj, t))
-          drawText(ctx, layout, '#4f8cff', textUnitStates(model, obj, t, layout), SCALE, -layout.width / 2, -layout.height / 2)
+          drawText(ctx, layout, fill, textUnitStates(model, obj, t, layout), SCALE, -layout.width / 2, -layout.height / 2)
         } else if (obj.className === SHAPE) {
           // A Shape's outline as it is then, a morph's blend included (D265); up is up on screen.
           ctx.beginPath()

@@ -1,5 +1,5 @@
 import * as acorn from 'acorn'
-import type { ActionInfo, BlockInfo, DeclInfo, PropInfo, Range } from './types'
+import type { ActionInfo, BlockInfo, DeclInfo, MarkerInfo, PropInfo, Range } from './types'
 
 /** The slice of the ESTree shape this file reads. Narrowed by `type`. */
 interface Node {
@@ -74,6 +74,8 @@ export interface ParseError {
 export interface ParseResult {
   decls: DeclInfo[]
   actions: ActionInfo[]
+  /** `name = marker(seconds)` statements (D296). */
+  markers: MarkerInfo[]
   /** End of the last object declaration statement, or null when there is none. */
   lastDeclEnd: number | null
   error: ParseError | null
@@ -179,6 +181,7 @@ export function parseScene(source: string, classNames: ReadonlySet<string>, verb
     return {
       decls: [],
       actions: [],
+      markers: [],
       lastDeclEnd: null,
       error: { message: (e.message ?? 'Syntax error').replace(/\s*\(\d+:\d+\)\s*$/, ''), pos: e.pos ?? 0, line: e.loc?.line ?? 1 },
     }
@@ -186,6 +189,7 @@ export function parseScene(source: string, classNames: ReadonlySet<string>, verb
 
   const decls: DeclInfo[] = []
   const actions: ActionInfo[] = []
+  const markers: MarkerInfo[] = []
   let lastDeclEnd: number | null = null
 
   const classify = (stmt: Node, name: string | null, expr: Node, keywordRange?: Range): void => {
@@ -195,6 +199,12 @@ export function parseScene(source: string, classNames: ReadonlySet<string>, verb
     const block = lastArg && lastArg.type === 'ObjectExpression' ? (lastArg as ObjectExpression) : null
     if (call.callee.type === 'Identifier') {
       const className = (call.callee as Identifier).name
+      // name = marker(seconds): a named moment (D296).
+      if (className === 'marker') {
+        const arg = call.arguments[0]
+        if (name !== null && arg) markers.push({ name, range: { from: stmt.start, to: stmt.end }, arg: { from: arg.start, to: arg.end } })
+        return
+      }
       if (!classNames.has(className) || !block || name === null) return
       decls.push({ ...blockInfo(source, stmt, block, keywordRange), name, className })
       lastDeclEnd = stmt.end
@@ -209,9 +219,23 @@ export function parseScene(source: string, classNames: ReadonlySet<string>, verb
         actions.push({ ...blockInfo(source, stmt, block, keywordRange), objectName: (member.object as Identifier).name, verb, name: name ?? undefined })
         return
       }
-      // all('class').verb({ ... })
       if (member.object.type === 'CallExpression') {
         const selector = member.object as CallExpression
+        // text.char(3).verb({ ... }): the action on those units alone (D286).
+        if (selector.callee.type === 'MemberExpression') {
+          const handle = selector.callee as MemberExpression
+          if (handle.computed || handle.object.type !== 'Identifier' || handle.property.type !== 'Identifier') return
+          const kind = (handle.property as Identifier).name
+          if (kind !== 'char' && kind !== 'word' && kind !== 'line') return
+          const indexes: number[] = []
+          for (const a of selector.arguments) {
+            if (a.type !== 'Literal' || typeof (a as Literal).value !== 'number') return
+            indexes.push((a as Literal).value as number)
+          }
+          actions.push({ ...blockInfo(source, stmt, block, keywordRange), objectName: (handle.object as Identifier).name, verb, name: name ?? undefined, unit: { kind, indexes } })
+          return
+        }
+        // all('class').verb({ ... })
         const arg = selector.arguments[0]
         if (selector.callee.type !== 'Identifier' || (selector.callee as Identifier).name !== 'all' || !arg || arg.type !== 'Literal') return
         const className = (arg as Literal).value
@@ -239,5 +263,5 @@ export function parseScene(source: string, classNames: ReadonlySet<string>, verb
     }
   }
 
-  return { decls, actions, lastDeclEnd, error: null }
+  return { decls, actions, markers, lastDeclEnd, error: null }
 }

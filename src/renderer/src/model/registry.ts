@@ -89,6 +89,7 @@ export const classes: Record<string, ClassSchema> = {
       { name: 'smooth', type: 'boolean', default: false, doc: 'A curve through the points instead of straight lines between them.', animatable: false },
       { name: 'stroke', type: 'color', default: '#ffffff', doc: 'Outline color, as #rrggbb.', animatable: true },
       { name: 'strokeWidth', type: 'number', default: 0, doc: 'Outline width in pixels. 0 draws none.', animatable: true },
+      { name: 'drawn', type: 'number', default: 1, doc: 'How much of the line is drawn, 0 to 1 from its start (D298). Animate it to write the shape on.', animatable: true },
     ],
   },
   Group: {
@@ -150,7 +151,7 @@ export const VERB_ATTRS: Record<Verb, readonly string[] | null> = {
 export const VERB_PARAMS: Record<Verb, readonly string[]> = {
   to: ['pivotX', 'pivotY'],
   move: [],
-  path: ['shape', 'orient', 'offset', 'smooth'],
+  path: ['shape', 'orient', 'offset', 'smooth', 'timed'],
   rotate: ['pivotX', 'pivotY'],
   resize: ['pivotX', 'pivotY'],
   fade: [],
@@ -173,7 +174,7 @@ export const VERB_COLORS: Record<Verb, string> = {
 export const OBJECT_COLOR = '#3b82f6'
 
 /** Keys allowed in every action block that are not attributes: timing, `relative`, and `overrides` (D80). */
-export const TIMING_KEYS = ['at', 'delay', 'duration', 'until', 'easeIn', 'easeOut', 'ease', 'relative', 'by', 'stagger', 'overrides'] as const
+export const TIMING_KEYS = ['at', 'delay', 'duration', 'until', 'hold', 'return', 'easeIn', 'easeOut', 'ease', 'relative', 'by', 'stagger', 'overrides'] as const
 export type TimingKey = (typeof TIMING_KEYS)[number]
 export const TIMING_KEY_NAMES: ReadonlySet<string> = new Set(TIMING_KEYS)
 
@@ -183,8 +184,18 @@ export function schemaOf(className: string): ClassSchema | undefined {
   return classes[className]
 }
 
+/** Each class's attributes by name, built on first use: the sampler asks many times a frame. */
+const attrIndex = new Map<string, Map<string, AttrSchema>>()
+
 export function attrSchema(className: string, attr: string): AttrSchema | undefined {
-  return classes[className]?.attrs.find((a) => a.name === attr)
+  let index = attrIndex.get(className)
+  if (!index) {
+    const cls = classes[className]
+    if (!cls) return undefined
+    index = new Map(cls.attrs.map((a) => [a.name, a]))
+    attrIndex.set(className, index)
+  }
+  return index.get(attr)
 }
 
 /** An attribute's default for one object: derived from its other literal attributes when the schema says so. */

@@ -3,7 +3,7 @@ import { DEFAULT_EASE_FRACTION, easingFor, namedEasings, unease, type Easing } f
 import { boundsOf, flattenPathData, hasPathData, parsePathData, pathAnchors, placeBetween, polygonPathData, serializePathData, smoothPathData, translatePathData, type Anchor, type Seg, type Subpath } from './pathData'
 import { blendMorph, morphPairs, type MorphPair } from './morph'
 import { layoutOf, unitBegins, type TextLayout, type TextStyle, type UnitKind, type UnitState } from './text'
-import type { Action, AttrSource, SceneModel, SceneObject, StateDirection, StateName } from './types'
+import type { Action, AttrSource, SceneModel, SceneObject, StateDirection, StateName, Timing } from './types'
 
 /**
  * While a sample is in progress, attribute reads on object handles (inside link functions)
@@ -111,6 +111,7 @@ function topActionAt<T extends { action: Action }>(items: T[], time: number, str
   for (const item of items) {
     const a = item.action
     if (strictStart ? a.start >= time - TIME_TOLERANCE : !begun(a.start, time)) continue
+    if (gone(a, time)) continue
     if (!over(a.end, time) && a.end > a.start) running = item
     else if (!ended || a.end >= ended.action.end) ended = item
   }
@@ -127,7 +128,7 @@ function segmentsFor(model: SceneModel, obj: SceneObject, attr: string): Segment
     // An action by character, word, or line changes the units, never the object's own attribute (D268).
     const sorted = obj.actions.filter((a) => (attr in a.changes || (a.verb === 'path' && pathDrives(a, attr))) && !a.overridden && !a.timing.by).sort(byStack)
     for (const action of sorted) {
-      const segment: Segment = { action, to: action.changes[attr]!, from: action.from[attr], ease: easingFor(action.timing, action.end - action.start) }
+      const segment: Segment = { action, to: action.changes[attr]!, from: action.from[attr], ease: easingFor(action.timing, journeyOf(action)) }
       if (action.timing.relative && type === 'number') segments.relative.push(segment)
       else segments.absolute.push(segment)
     }
@@ -207,6 +208,42 @@ export function over(end: number, time: number): boolean {
   return time > end + TIME_TOLERANCE
 }
 
+/** An animation that returns is gone once over (D285): nothing of it shows, and nothing of it is held. */
+function gone(action: Action, time: number): boolean {
+  return action.timing.return !== undefined && over(action.end, time)
+}
+
+/** The seconds an animation holds what it reached and then takes to go back, once its journey is done (D285); null when it keeps. */
+export function tailOf(timing: Timing): { hold: number; back: number } | null {
+  if (timing.return === undefined) return null
+  return { hold: Math.max(0, timing.hold ?? 0), back: Math.max(0, timing.return) }
+}
+
+/** How long an action's journey is: its span less its hold and its return (D285). */
+export function journeyOf(action: Action): number {
+  const tail = tailOf(action.timing)
+  return Math.max(0, action.end - action.start - (tail ? tail.hold + tail.back : 0))
+}
+
+/** Where an action is at a time (D285): its journey's plain progress, held at 1 once done; its return's progress, 0 until the return begins; and whether it is over and gone. */
+export function courseAt(action: Action, time: number): { p: number; q: number; gone: boolean } {
+  if (!begun(action.start, time)) return { p: 0, q: 0, gone: false }
+  const journey = journeyOf(action)
+  const p = journey <= 0 ? 1 : Math.max(0, Math.min(1, (time - action.start) / journey))
+  const tail = tailOf(action.timing)
+  if (!tail) return { p, q: 0, gone: false }
+  if (over(action.end, time)) return { p: 1, q: 1, gone: true }
+  if (tail.back <= 0) return { p, q: 0, gone: false }
+  const returning = action.start + journey + tail.hold
+  if (time < returning - TIME_TOLERANCE) return { p, q: 0, gone: false }
+  return { p: 1, q: Math.max(0, Math.min(1, (time - returning) / tail.back)), gone: false }
+}
+
+/** The curve a return runs on (D285): the animation's ease over the return's seconds, the ramps smooth by default and never the journey's own. */
+function returnEase(action: Action): Easing {
+  return easingFor({ ease: action.timing.ease }, tailOf(action.timing)?.back ?? 0)
+}
+
 /**
  * The value of an attribute at a time from its absolute actions, those in `except` left out:
  * the one running, the top of the stack among those, has its say; else the last to end holds
@@ -220,7 +257,7 @@ function evalAbsolute(model: SceneModel, obj: SceneObject, attr: string, segment
   let ended = -1
   for (let i = 0; i < segments.length; i++) {
     const a = segments[i]!.action
-    if (!begun(a.start, time) || except.includes(a)) continue
+    if (!begun(a.start, time) || except.includes(a) || gone(a, time)) continue
     // An action runs through its last frame too (D263): a piece that ends at the playhead still has the say there over what runs on below it.
     if (!over(a.end, time) && a.end > a.start) running = i
     else if (ended < 0 || a.end >= segments[ended]!.action.end) ended = i
@@ -237,18 +274,20 @@ function evalAbsolute(model: SceneModel, obj: SceneObject, attr: string, segment
   }
   const segment = segments[index]!
   const action = segment.action
+  const course = courseAt(action, time)
+  // Over its return, an animation goes from what it reached back to what the rest of the stack shows now (D285).
+  const back = (reached: AttrValue): AttrValue => (course.q > 0 ? interpolate(reached, evalAbsolute(model, obj, attr, segments, time, type, [...except, action]), returnEase(action)(course.q), type) : reached)
   // A path puts the object on its shape by the eased progress (D192).
-  if (action.verb === 'path') return pathValue(model, obj, action, attr, time)
-  // After its end, an action holds the value its easing reached (D220): the target for any usual easing, elsewhere for one that falls back, as a pulse does.
-  const progress = running < 0 ? segment.ease(1) : segment.ease(Math.max(0, Math.min(1, (time - action.start) / (action.end - action.start))))
+  if (action.verb === 'path') return back(pathValue(model, obj, action, attr, time))
   // A change written as a function of the progress gives the value itself, the ease its envelope (D269, D277).
-  if (isProgressFunction(segment.to)) {
-    const natural = startOf(model, obj, attr, segments, segment, type, except)
-    return progressFunctionValue(model, segment.to, action, time, natural, type)
-  }
+  if (isProgressFunction(segment.to)) return back(progressFunctionValue(model, segment.to, action, time, startOf(model, obj, attr, segments, segment, type, except), type))
   const to = resolveSource(model, segment.to, time, fallbackFor(obj, attr))
-  if (running < 0 && progress === 1) return to
-  return interpolate(startOf(model, obj, attr, segments, segment, type, except), to, progress, type)
+  // Its journey done, an action holds the value its easing reached (D220): the target for any usual easing, elsewhere for one that falls back, as a pulse does.
+  if (course.p >= 1) {
+    const reached = segment.ease(1)
+    return back(reached === 1 ? to : interpolate(startOf(model, obj, attr, segments, segment, type, except), to, reached, type))
+  }
+  return back(interpolate(startOf(model, obj, attr, segments, segment, type, except), to, segment.ease(course.p), type))
 }
 
 /** A change written as a function with a parameter, `(p) => ...`, is a function of the progress (D269); one with none is a link. */
@@ -260,34 +299,32 @@ function isProgressFunction(source: AttrSource | undefined): source is AttrSourc
 function plainProgress(action: Action, time: number): { p: number; t: number } {
   const span = action.end - action.start
   if (!begun(action.start, time) || span <= 0) return { p: 0, t: 0 }
+  // The seconds keep counting through the hold and the return, so a rainbow keeps turning as it fades back (D285); the progress is the journey's.
   const t = Math.min(span, Math.max(0, time - action.start))
-  return { p: t / span, t }
+  const journey = journeyOf(action)
+  return { p: journey <= 0 ? 1 : Math.min(1, t / journey), t }
 }
 
 /**
- * How strongly a function of the progress applies at a plain progress (D277): the ease is its
- * envelope. Linear, or ramps of nothing, apply it in full throughout; ramps bring it in over
- * `easeIn` and out over `easeOut`, the speed the ramps give, so the thing ends as it began; a
- * named curve or a function of your own weighs it by what the curve gives.
+ * How strongly a function of the progress applies at a plain progress (D277, D285): the ease is
+ * its envelope. Linear, or a ramp of nothing, applies it in full from the start; ramps bring it
+ * in over `easeIn`, smoothly; a named curve or a function of your own weighs it by what the
+ * curve gives. Going out is the return's (D285), never the ease's.
  */
 function envelopeAt(action: Action, p: number): number {
   const ease = action.timing.ease
-  const span = action.end - action.start
+  const span = journeyOf(action)
   if (typeof ease === 'function') return Math.max(0, Math.min(1, easingFor(action.timing, span)(p)))
   if (typeof ease === 'string') {
     if (ease === 'linear' || !namedEasings[ease]) return 1
     return Math.max(0, Math.min(1, namedEasings[ease]!(p)))
   }
   if (span <= 0) return 1
-  let a = Math.max(0, action.timing.easeIn ?? span * DEFAULT_EASE_FRACTION) / span
-  let b = Math.max(0, action.timing.easeOut ?? span * DEFAULT_EASE_FRACTION) / span
-  const sum = a + b
-  if (sum > 1) {
-    a /= sum
-    b /= sum
+  const a = Math.max(0, Math.min(span, action.timing.easeIn ?? span * DEFAULT_EASE_FRACTION)) / span
+  if (a > 0 && p < a) {
+    const x = p / a
+    return x * x * (3 - 2 * x)
   }
-  if (a > 0 && p < a) return p / a
-  if (b > 0 && p > 1 - b) return (1 - p) / b
   return 1
 }
 
@@ -534,8 +571,37 @@ export function pathFrame(model: SceneModel, action: Action, time: number): Path
 function alongFrame(frame: PathFrame, fraction: number): { point: Point; angle: number; segment: number; t: number } {
   const { curve, cumulative } = frame
   if (curve.length === 1) return { point: curve[0]!, angle: 0, segment: 0, t: 0 }
-  const total = cumulative[cumulative.length - 1]!
-  const target = Math.max(0, Math.min(1, fraction)) * total
+  return alongLength(frame, Math.max(0, Math.min(1, fraction)) * cumulative[cumulative.length - 1]!)
+}
+
+/**
+ * The point a fraction of the way along a timed path (D297): its anchors are evenly spaced in
+ * time, as a motion sketch records them, so the fraction names a span of anchors and how far
+ * into it, by distance within that span.
+ */
+function alongTimed(frame: PathFrame, fraction: number): { point: Point; angle: number; segment: number; t: number } {
+  const n = frame.anchors.length
+  if (n < 2 || frame.spans.length !== frame.curve.length) return alongFrame(frame, fraction)
+  const k = Math.max(0, Math.min(1, fraction)) * (n - 1)
+  const span = Math.min(n - 2, Math.floor(k))
+  const within = k - span
+  // The curve's point where a span ends is the last tagged with it; the span starts where the one before ends.
+  const endOf = (s: number): number => {
+    let e = frame.spans.length - 1
+    while (e > 0 && frame.spans[e]! > s) e--
+    return e
+  }
+  const i0 = span === 0 ? 0 : endOf(span - 1)
+  const i1 = endOf(span)
+  const l0 = frame.cumulative[i0]!
+  const l1 = frame.cumulative[i1]!
+  return alongLength(frame, l0 + (l1 - l0) * within)
+}
+
+/** The point a length along a frame's curve. */
+function alongLength(frame: PathFrame, target: number): { point: Point; angle: number; segment: number; t: number } {
+  const { curve, cumulative } = frame
+  if (curve.length === 1) return { point: curve[0]!, angle: 0, segment: 0, t: 0 }
   let lo = 0
   let hi = cumulative.length - 2
   while (lo < hi) {
@@ -578,7 +644,8 @@ export function pathPointAt(model: SceneModel, action: Action, progress: number,
   if (shape.kind === 'points') {
     const frame = pathFrame(model, action, time)
     if (!frame) return null
-    const { point, angle } = alongFrame(frame, progress)
+    // Timed, the points are evenly spaced in time rather than traveled by distance (D297).
+    const { point, angle } = action.changes['timed'] === true ? alongTimed(frame, progress) : alongFrame(frame, progress)
     return { point, angle }
   }
   const point = shape.at(progress)
@@ -904,7 +971,7 @@ function morphAt(morphs: Action[], time: number, except: ReadonlySet<Action>, st
   let ended = -1
   for (let i = 0; i < morphs.length; i++) {
     const a = morphs[i]!
-    if (except.has(a)) continue
+    if (except.has(a) || gone(a, time)) continue
     if (strictStart ? a.start >= time - TIME_TOLERANCE : !begun(a.start, time)) continue
     if (!over(a.end, time) && a.end > a.start) running = i
     else if (ended < 0 || a.end >= morphs[ended]!.end) ended = i
@@ -940,19 +1007,29 @@ function morphedSegs(model: SceneModel, obj: SceneObject, time: number, morphs: 
   const without = new Set(except).add(action)
   const target = morphTargetSegs(model, action, time)
   if (!target) return morphedSegs(model, obj, time, morphs, without)
-  const ease = easingFor(action.timing, action.end - action.start)
-  const progress = running ? ease((time - action.start) / (action.end - action.start)) : ease(1)
-  if (progress === 1) return target
-  const from = morphedSegs(model, obj, action.start, morphs, without)
-  if (!from) return target
-  if (progress === 0) return from
+  const course = courseAt(action, time)
+  const ease = easingFor(action.timing, journeyOf(action))
+  const progress = running ? ease(course.p) : ease(1)
   const c = cacheFor(model)
-  let entry = c.morphs.get(action.id)
-  if (!entry || entry.from !== from || entry.to !== target) {
-    entry = { from, to: target, pairs: morphPairs(from, target) }
-    c.morphs.set(action.id, entry)
+  const blend = (key: number, from: Seg[], to: Seg[], p: number): Seg[] => {
+    if (p >= 1) return to
+    if (p <= 0) return from
+    let entry = c.morphs.get(key)
+    if (!entry || entry.from !== from || entry.to !== to) {
+      entry = { from, to, pairs: morphPairs(from, to) }
+      c.morphs.set(key, entry)
+    }
+    return blendMorph(entry.pairs, p)
   }
-  return blendMorph(entry.pairs, progress)
+  let reached = target
+  if (progress !== 1) {
+    const from = morphedSegs(model, obj, action.start, morphs, without)
+    if (from) reached = blend(action.id, from, target, progress)
+  }
+  if (course.q <= 0) return reached
+  // Over its return, the outline goes from what it reached back to what the rest make of it now (D285).
+  const found = morphedSegs(model, obj, time, morphs, without)
+  return found ? blend(-(action.id + 1), reached, found, returnEase(action)(course.q)) : reached
 }
 
 /** A Shape's outline as path data at a time, in its own space (D257): its own, or what its morphs have made of it by then, which the Shape tool shows; null for a shape that draws nothing. */
@@ -1159,9 +1236,11 @@ export function pathCutAt(model: SceneModel, action: Action, progress: number, t
 /** Eased progress of an action at a time: 0 before it starts, and once it has ended, what its easing reaches at 1, which is 1 for any usual easing (D220). */
 export function progressAt(action: Action, time: number): number {
   if (!begun(action.start, time)) return 0
-  const ease = easingFor(action.timing, action.end - action.start)
-  if (time >= action.end - TIME_TOLERANCE || action.end <= action.start) return ease(1)
-  return ease((time - action.start) / (action.end - action.start))
+  // The journey's progress: held at its end through the hold and the return (D285).
+  const journey = journeyOf(action)
+  const ease = easingFor(action.timing, journey)
+  if (journey <= 0 || time >= action.start + journey - TIME_TOLERANCE) return ease(1)
+  return ease((time - action.start) / journey)
 }
 
 /** What the absolute actions alone give an attribute at a time, before any relative change is added: where a new absolute action must begin for the object to stay put (D210, D225). */
@@ -1187,22 +1266,26 @@ export function valueAt(model: SceneModel, obj: SceneObject, attr: string, time:
         if (typeof from === 'number') sum += from
         continue
       }
+      // A returning change fades out over its return and adds nothing once over (D285).
+      const course = courseAt(segment.action, time)
+      if (course.gone) continue
+      const weight = course.q > 0 ? 1 - returnEase(segment.action)(course.q) : 1
       if (segment.action.verb === 'path') {
         // A relative path's shape is changes from where the object is, added on top of whatever else moves it (D196).
         const at = pathPointAt(model, segment.action, progressAt(segment.action, time), time)
-        if (at) sum += attr === 'x' ? at.point.x : attr === 'y' ? at.point.y : at.angle
+        if (at) sum += (attr === 'x' ? at.point.x : attr === 'y' ? at.point.y : at.angle) * weight
         continue
       }
       // A relative change written as a function of the progress adds what it gives, by its envelope (D269, D277).
       if (isProgressFunction(segment.to)) {
         const given = progressFunctionValue(model, segment.to, segment.action, time, 0, 'number')
-        if (typeof given === 'number') sum += given
+        if (typeof given === 'number') sum += given * weight
         continue
       }
       const to = resolveSource(model, segment.to, time, 0)
       const from = segment.from !== undefined ? resolveSource(model, segment.from, time, 0) : 0
       // A relative change runs from its own start, when written as a range, else from nothing, to its value (D221).
-      if (typeof to === 'number' && typeof from === 'number') sum += from + (to - from) * progressAt(segment.action, time)
+      if (typeof to === 'number' && typeof from === 'number') sum += (from + (to - from) * progressAt(segment.action, time)) * weight
     }
     value = sum
   }
@@ -1360,19 +1443,24 @@ function unitAttrType(attr: UnitAttr): AttrType {
  * and its own text, and what it returns is the value; a `path` by unit is the shape as changes
  * from the unit's place, `orient` turning it.
  */
-export function textUnitStates(model: SceneModel, obj: SceneObject, time: number, layout: TextLayout): UnitState[] | null {
+export function textUnitStates(model: SceneModel, obj: SceneObject, time: number, layout: TextLayout, attrs: readonly UnitAttr[] = UNIT_ATTRS): UnitState[] | null {
   const actions = unitActions(obj)
   if (actions.length === 0) return null
   const timed = actions.map((action) => {
     const kind = action.timing.by!
-    const count = layout.units[kind].length
-    const begins = unitBegins(action.timing.stagger, count).map((b) => action.start + b)
-    const last = count > 0 ? begins[count - 1]! - action.start : 0
-    const duration = Math.max(0, action.end - action.start - last)
-    return { action, kind, begins, duration, ease: easingFor(action.timing, duration) }
+    // The units it runs on, all or those its handle names (D286), each beginning its turn by the stagger; a turn's journey is the duration, which a hold and a return follow (D285).
+    const indexes = unitIndexes(action, layout.units[kind].length)
+    const gaps = unitBegins(action.timing.stagger, indexes)
+    const begins: number[] = []
+    indexes.forEach((unit, k) => (begins[unit] = action.start + gaps[k]!))
+    const last = gaps.length > 0 ? gaps[gaps.length - 1]! : 0
+    const tail = tailOf(action.timing)
+    const after = tail ? tail.hold + tail.back : 0
+    const duration = Math.max(0, action.end - action.start - last - after)
+    return { action, kind, begins, duration, after, ease: easingFor(action.timing, duration) }
   })
   const states: UnitState[] = layout.units.char.map(() => ({ dx: 0, dy: 0, rotation: 0, scale: 1, opacity: 1, fill: null, text: null }))
-  const fill = String(valueAt(model, obj, 'fill', time))
+  const fill = attrs.includes('fill') ? String(valueAt(model, obj, 'fill', time)) : ''
   let any = false
   layout.units.char.forEach((char, i) => {
     const runs: UnitRun[] = []
@@ -1380,10 +1468,10 @@ export function textUnitStates(model: SceneModel, obj: SceneObject, time: number
       const unit = t.kind === 'char' ? i : t.kind === 'word' ? char.word : char.line
       const begins = t.begins[unit]
       if (begins === undefined) continue
-      runs.push({ action: t.action, kind: t.kind, unit, begins, ends: begins + t.duration, duration: t.duration, ease: t.ease })
+      runs.push({ action: t.action, kind: t.kind, unit, begins, ends: begins + t.duration + t.after, duration: t.duration, ease: t.ease })
     }
     runs.sort((a, b) => a.begins - b.begins || a.action.id - b.action.id)
-    for (const attr of UNIT_ATTRS) {
+    for (const attr of attrs) {
       const list = runs.filter((r) => attr in r.action.changes || (r.action.verb === 'path' && (attr === 'x' || attr === 'y' || (attr === 'rotation' && r.action.changes['orient'] === true))))
       if (list.length === 0) continue
       const natural: AttrValue = attr === 'fill' ? fill : attr === 'text' ? char.text : attr === 'scale' || attr === 'opacity' ? 1 : 0
@@ -1404,12 +1492,33 @@ export function textUnitStates(model: SceneModel, obj: SceneObject, time: number
 }
 
 /** The value of one attribute of one unit at a time, from the runs on it, those in `except` left out (D269): null for its natural state. */
+/** The units an action by unit runs on, by index (D286): those its handle names that the text has, else all of them. */
+function unitIndexes(action: Action, total: number): number[] {
+  return action.timing.units ? action.timing.units.filter((i) => i >= 0 && i < total) : Array.from({ length: total }, (_, i) => i)
+}
+
+/** The turns of an action by character, word, or line (D268, D286): each unit it runs on, in order, and when its turn begins. */
+export function unitTurns(model: SceneModel, obj: SceneObject, action: Action): { unit: number; begins: number }[] {
+  const layout = layoutOf(textStyleAt(model, obj, action.start))
+  const indexes = unitIndexes(action, layout.units[action.timing.by!].length)
+  const gaps = unitBegins(action.timing.stagger, indexes)
+  return indexes.map((unit, k) => ({ unit, begins: action.start + gaps[k]! }))
+}
+
+/** The seconds an action's `duration` stands for: its span less the gaps between its units and its hold and return (D268, D285), which the model adds. */
+export function writtenSpan(model: SceneModel, obj: SceneObject, action: Action): number {
+  const gaps = action.timing.by !== undefined ? (unitTurns(model, obj, action).at(-1)?.begins ?? action.start) - action.start : 0
+  return Math.max(0, journeyOf(action) - gaps)
+}
+
 function unitValue(model: SceneModel, layout: TextLayout, attr: UnitAttr, list: UnitRun[], time: number, natural: AttrValue, except: readonly Action[]): AttrValue | null {
   let running = -1
   let ended = -1
   for (let i = 0; i < list.length; i++) {
     const r = list[i]!
     if (!begun(r.begins, time) || except.includes(r.action)) continue
+    // A turn that returned is over and gone (D285).
+    if (r.action.timing.return !== undefined && over(r.ends, time)) continue
     if (!over(r.ends, time) && r.ends > r.begins) running = i
     else if (ended < 0 || r.ends >= list[ended]!.ends) ended = i
   }
@@ -1420,24 +1529,27 @@ function unitValue(model: SceneModel, layout: TextLayout, attr: UnitAttr, list: 
     return pending ? resolveSource(model, pending.action.from[attr]!, time, natural) : null
   }
   const r = list[index]!
-  const progress = running < 0 || r.duration <= 0 ? r.ease(1) : r.ease(Math.max(0, Math.min(1, (time - r.begins) / r.duration)))
+  // The unit's turn as an action of its own (D277): its journey, its hold, and its return (D285).
+  const turn: Action = { ...r.action, start: r.begins, end: r.ends }
+  const course = courseAt(turn, time)
+  const progress = r.duration <= 0 ? r.ease(1) : r.ease(course.p)
   const own = layout.units[r.kind][r.unit]
+  const type = unitAttrType(attr)
+  // Over its return, the unit goes from what the turn reached back to what the other turns leave it now (D285).
+  const back = (reached: AttrValue): AttrValue => (course.q > 0 ? interpolate(reached, unitValue(model, layout, attr, list, time, natural, [...except, r.action]) ?? natural, returnEase(r.action)(course.q), type) : reached)
   if (r.action.verb === 'path') {
     // The path's shape as changes from the unit's place: where it is at the progress, less where it starts.
     const at = pathPointAt(model, r.action, progress, time)
     const origin = pathPointAt(model, r.action, 0, time)
     if (!at || !origin) return null
-    return attr === 'x' ? at.point.x - origin.point.x : attr === 'y' ? at.point.y - origin.point.y : at.angle
+    return back(attr === 'x' ? at.point.x - origin.point.x : attr === 'y' ? at.point.y - origin.point.y : at.angle)
   }
   const raw = r.action.changes[attr]
   const from = r.action.from[attr] !== undefined ? resolveSource(model, r.action.from[attr]!, time, natural) : (unitValue(model, layout, attr, list, r.begins, natural, [...except, r.action]) ?? natural)
-  if (isProgressFunction(raw)) {
-    // The unit's turn as an action of its own: the function gets the plain progress of the turn, the unit's index, its own text, the seconds since its turn began, and how many units there are (D277).
-    const turn: Action = { ...r.action, start: r.begins, end: r.ends }
-    return progressFunctionValue(model, raw, turn, time, from, unitAttrType(attr), (p, t) => [p, r.unit, own?.text ?? '', t, layout.units[r.kind].length])
-  }
+  // A function gets the plain progress of the turn, the unit's index, its own text, the seconds since its turn began, and how many units there are (D277).
+  if (isProgressFunction(raw)) return back(progressFunctionValue(model, raw, turn, time, from, type, (p, t) => [p, r.unit, own?.text ?? '', t, layout.units[r.kind].length]))
   const to = resolveSource(model, raw as AttrSource, time, natural)
-  return interpolate(from, to, progress, unitAttrType(attr))
+  return back(interpolate(from, to, progress, type))
 }
 
 /**
@@ -1447,12 +1559,32 @@ function unitValue(model: SceneModel, layout: TextLayout, attr: UnitAttr, list: 
  */
 export function visibleShareAt(model: SceneModel, obj: SceneObject, time: number): number {
   const opacity = opacityAt(model, obj, time)
-  if (obj.className !== 'Text' || opacity <= 0 || unitActions(obj).length === 0) return opacity
+  return opacity <= 0 ? opacity : opacity * unitShareAt(model, obj, time)
+}
+
+const OPACITY_ONLY: readonly UnitAttr[] = ['opacity']
+
+/** The share of a Text's characters that show at a time, 0 to 1: the mean of their opacities where their opacity is animated by unit, else 1. */
+export function unitShareAt(model: SceneModel, obj: SceneObject, time: number): number {
+  if (obj.className !== 'Text' || !unitActions(obj).some((a) => 'opacity' in a.changes)) return 1
   const layout = layoutOf(textStyleAt(model, obj, time))
-  const states = textUnitStates(model, obj, time, layout)
-  if (!states || states.length === 0) return opacity
-  const mean = states.reduce((sum, s) => sum + Math.max(0, Math.min(1, s.opacity)), 0) / states.length
-  return opacity * mean
+  const states = textUnitStates(model, obj, time, layout, OPACITY_ONLY)
+  if (!states || states.length === 0) return 1
+  // The blanks are units too (D289), but nothing of them shows: the share is the seen characters'.
+  const seen = states.filter((_, i) => !/^\s*$/.test(layout.units.char[i]?.text ?? ''))
+  if (seen.length === 0) return 1
+  return seen.reduce((sum, s) => sum + Math.max(0, Math.min(1, s.opacity)), 0) / seen.length
+}
+
+/** The stretches of time over which an object's unit actions change an attribute, merged where they overlap, in order; between them the units hold still. */
+export function unitSpans(obj: SceneObject, attr: string): { start: number; end: number }[] {
+  const merged: { start: number; end: number }[] = []
+  for (const a of unitActions(obj).filter((a) => attr in a.changes).sort((a, b) => a.start - b.start)) {
+    const last = merged[merged.length - 1]
+    if (last && a.start <= last.end) last.end = Math.max(last.end, a.end)
+    else merged.push({ start: a.start, end: a.end })
+  }
+  return merged
 }
 
 function apply(m: Motion, p: Point): Point {

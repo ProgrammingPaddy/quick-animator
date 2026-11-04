@@ -41,12 +41,13 @@ export function ObjectPane() {
   const fps = useStore((s) => s.settings.fps)
   const selection = useStore((s) => s.selection)
   const anchored = useStore((s) => s.anchored)
-  const time = useStore((s) => s.time)
   /** The search, and whether only what is active at the playhead is listed (D176). */
   const [query, setQuery] = useState('')
   const [activeOnly, setActiveOnly] = useState(false)
   /** Whether only the animations running at the playhead are listed under each object (D184). */
   const [activeAnimations, setActiveAnimations] = useState(false)
+  // The playhead matters only to those filters, so the pane follows it only while one is on.
+  const time = useStore((s) => (activeOnly || activeAnimations ? s.time : 0))
   const running = (a: { start: number; end: number }): boolean => a.start <= time && time < a.end
   const dependents = useMemo(() => (model ? dependentsByTarget(model) : new Map<string, string[]>()), [model])
   /** Link marks, icons only, saying what in their tooltips (D169). */
@@ -127,7 +128,7 @@ export function ObjectPane() {
       showMenu(e, [
         { label: 'Jump to code', run: () => jumpToObject(obj.name) },
         { label: 'Rename', run: () => requestRename({ object: obj.name }) },
-        { label: 'Save as preset', run: () => requestSavePreset({ object: obj.name }) },
+        { label: 'Save preset', run: () => requestSavePreset({ object: obj.name }) },
         { label: 'Ungroup', run: () => ungroup(obj.name) },
       ])
       return
@@ -136,11 +137,11 @@ export function ObjectPane() {
       { label: 'Jump to code', run: () => jumpToObject(obj.name) },
       ...(many ? [] : [{ label: 'Rename', run: () => requestRename({ object: obj.name }) }]),
       { label: 'Classes', run: () => requestClasses(targets) },
-      ...(many ? [] : [{ label: 'Edit links', run: () => useStore.getState().openLinksDialog({ object: obj.name }) }]),
+      ...(many ? [] : [{ label: 'Links', run: () => useStore.getState().openLinksDialog({ object: obj.name }) }]),
       { label: many ? `Duplicate ${targets.length} objects` : 'Duplicate', run: () => duplicateObjects(targets) },
       ...(many ? [] : [{ label: 'End at', keyword: timecode(s.time, s.settings.fps), run: () => setLifetime(obj.name, { until: useStore.getState().time }) }]),
-      ...(many || !obj.decl ? [] : [{ label: 'Save as preset', run: () => requestSavePreset({ object: obj.name }) }]),
-      { label: many ? `Delete ${targets.length} objects` : 'Delete object', run: () => deleteObjects(targets), danger: true },
+      ...(many || !obj.decl ? [] : [{ label: 'Save preset', run: () => requestSavePreset({ object: obj.name }) }]),
+      { label: many ? `Delete ${targets.length} objects` : 'Delete', run: () => deleteObjects(targets), danger: true },
     ])
   }
 
@@ -153,26 +154,26 @@ export function ObjectPane() {
       if (action.overridden) {
         const override = overrideOf(obj, classAction)
         showMenu(e, [
-          { label: 'Jump to the override', run: () => selectAction(obj.name, override) },
-          { label: 'Remove the override', run: () => deleteAction(obj.name, override), danger: true },
+          { label: 'Jump to override', run: () => selectAction(obj.name, override) },
+          { label: 'Remove override', run: () => deleteAction(obj.name, override), danger: true },
         ])
         return
       }
       showMenu(e, [
         { label: `Override for ${obj.name}`, run: () => overrideClassAction(obj.name, index) },
-        { label: 'Copy as own action', run: () => materializeClassAction(obj.name, index) },
+        { label: 'Override', run: () => materializeClassAction(obj.name, index) },
         { label: 'Jump to class code', run: () => jumpToAction(obj.name, index) },
         { label: `Remove ${obj.name} from ${classAction.className}`, run: () => removeFromClass(obj.name, classAction.className) },
-        { label: 'Delete for every member', run: () => deleteAction(obj.name, index), danger: true },
+        { label: 'Delete for all', run: () => deleteAction(obj.name, index), danger: true },
       ])
       return
     }
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToAction(obj.name, index) },
       { label: action?.name ? 'Rename' : 'Name', run: () => requestRename({ object: obj.name, index }) },
-      { label: 'Edit links', run: () => useStore.getState().openLinksDialog({ object: obj.name, index }) },
-      { label: 'Save as preset', run: () => requestSavePreset({ object: obj.name, index }) },
-      { label: 'Delete action', run: () => deleteAction(obj.name, index), danger: true },
+      { label: 'Links', run: () => useStore.getState().openLinksDialog({ object: obj.name, index }) },
+      { label: 'Save preset', run: () => requestSavePreset({ object: obj.name, index }) },
+      { label: 'Delete', run: () => deleteAction(obj.name, index), danger: true },
     ])
   }
 
@@ -182,8 +183,8 @@ export function ObjectPane() {
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToClass(group.className) },
       { label: 'Select members', run: () => selectClass(group.className) },
-      { label: 'Save as preset', run: () => requestSavePreset({ className: group.className }) },
-      { label: 'Delete class', run: () => deleteClass(group.className), danger: true },
+      { label: 'Save preset', run: () => requestSavePreset({ className: group.className }) },
+      { label: 'Delete', run: () => deleteClass(group.className), danger: true },
     ])
   }
 
@@ -195,7 +196,7 @@ export function ObjectPane() {
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToClass(group.className) },
       { label: classAction.name ? 'Rename' : 'Name', run: () => requestRename({ classAction: id }) },
-      { label: 'Delete for every member', run: () => deleteClassAction(id), danger: true },
+      { label: 'Delete for all', run: () => deleteClassAction(id), danger: true },
     ])
   }
 
@@ -350,17 +351,17 @@ export function ObjectPane() {
             <div className="objects-tools-row">
               <input className="objects-search" type="search" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search objects" />
               {foldable.length > 0 && (
-                <button className="small" onClick={() => setAllCollapsed('objects', anyExpanded ? foldable : null)} title={anyExpanded ? 'Fold every section, class, and action list' : 'Unfold everything'}>
+                <button className="small" onClick={() => setAllCollapsed('objects', anyExpanded ? foldable : null)} title={anyExpanded ? 'Fold all' : 'Unfold all'}>
                   {anyExpanded ? 'Collapse all' : 'Expand all'}
                 </button>
               )}
             </div>
             <div className="objects-tools-row">
               <span className="dim" title="Only what is active at the playhead">Active:</span>
-              <button className={`small${activeOnly ? ' on' : ''}`} onClick={() => setActiveOnly(!activeOnly)} title={activeOnly ? 'Only what is on screen at the playhead' : 'Everything; off screen dimmed'} aria-pressed={activeOnly}>
+              <button className={`small${activeOnly ? ' on' : ''}`} onClick={() => setActiveOnly(!activeOnly)} title={activeOnly ? 'Active at the playhead' : 'Everything'} aria-pressed={activeOnly}>
                 objects
               </button>
-              <button className={`small${activeAnimations ? ' on' : ''}`} onClick={() => setActiveAnimations(!activeAnimations)} title={activeAnimations ? 'Listing only the animations running at the playhead. Click to list every animation.' : 'Listing every animation. Click to list only the ones running at the playhead.'} aria-pressed={activeAnimations}>
+              <button className={`small${activeAnimations ? ' on' : ''}`} onClick={() => setActiveAnimations(!activeAnimations)} title={activeAnimations ? 'Running at the playhead' : 'Every animation'} aria-pressed={activeAnimations}>
                 animations
               </button>
               <span className="dim count">

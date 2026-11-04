@@ -157,7 +157,7 @@ export function requestSavePreset(target: SaveTarget): void {
   }
   const taken = new Set(s.userPresets.map((p) => p.label.trim().toLowerCase()))
   s.openDialog({
-    title: 'Save as preset',
+    title: 'Save preset',
     input: { label: 'Name', value: suggested, validate: (value) => (value.trim() === '' ? 'Give it a name' : taken.has(value.trim().toLowerCase()) ? 'One of your presets has this name' : null) },
     confirmLabel: 'Save',
     onConfirm: (label) => {

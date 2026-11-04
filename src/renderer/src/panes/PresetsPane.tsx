@@ -250,7 +250,7 @@ export function PresetsPane() {
   const userMenu = (p: UserPreset) => (e: ReactMouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    showMenu(e, [{ label: 'Delete preset', keyword: p.label, run: () => deleteUserPreset(p.id), danger: true }])
+    showMenu(e, [{ label: 'Delete', keyword: p.label, run: () => deleteUserPreset(p.id), danger: true }])
   }
 
   /** The ghost's place and size: an animation's clip by the pointer, an object centered on it in the preview, a clip from it on the timeline, else its card (D222). */

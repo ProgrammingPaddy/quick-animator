@@ -4,7 +4,7 @@ import { GROUP } from '../model/registry'
 import { hasPathData } from '../model/pathData'
 import { existsAt, groupBox, opacityAt, parseColor, shapePieces, textPadding, textStyleAt, textUnitStates, valueAt, worldPose, type Pose, type ShapePiece } from '../model/sample'
 import { SHAPE } from '../model/registry'
-import { drawText, estimateMeasure, fontSpec, layoutOf, textMeasure, unitOverflow, type TextMeasure, type TextStyle } from '../model/text'
+import { drawText, estimateMeasure, fontSpec, layoutOf, sameUnitStates, textMeasure, unitOverflow, type TextMeasure, type TextStyle, type UnitState } from '../model/text'
 import { fontsVersion } from '../project/fonts'
 import type { SceneModel, SceneObject } from '../model/types'
 import type { TransformMode } from '../state/store'
@@ -19,6 +19,8 @@ interface Item {
   /** A Text's canvas, kept and redrawn, and how much of the world its picture covers, which grows past the block as animated characters reach out (D268). */
   textCanvas?: HTMLCanvasElement
   drawn?: { width: number; height: number }
+  /** The characters' states the canvas was last drawn in, so a frame that leaves them as they are draws nothing. */
+  drawnStates?: UnitState[] | null
   /** A Shape's stroke, its own mesh; the box around its line in its own space, its center offset from the object's x and y; and what its geometry was built from (D232). */
   stroke?: THREE.Mesh
   bounds?: { x: number; y: number; width: number; height: number }
@@ -254,6 +256,34 @@ function dashes(points: { x: number; y: number }[], on: number, off: number): [{
 }
 
 /** A Shape's stroke as triangles: a quad along each piece of each line and a small fan at each point, so the joins are round (D232). */
+/** The first share of a line, by length across its pieces (D298): what is drawn of it so far. */
+function drawnCurves(curves: { x: number; y: number }[][], fraction: number): { x: number; y: number }[][] {
+  let total = 0
+  for (const curve of curves) for (let i = 0; i + 1 < curve.length; i++) total += Math.hypot(curve[i + 1]!.x - curve[i]!.x, curve[i + 1]!.y - curve[i]!.y)
+  let left = total * fraction
+  const out: { x: number; y: number }[][] = []
+  for (const curve of curves) {
+    if (left <= 0 || curve.length < 2) break
+    const piece = [curve[0]!]
+    for (let i = 0; i + 1 < curve.length; i++) {
+      const a = curve[i]!
+      const b = curve[i + 1]!
+      const length = Math.hypot(b.x - a.x, b.y - a.y)
+      if (length <= left) {
+        piece.push(b)
+        left -= length
+        continue
+      }
+      const t = length > 1e-9 ? left / length : 0
+      piece.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })
+      left = 0
+      break
+    }
+    out.push(piece)
+  }
+  return out
+}
+
 function strokeGeometry(curves: { x: number; y: number }[][], width: number): THREE.BufferGeometry {
   const positions: number[] = []
   const half = width / 2
@@ -561,6 +591,9 @@ export class SceneRenderer {
   /** What was last drawn, for the frames of groups. */
   private model: SceneModel | null = null
   private time = 0
+  private editing: string | null = null
+  /** An object drawn where the pencil holds it while its motion is sketched (D297), whatever the model says. */
+  private follow: { name: string; point: { x: number; y: number } } | null = null
 
   constructor() {
     this.rotateRing = new THREE.LineLoop(ringGeometry(), ringMaterial)
@@ -601,7 +634,15 @@ export class SceneRenderer {
       model.objects.forEach((obj, index) => {
         if (obj.className === GROUP) return
         seen.add(obj.name)
-        this.apply(this.ensure(obj), obj, model, time, index, keepAliveFrom)
+        const item = this.ensure(obj)
+        this.apply(item, obj, model, time, index, keepAliveFrom)
+        // The Text being edited in the preview shows its words in the editor alone (D270).
+        if (obj.name === this.editing) item.mesh.visible = false
+        // Held by the pencil: drawn under the pointer, the model untouched until the sketch is written (D297).
+        if (this.follow && obj.name === this.follow.name) {
+          item.mesh.position.set(this.follow.point.x, this.follow.point.y, item.mesh.position.z)
+          if (item.stroke) item.stroke.position.set(this.follow.point.x, this.follow.point.y, item.stroke.position.z)
+        }
       })
     }
     for (const [name, item] of this.items) {
@@ -760,6 +801,16 @@ export class SceneRenderer {
   }
 
   /** Where a visible object, or a group, is drawn right now, or null. */
+  /** The Text whose words are being edited in the preview, drawn by the editor over it instead (D270). */
+  setEditing(name: string | null): void {
+    this.editing = name
+  }
+
+  /** The object the pencil holds while its motion is sketched, drawn at the point (D297); null lets go. */
+  setFollow(name: string | null, point: { x: number; y: number } | null): void {
+    this.follow = name && point ? { name, point } : null
+  }
+
   frameOf(name: string): Frame | null {
     const item = this.items.get(name)
     if (item) {
@@ -897,17 +948,21 @@ export class SceneRenderer {
     const pieces = shapePieces(model, obj, time)
     const widthValue = valueAt(model, obj, 'strokeWidth', time)
     const strokeWidth = typeof widthValue === 'number' && Number.isFinite(widthValue) ? Math.max(0, widthValue) : 0
+    // How much of the line is drawn so far (D298): the stroke stops there; the fill is whole.
+    const drawnValue = valueAt(model, obj, 'drawn', time)
+    const drawn = typeof drawnValue === 'number' && Number.isFinite(drawnValue) ? Math.max(0, Math.min(1, drawnValue)) : 1
     const d = valueAt(model, obj, 'curves', time)
     // Path data is its own key; points, and a morphing shape, are keyed by the line they make, since a list may be a word and a morph changes the line over time (D257).
     const morphing = obj.actions.some((a) => a.verb === 'morph' && !a.overridden)
-    const key = `${strokeWidth}:${hasPathData(d) && !morphing ? `d${d}` : pieces.map((piece) => `${piece.closed ? 'c' : 'o'}${piece.curve.map((p) => `${Math.round(p.x * 10)},${Math.round(p.y * 10)}`).join(';')}`).join('|')}`
+    const key = `${strokeWidth}:${drawn < 1 ? drawn.toFixed(3) : ''}:${hasPathData(d) && !morphing ? `d${d}` : pieces.map((piece) => `${piece.closed ? 'c' : 'o'}${piece.curve.map((p) => `${Math.round(p.x * 10)},${Math.round(p.y * 10)}`).join(';')}`).join('|')}`
     if (item.shapeKey !== key) {
       item.shapeKey = key
       item.mesh.geometry.dispose()
       item.mesh.geometry = fillGeometry(pieces)
       if (item.stroke) {
         item.stroke.geometry.dispose()
-        item.stroke.geometry = strokeWidth > 0 ? strokeGeometry(pieces.map((piece) => piece.curve), strokeWidth) : new THREE.BufferGeometry()
+        const curves = pieces.map((piece) => piece.curve)
+        item.stroke.geometry = strokeWidth > 0 ? strokeGeometry(drawn < 1 ? drawnCurves(curves, drawn) : curves, strokeWidth) : new THREE.BufferGeometry()
       }
       let left = Infinity
       let right = -Infinity
@@ -1001,9 +1056,12 @@ export class SceneRenderer {
     const layout = layoutOf(style)
     const states = textUnitStates(model, obj, time, layout)
     const color = parseColor(fill) ? fill : '#ffffff'
-    const key = [layout.width, layout.height, style.text, style.fontSize, style.font, style.weight, style.italic, style.align, style.lineHeight, style.letterSpacing, color, fontsVersion.current, states ? time : ''].join('\u0000')
-    if (item.textKey === key) return
+    // Redrawn when the look or the characters' states change, not for every frame of a unit animation that leaves them still.
+    const still = item.drawnStates !== undefined && sameUnitStates(item.drawnStates, states)
+    const key = [layout.width, layout.height, style.text, style.fontSize, style.font, style.weight, style.italic, style.align, style.lineHeight, style.letterSpacing, color, fontsVersion.current].join('\u0000')
+    if (item.textKey === key && still) return
     item.textKey = key
+    item.drawnStates = states
     const pad = textPadding(style)
     item.width = layout.width + 2 * pad
     item.height = layout.height + 2 * pad

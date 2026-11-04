@@ -10,7 +10,7 @@ import { HelpOverlay } from './components/HelpOverlay'
 import { Layout } from './Layout'
 import { runHeadless } from './export/headless'
 import { initProject } from './project/controller'
-import { copySelection, cutSelection, deleteActions, deleteObjects, duplicateObjects, importSvg, jumpToEdge, nudgeActions, nudgeObjects, nudgeObjectsInTime, pasteClipboard, removePathPoints, removeShapePoints, settleMorph, requestRename } from './project/operations'
+import { addMarker, copySelection, cutSelection, deleteActions, deleteObjects, duplicateObjects, importSvg, jumpToEdge, nudgeActions, nudgeObjects, nudgeObjectsInTime, pasteClipboard, removePathPoints, removeShapePoints, settleMorph, requestRename } from './project/operations'
 import { useClock } from './state/clock'
 import { dropTargets } from './state/dropTargets'
 import { getEditor } from './code/editor'
@@ -214,6 +214,10 @@ export function App() {
         case 'razor':
           e.preventDefault()
           store.setTimelineTool(store.timelineTool === 'razor' ? 'select' : 'razor')
+          return
+        case 'marker':
+          e.preventDefault()
+          addMarker(store.time)
           return
         case 'escape':
           if (tool !== 'select') setTool('select')

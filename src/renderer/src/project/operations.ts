@@ -3,14 +3,15 @@ import { findDependents, type Dependent } from '../model/dependents'
 import { appendStatement, blockText, formatNumber, formatValue, insertDeclaration, lineEdit, moveStatementEdits, removeProp, removeStatements, setProp, setPropFrom, setPropText, setTimeProp, type TextEdit } from '../model/edits'
 import { DEFAULT_EASE_FRACTION, namedEasings } from '../model/easing'
 import { isMember } from '../model/evaluate'
-import { memberRef, normalizeSelection } from '../model/groups'
-import { classes, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
+import { activeMembers, groupMembers, memberRef, normalizeSelection } from '../model/groups'
+import { attrSchema, classes, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
 import { absoluteAt, actionCourse, anchorTime, memberBox, pathCutAt, pathFrame, pathHolds, pathShift, pointsCenter, positionAt, progressAt, rawFromWorld, morphInForce, morphRunning, morphTargetSegs, shapeCurves, shapeOwnFromWorld, shapeOwnPoints, shapeSegsAt, travelFrame, type Point, type ShapePiece } from '../model/sample'
 import { anchorCurved, anchorKind, closePath, cornerAnchors, curveSegment, dragAnchorHandle, ellipsePathData, flattenPathData, formatCurves, hasPathData, moveAnchor, openPath, parsePathData, pathAnchors, pathDataBounds, polygonPathData, removeAnchor, scalePathData, segmentKind, serializePathData, smoothAnchors, smoothPathData, splitSegment, straightenAll, straightenAnchors, straightenSegment, translatePathData, type Anchor, type AnchorKind, type Seg } from '../model/pathData'
 import { insertPointsEdit, pointText, removePointEdit, setPointEdit, shapeLiteral, stringLiteral, type ShapeLiteral } from '../model/pathEdits'
 import { readSvg, scaleImported, type ImportedItem } from './svgImport'
 import { identifierEdits, nameProblem, renameMembers, replaceIdentifiers } from '../model/rename'
 import { currentWritten, definingAction, shownValue, valueAt, withWritten, writesFrom, writtenValues } from '../model/sample'
+import { begun, journeyOf, unitTurns, writtenSpan } from '../model/sample'
 import type { Action, ActionInfo, BlockInfo, ClassAction, PropInfo, Range, SceneModel, SceneObject } from '../model/types'
 import { useStore, type ActionRef, type Clip, type ClipAction, type ClipObject, type Pin, type SelectionState, type ObjectKind } from '../state/store'
 
@@ -1780,7 +1781,7 @@ export function setActionTiming(name: string, index: number, timing: { at?: numb
  * default share of the duration, and shrunk to fit when the two overlap.
  */
 function rampsOf(action: Action): { easeIn: number; easeOut: number } {
-  const duration = action.end - action.start
+  const duration = journeyOf(action)
   let easeIn = Math.max(0, action.timing.easeIn ?? duration * DEFAULT_EASE_FRACTION)
   let easeOut = Math.max(0, action.timing.easeOut ?? duration * DEFAULT_EASE_FRACTION)
   if (easeIn + easeOut > duration && easeIn + easeOut > 0) {
@@ -1798,7 +1799,7 @@ function easeCode(action: Action): string {
   if (typeof ease === 'string' && namedEasings[ease]) return `'${ease}'`
   if (typeof ease === 'function' && prop) return prop.raw
   const { easeIn, easeOut } = rampsOf(action)
-  return `Ease.ramps(${formatNumber(easeIn)}, ${formatNumber(easeOut)}, ${formatNumber(roundSeconds(action.end - action.start))})`
+  return `Ease.ramps(${formatNumber(easeIn)}, ${formatNumber(easeOut)}, ${formatNumber(roundSeconds(journeyOf(action)))})`
 }
 
 /** How a piece of a sliced animation eases (D264): as ramps, where those say the same, else as code. */
@@ -1813,15 +1814,17 @@ type EasePlan = { easeIn: number; easeOut: number } | { ease: string }
  * stop where the cut was, and the second on the part after it, or, when relative, on its share.
  */
 function easePlans(action: Action, at: number, functional: boolean): { first: EasePlan; second: EasePlan } {
-  const fraction = formatNumber((at - action.start) / (action.end - action.start))
+  const fraction = formatNumber((at - action.start) / journeyOf(action))
   const code = easeCode(action)
+  // A path keeps its whole line on both pieces, so each runs the stretch of the ease that is its own, the progress along the line carrying on.
+  if (action.verb === 'path') return { first: { ease: `Ease.along(${code}, 0, ${fraction})` }, second: { ease: `Ease.along(${code}, ${fraction}, 1)` } }
   if (functional) return { first: { ease: `Ease.share(${code}, 0, ${fraction})` }, second: { ease: action.timing.relative ? `Ease.share(${code}, ${fraction}, 1)` : `Ease.part(${code}, ${fraction}, 1)` } }
   const ease = action.timing.ease
   const plain = !(typeof ease === 'string' && namedEasings[ease]) && typeof ease !== 'function'
   if (!plain) return { first: { ease: `Ease.part(${code}, 0, ${fraction})` }, second: { ease: `Ease.part(${code}, ${fraction}, 1)` } }
   const { easeIn, easeOut } = rampsOf(action)
   const d1 = roundSeconds(at - action.start)
-  const d2 = roundSeconds(action.end - at)
+  const d2 = roundSeconds(action.start + journeyOf(action) - at)
   const first: EasePlan = d2 < easeOut - 1e-9 ? { ease: `Ease.part(${code}, 0, ${fraction})` } : { easeIn: Math.min(easeIn, d1), easeOut: 0 }
   const second: EasePlan = d1 < easeIn - 1e-9 ? { ease: `Ease.part(${code}, ${fraction}, 1)` } : { easeIn: 0, easeOut: Math.min(easeOut, d2) }
   return { first, second }
@@ -1836,6 +1839,12 @@ interface PieceEdits {
 
 function pieceEdits(): PieceEdits {
   return { remove: [], set: {}, setText: {} }
+}
+
+/** Nothing cut, and a word on why, shown where the app's notices show (D290). */
+function uncut(why: string): false {
+  useStore.getState().setNotice(why)
+  return false
 }
 
 function easeInto(piece: PieceEdits, plan: EasePlan): void {
@@ -1867,6 +1876,115 @@ function applyPieceEdits(name: string, index: number, piece: PieceEdits, extra: 
 }
 
 /**
+ * Cut an animation by character, word, or line between its units (D288): the units whose turns
+ * had begun by the cut stay in the first piece, which lasts until they are done; the rest go to
+ * a second piece on those units alone, written as a handle, `t.char(5, 6).fade({ ... })`,
+ * beginning where its first unit's turn began, so the two run as the whole did. The name stays
+ * on the first. With every unit begun, or none, nothing is cut.
+ */
+function sliceUnits(model: SceneModel, obj: SceneObject, name: string, index: number, action: Action, at: number): boolean {
+  const stmt = action.stmt
+  if (!stmt) return false
+  const turns = unitTurns(model, obj, action)
+  const kind = action.timing.by!
+  const firstUnits = turns.filter((t) => begun(t.begins, at))
+  const secondUnits = turns.filter((t) => !begun(t.begins, at))
+  if (firstUnits.length === 0 || secondUnits.length === 0) return uncut('Cut where some units have begun and the rest have not')
+  const first = pieceEdits()
+  const second = pieceEdits()
+  // The handle names the units, so a `by` in the block would only repeat it.
+  first.remove.push('by')
+  second.remove.push('by', 'delay')
+  second.set['at'] = roundSeconds(secondUnits[0]!.begins)
+  // An end written as a time is the whole's; the second piece takes the turn's length instead.
+  if (stmt.props.some((p) => p.key === 'until')) {
+    second.remove.push('until')
+    second.set['duration'] = roundSeconds(writtenSpan(model, obj, action))
+  }
+  const head = (units: { unit: number }[]) => (src: string, s: ActionInfo): TextEdit => {
+    const text = src.slice(s.range.from, s.propsOpen)
+    const object = Math.max(0, text.indexOf(`${name}.`))
+    // From the object's name through the verb's opening parenthesis, the block untouched.
+    const open = s.range.from + text.lastIndexOf('(') + 1
+    return { from: s.range.from + object, to: open, insert: `${name}.${kind}(${units.map((u) => u.unit).join(', ')}).${action.verb}(` }
+  }
+  const joined = gestureOpen()
+  if (!joined) beginGesture()
+  // The second piece is a copy of the whole, written right after it, without the name (D264); then each piece is given its units.
+  applyPieceEdits(name, index, first, (src, s) => {
+    const text = src.slice(s.range.from, s.propsOpen)
+    const object = Math.max(0, text.indexOf(`${name}.`))
+    return [{ from: s.range.to, to: s.range.to, insert: `\n\n${src.slice(s.range.from + object, s.range.to)}` }, head(firstUnits)(src, s)]
+  })
+  applyPieceEdits(name, index + 1, second, (src, s) => [head(secondUnits)(src, s)], actionSelected(name, index + 1))
+  if (!joined) endGesture()
+  return true
+}
+
+/**
+ * Cut a class animation at a time into two (D290): every member finds its own course, so both
+ * pieces keep the values as written, the first running its share of the ease and the second the
+ * part after, as a change that stays a function is cut; a class path keeps its line on both. The
+ * second piece is written right after the first, without the name. Members that begin at their
+ * own times are cut at the first's. Returns whether it was cut.
+ */
+export function sliceClassAction(id: number, time: number): boolean {
+  const { model, fps } = state()
+  const classAction = model?.classActions[id]
+  const sample = classAction ? activeMembers(classAction)[0] : undefined
+  if (!model || !classAction || !sample) return false
+  const stmt = classAction.stmt
+  if (!stmt) return uncut('This animation is code; cut it in the code')
+  const frame = frameSeconds(fps)
+  const at = roundSeconds(time)
+  const start = roundSeconds(sample.start)
+  const end = roundSeconds(sample.start + journeyOf(sample))
+  if (at > end - frame + 1e-9 && sample.timing.return !== undefined) return uncut('A hold or a return is not cut')
+  if (at < start + frame - 1e-9 || at > end - frame + 1e-9) return uncut('Cut inside the animation')
+  const first = pieceEdits()
+  const second = pieceEdits()
+  const withUntil = stmt.props.some((p) => p.key === 'until')
+  if (withUntil) first.set['until'] = at
+  else first.set['duration'] = roundSeconds(at - start)
+  second.set['at'] = at
+  second.remove.push('delay')
+  first.remove.push('hold', 'return')
+  if (!withUntil) second.set['duration'] = roundSeconds(end - at)
+  const plans = easePlans(sample, at, true)
+  easeInto(first, plans.first)
+  easeInto(second, plans.second)
+  const className = classAction.className
+  const ordinal = model.classActions.filter((c) => c.className === className).indexOf(classAction)
+  const joined = gestureOpen()
+  if (!joined) beginGesture()
+  applyClassPieceEdits(className, ordinal, first, (src, s) => {
+    const head = src.slice(s.range.from, s.propsOpen)
+    const object = Math.max(0, head.indexOf('all('))
+    return [{ from: s.range.to, to: s.range.to, insert: `\n\n${src.slice(s.range.from + object, s.range.to)}` }]
+  })
+  applyClassPieceEdits(className, ordinal + 1, second)
+  if (!joined) endGesture()
+  return true
+}
+
+/** As applyPieceEdits, for the class animation that is the `ordinal`th of its class in the file. */
+function applyClassPieceEdits(className: string, ordinal: number, piece: PieceEdits, extra: (source: string, stmt: ActionInfo) => TextEdit[] = () => []): void {
+  const fresh = (): { source: string; stmt: ActionInfo } | null => {
+    const { source, model } = state()
+    const stmt = model?.classActions.filter((c) => c.className === className)[ordinal]?.stmt
+    return stmt ? { source, stmt } : null
+  }
+  const a = fresh()
+  if (!a) return
+  const removals = [...piece.remove.map((key) => removeProp(a.source, a.stmt, key)), ...extra(a.source, a.stmt)].filter((e): e is TextEdit => !!e)
+  if (removals.length > 0) applyEdits(removals)
+  const b = fresh()
+  if (!b) return
+  const sets = [...Object.entries(piece.set).map(([key, value]) => setProp(b.source, b.stmt, key, value)), ...Object.entries(piece.setText).map(([key, text]) => setPropText(b.source, b.stmt, key, text))]
+  applyEdits(sets)
+}
+
+/**
  * Slice an animation at a time into two (D264), as the razor does: the first goes to the state
  * its course reaches there and holds it; the second, written right after it, continues from that
  * point to the end, and begins from the state the first leaves, as any animation begins. The
@@ -1883,24 +2001,29 @@ export function sliceAction(name: string, index: number, time: number): boolean 
   const { model, fps } = state()
   const obj = model?.objects.find((o) => o.name === name)
   const action = obj?.actions[index]
-  if (!model || !obj || !action?.stmt || action.classAction) return false
-  // An action by character, word, or line runs on each unit in turn: there is no one course to cut (D268).
-  if (action.timing.by !== undefined) return false
+  if (!model || !obj || !action) return false
+  // A class animation is cut as a class animation (D290).
+  if (action.classAction) return sliceClassAction(action.classAction.id, time)
+  if (!action.stmt) return uncut('This animation is code; cut it in the code')
   const stmt = action.stmt
   const frame = frameSeconds(fps)
   const at = roundSeconds(time)
+  // An action by character, word, or line runs on each unit in turn: it is cut between its units (D288).
+  if (action.timing.by !== undefined) return sliceUnits(model, obj, name, index, action, at)
   const start = roundSeconds(action.start)
-  const end = roundSeconds(action.end)
-  if (at < start + frame - 1e-9 || at > end - frame + 1e-9) return false
+  // The cut falls in the journey; a hold or a return is not cut, and the first piece has none (D285).
+  const end = roundSeconds(action.start + journeyOf(action))
+  if (at > end - frame + 1e-9 && action.timing.return !== undefined) return uncut('A hold or a return is not cut')
+  if (at < start + frame - 1e-9 || at > end - frame + 1e-9) return uncut('Cut inside the animation')
   const functional = Object.values(action.changes).some((v) => typeof v === 'function')
   const first = pieceEdits()
   const second = pieceEdits()
-  // The pieces' values.
+  // The pieces' values. A path from a formula keeps its whole line on both pieces, as a function does.
   if (action.verb === 'path') {
-    if (functional || !slicePathInto(obj, action, index, at, first, second)) return false
+    if (!functional && !slicePathInto(obj, action, index, at, first, second)) return uncut('This path could not be cut')
   } else if (action.verb === 'morph' && !functional) {
     const segs = shapeSegsAt(model, obj, at)
-    if (!segs) return false
+    if (!segs) return uncut('This shape draws nothing here')
     first.set['to'] = serializePathData(segs)
   } else if (!functional) {
     for (const [attr, raw] of Object.entries(action.changes)) {
@@ -1916,6 +2039,7 @@ export function sliceAction(name: string, index: number, time: number): boolean 
   else first.set['duration'] = roundSeconds(at - start)
   second.set['at'] = at
   second.remove.push('delay')
+  first.remove.push('hold', 'return')
   if (!stmt.props.some((p) => p.key === 'until')) second.set['duration'] = roundSeconds(end - at)
   const plans = easePlans(action, at, functional)
   easeInto(first, plans.first)
@@ -2041,11 +2165,13 @@ export function retimeActions(refs: ActionRef[], change: { shift?: number; grow?
     const delay = action.timing.delay ?? 0
     const origin = from?.[`${ref.object}:${ref.index}`] ?? { start: action.start, end: action.end }
     const duration = origin.end - origin.start
+    // What `duration` stands for is the journey of one unit: the gaps between units, the hold, and the return are the model's to add (D268, D285).
+    const extra = roundSeconds(action.end - action.start - writtenSpan(model, action.object, action))
     if (change.trimStart !== undefined) {
       // The end stays put: the duration changes first, and the start follows it, so hitting the
       // one-frame floor never nudges the end.
-      const newDuration = Math.max(minimum, duration - change.trimStart)
-      if (!untilProp) edits.push(timeProp(source, stmt, 'duration', roundSeconds(newDuration)))
+      const newDuration = Math.max(minimum + extra, duration - change.trimStart)
+      if (!untilProp) edits.push(timeProp(source, stmt, 'duration', roundSeconds(newDuration - extra)))
       if (!atLocked) edits.push(timeProp(source, stmt, 'at', roundSeconds(Math.max(0, origin.end - newDuration - delay))))
       if (!atLocked && !untilProp) span(action, Math.max(0, origin.end - newDuration), origin.end)
       continue
@@ -2053,9 +2179,9 @@ export function retimeActions(refs: ActionRef[], change: { shift?: number; grow?
     const move = change.shift ?? 0
     if ((move !== 0 || from) && !atLocked) edits.push(timeProp(source, stmt, 'at', roundSeconds(Math.max(0, origin.start + move - delay))))
     const grow = change.grow ?? 0
-    if ((grow !== 0 || (from && change.grow !== undefined)) && !untilProp) edits.push(timeProp(source, stmt, 'duration', roundSeconds(Math.max(minimum, duration + grow))))
+    if ((grow !== 0 || (from && change.grow !== undefined)) && !untilProp) edits.push(timeProp(source, stmt, 'duration', roundSeconds(Math.max(minimum, duration + grow - extra))))
     const newStart = atLocked ? origin.start : Math.max(0, origin.start + move)
-    span(action, newStart, newStart + (untilProp ? duration : Math.max(minimum, duration + grow)))
+    span(action, newStart, newStart + (untilProp ? duration : Math.max(minimum + extra, duration + grow)))
   }
   for (const [obj, s] of spans) {
     const life = from?.[`${obj.name}:life`]
@@ -2088,14 +2214,14 @@ export interface LifetimeOrigin {
  * follow on their own, and class actions stay with their class. With `edge: 'start'` the end stays
  * where it is: the start edge is dragged and the actions keep their place against it.
  */
-export function placeObject(name: string, at: number, edge: 'all' | 'start' = 'all', from?: LifetimeOrigin): void {
-  const { source, model, fps } = state()
+export function placeObject(name: string, at: number, from?: LifetimeOrigin): void {
+  const { source, model } = state()
   const obj = model?.objects.find((o) => o.name === name)
   if (!model || !obj?.decl || obj.className === GROUP) return
   const origin: LifetimeOrigin = from ?? { at: obj.at, until: obj.until, actions: {} }
   const target = Math.max(0, roundSeconds(at))
   const shift = target - origin.at
-  const until = origin.until === null ? null : edge === 'all' ? origin.until + shift : Math.max(target + frameSeconds(fps), origin.until)
+  const until = origin.until === null ? null : origin.until + shift
   const edits: (TextEdit | null)[] = [target <= 0 ? removeProp(source, obj.decl, 'at') : timeProp(source, obj.decl, 'at', target)]
   if (until !== origin.until || from) edits.push(until === null ? removeProp(source, obj.decl, 'until') : timeProp(source, obj.decl, 'until', roundSeconds(until)))
   obj.actions.forEach((action, index) => {
@@ -2707,7 +2833,7 @@ export function duplicateObject(name: string): string | null {
   return duplicateObjects([name])[0] ?? null
 }
 
-type RenameTarget = { object: string } | { object: string; index: number } | { classAction: number }
+type RenameTarget = { object: string } | { object: string; index: number } | { classAction: number } | { marker: string }
 
 /** Ask for a new name for an object, an action, or a class action, naming it when it has no name yet. */
 export function requestRename(target: RenameTarget): void {
@@ -2716,7 +2842,10 @@ export function requestRename(target: RenameTarget): void {
   let current: string
   let title: string
   let verb: string | undefined
-  if ('classAction' in target) {
+  if ('marker' in target) {
+    current = target.marker
+    title = `Rename ${current}`
+  } else if ('classAction' in target) {
     const classAction = model.classActions[target.classAction]
     if (!classAction?.stmt) return
     current = classAction.name ?? ''
@@ -2750,6 +2879,11 @@ export function requestRename(target: RenameTarget): void {
 function applyRename(target: RenameTarget, newName: string): void {
   const { source, model } = state()
   if (!model) return
+  // A marker is a name in the code: every reference to it is renamed too (D296).
+  if ('marker' in target) {
+    applyEdits(identifierEdits(source, { [target.marker]: newName }))
+    return
+  }
   if ('classAction' in target) {
     const classAction = model.classActions[target.classAction]
     if (!classAction?.stmt) return
@@ -2907,4 +3041,215 @@ export function selectClassAction(classAction: ClassAction): void {
 /** The current action, for callers that need to know whether it is a class action. */
 export function actionAt(name: string, index: number): Action | null {
   return findObject(name)?.actions[index] ?? null
+}
+
+/**
+ * Paint an object (D293): its fill becomes the color, written to whatever gives the fill at the
+ * playhead, the color change that has the say or else the declaration; with `animate`, a color
+ * change to it from the playhead, half a second long. A group's members are painted.
+ */
+export function paintFill(name: string, color: string, time: number): void {
+  const { model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj) return
+  if (obj.className === GROUP) {
+    beginGesture()
+    try {
+      for (const member of groupMembers(model, name)) paintFill(member, color, time)
+    } finally {
+      endGesture()
+    }
+    return
+  }
+  if (!obj.decl || !attrSchema(obj.className, 'fill')) return
+  const t = roundSeconds(time)
+  const action = definingAction(obj, 'fill', t)
+  if (action?.stmt && !action.classAction) setActionProp({ object: name, index: obj.actions.indexOf(action) }, 'fill', color)
+  else setObjectProp(name, 'fill', color)
+}
+
+/**
+ * A color change to the color, made as any Shift-made animation is (D103, D294): pinned at
+ * `when` for `length` seconds, selected; a group's members each get one. Returns the end.
+ */
+export function beginFill(name: string, color: string, pin: Pin, when: number, length = 1): number | null {
+  const { model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj) return null
+  if (obj.className === GROUP) {
+    let end: number | null = null
+    beginGesture()
+    try {
+      for (const member of groupMembers(model, name)) end = beginFill(member, color, pin, when, length) ?? end
+    } finally {
+      endGesture()
+    }
+    return end
+  }
+  if (!obj.decl || !attrSchema(obj.className, 'fill')) return null
+  return appendTimed(name, 'to', { fill: color }, pin, when, length)
+}
+
+/** A marker at a time (D296): `mark1 = marker(2.5)` at the end of the file, a plain number named for the timeline and the code. Returns its name. */
+export function addMarker(time: number): string | null {
+  const { source, model } = state()
+  if (!model) return null
+  const name = uniqueName('mark')
+  applyEdits([appendStatement(source, `${name} = marker(${formatNumber(Math.max(0, roundSeconds(time)))})`)])
+  return name
+}
+
+/** A marker moved to a time: its seconds rewritten, as frames when written as frames (D276). */
+export function setMarkerTime(name: string, time: number): void {
+  const { source, model, fps } = state()
+  const marker = model?.markers.find((m) => m.name === name)
+  if (!marker) return
+  const current = source.slice(marker.stmt.arg.from, marker.stmt.arg.to)
+  const t = Math.max(0, roundSeconds(time))
+  const text = /^frames\(/.test(current) ? `frames(${Math.round(t * fps)})` : formatNumber(t)
+  applyEdits([{ from: marker.stmt.arg.from, to: marker.stmt.arg.to, insert: text }])
+}
+
+/** A marker's statement taken out of the file (D296). */
+export function deleteMarker(name: string): void {
+  const { source, model } = state()
+  const marker = model?.markers.find((m) => m.name === name)
+  if (!marker) return
+  applyEdits(removeStatements(source, [marker.stmt.range]))
+}
+
+/** Paint a Shape's outline (D299): its stroke becomes the color, written as a fill is (D293); an outline of no width gets the bar's width. */
+export function paintStroke(name: string, color: string, width: number, time: number): void {
+  const { model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl) return
+  if (!attrSchema(obj.className, 'stroke')) {
+    useStore.getState().setNotice('Only a Shape has an outline; Convert to shape first')
+    return
+  }
+  const t = roundSeconds(time)
+  beginGesture()
+  try {
+    const action = definingAction(obj, 'stroke', t)
+    if (action?.stmt && !action.classAction) setActionProp({ object: name, index: obj.actions.indexOf(action) }, 'stroke', color)
+    else setObjectProp(name, 'stroke', color)
+    const current = valueAt(model, obj, 'strokeWidth', t)
+    if (typeof current !== 'number' || current <= 0) setObjectProp(name, 'strokeWidth', Math.max(1, Math.round(width)))
+  } finally {
+    endGesture()
+  }
+}
+
+/** An outline change to the color, made as any Shift-made animation is (D103, D299); an outline of no width gets the bar's width first. Returns the end. */
+export function beginOutline(name: string, color: string, width: number, pin: Pin, when: number, length = 1): number | null {
+  const { model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl) return null
+  if (!attrSchema(obj.className, 'stroke')) {
+    useStore.getState().setNotice('Only a Shape has an outline; Convert to shape first')
+    return null
+  }
+  const current = valueAt(model, obj, 'strokeWidth', roundSeconds(when))
+  beginGesture()
+  try {
+    if (typeof current !== 'number' || current <= 0) setObjectProp(name, 'strokeWidth', Math.max(1, Math.round(width)))
+    return appendTimed(name, 'to', { stroke: color }, pin, when, length)
+  } finally {
+    endGesture()
+  }
+}
+
+/**
+ * The motion sketched for an object (D297): a path of one point where the object is, as the Draw
+ * tool begins one (D194), then the points as recorded, in the object's own space, evenly spaced
+ * in time, from `at` for `duration` seconds, straight through time. Returns the action's index.
+ */
+export function sketchPath(name: string, worlds: Point[], at: number, duration: number): number | null {
+  const { model, fps } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl || worlds.length < 2) return null
+  const start = roundSeconds(at)
+  const length = Math.max(frameSeconds(fps), roundSeconds(duration))
+  beginGesture()
+  try {
+    const index = addPath(name, start)
+    if (index === null) return null
+    const ref = { object: name, index }
+    insertPathPoints(ref, 1, worlds.slice(1))
+    setActionProp(ref, 'duration', length)
+    setActionProp(ref, 'timed', true)
+    setActionProp(ref, 'ease', 'linear')
+    return index
+  } finally {
+    endGesture()
+  }
+}
+
+/** A line sketched with the pencil (D297): a Shape through the points, simplified and smoothed, in the bar's stroke; with `writeOn`, drawn on from `at` over `duration` seconds (D298). Returns its name. */
+export function sketchLine(worlds: Point[], stroke: string, width: number, at: number, duration: number, writeOn: boolean): string | null {
+  const { model, fps } = state()
+  if (!model || worlds.length < 2) return null
+  const simplified = simplifyPoints(worlds, 2)
+  if (simplified.length < 2) return null
+  let left = Infinity
+  let right = -Infinity
+  let bottom = Infinity
+  let top = -Infinity
+  for (const p of simplified) {
+    left = Math.min(left, p.x)
+    right = Math.max(right, p.x)
+    bottom = Math.min(bottom, p.y)
+    top = Math.max(top, p.y)
+  }
+  const cx = Math.round((left + right) / 2)
+  const cy = Math.round((bottom + top) / 2)
+  const name = uniqueName('line')
+  const start = roundSeconds(at)
+  const span = Math.max(frameSeconds(fps), roundSeconds(duration))
+  const attrs: Record<string, AttrValue> = { x: cx, y: cy, points: simplified.map((p) => [Math.round(p.x - cx), Math.round(p.y - cy)]), closed: false, smooth: true, fill: 'none', stroke, strokeWidth: Math.max(1, Math.round(width)) }
+  if (start > 0) attrs['at'] = start
+  const life = useStore.getState().prefs.objectLength
+  if (life !== null) attrs['until'] = roundSeconds(start + Math.max(life, writeOn ? span : 0))
+  beginGesture()
+  try {
+    applyEdits([insertDeclaration(model.lastDeclEnd, blockText(`${name} = Shape`, attrs))], objectsSelected([name]))
+    // Written on: the line's drawn share from nothing to all over the sketch's own length (D298).
+    if (writeOn) applyEdits([appendStatement(state().source, `${name}.to({\n  drawn: [0, 1],\n  at: ${formatNumber(start)},\n  duration: ${formatNumber(span)},\n  ease: 'linear',\n})`)])
+  } finally {
+    endGesture()
+  }
+  foldShapes()
+  return name
+}
+
+/** Fewer points for the same line (D297): those a stroke's path would miss by more than the tolerance are kept, the rest dropped. */
+export function simplifyPoints(points: Point[], tolerance: number): Point[] {
+  if (points.length < 3) return points
+  const keep = new Array<boolean>(points.length).fill(false)
+  keep[0] = true
+  keep[points.length - 1] = true
+  const stack: [number, number][] = [[0, points.length - 1]]
+  while (stack.length > 0) {
+    const [a, b] = stack.pop()!
+    const pa = points[a]!
+    const pb = points[b]!
+    const dx = pb.x - pa.x
+    const dy = pb.y - pa.y
+    const length = Math.hypot(dx, dy)
+    let far = -1
+    let farDistance = tolerance
+    for (let i = a + 1; i < b; i++) {
+      const p = points[i]!
+      const d = length > 1e-9 ? Math.abs(dx * (p.y - pa.y) - dy * (p.x - pa.x)) / length : Math.hypot(p.x - pa.x, p.y - pa.y)
+      if (d > farDistance) {
+        far = i
+        farDistance = d
+      }
+    }
+    if (far >= 0) {
+      keep[far] = true
+      stack.push([a, far], [far, b])
+    }
+  }
+  return points.filter((_, i) => keep[i])
 }

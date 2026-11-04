@@ -74,15 +74,17 @@ export function textLines(text: string): string[] {
 }
 
 /** When each unit begins, from the action's start (D268, D269): `stagger` seconds after the one before, or, for a function of the index, the gap it gives before that unit; the first begins at once. */
-export function unitBegins(stagger: number | ((index: number) => number) | undefined, count: number): number[] {
+export function unitBegins(stagger: number | ((index: number) => number) | undefined, units: number | number[]): number[] {
+  // The units by their index in the text, so a function of the index sees the unit's own, and a run of chosen units keeps its gaps (D286).
+  const indexes = typeof units === 'number' ? Array.from({ length: units }, (_, i) => i) : units
   const begins: number[] = []
   let at = 0
-  for (let k = 0; k < count; k++) {
+  for (let k = 0; k < indexes.length; k++) {
     if (k > 0) {
       let gap = DEFAULT_STAGGER
       if (typeof stagger === 'function') {
         try {
-          gap = Number(stagger(k))
+          gap = Number(stagger(indexes[k]!))
         } catch {
           gap = DEFAULT_STAGGER
         }
@@ -99,7 +101,8 @@ export function unitCount(text: string, kind: UnitKind): number {
   const lines = textLines(text)
   if (kind === 'line') return lines.length
   if (kind === 'word') return lines.reduce((n, line) => n + line.split(/\s+/).filter((w) => w.length > 0).length, 0)
-  return lines.reduce((n, line) => n + Array.from(line).filter((c) => !/\s/.test(c)).length, 0)
+  // Every character counts, spaces and the breaks between lines too (D289), so the count is the text's own.
+  return lines.reduce((n, line) => n + Array.from(line).length, 0) + Math.max(0, lines.length - 1)
 }
 
 const layouts = new Map<string, TextLayout>()
@@ -171,11 +174,12 @@ export function layoutText(style: TextStyle, measure: Measurer): TextLayout {
         units.word.push(unit(text, li, word, line.left + advance[end]! - w, line.baseline, spaced(w)))
       }
       inWord = !space
-      if (!space) {
-        const w = own(ch)
-        units.char.push(unit(ch, li, word, line.left + advance[ci + 1]! - w, line.baseline, spaced(w)))
-      }
+      // Every character is a unit, a space too (D289), so a character's index is its index in the text; a space belongs to no word.
+      const w = own(ch)
+      units.char.push(unit(ch, li, space ? -1 : word, line.left + advance[ci + 1]! - w, line.baseline, spaced(w)))
     })
+    // The break after the line is a character of the text as well (D289): a unit of no width at the line's end.
+    if (li < texts.length - 1) units.char.push(unit('\n', li, -1, line.left + line.width, line.baseline, 0))
   })
   return { style, width, height, ascent, descent, lines, units }
 }
@@ -217,6 +221,9 @@ export function drawText(ctx: CanvasRenderingContext2D, layout: TextLayout, fill
   layout.units.char.forEach((unit, i) => {
     const s = states[i]
     if (!s || s.opacity <= 0.0005 || s.scale === 0) return
+    // A character shown in place of its own sits centered in its slot (D269); a blank draws nothing.
+    const shown = s.text ?? unit.text
+    if (/^\s*$/.test(shown)) return
     // The character's center, then its state about that center; its own offset goes up for a positive dy.
     const cx = ox + unit.left + unit.width / 2 + s.dx
     const cy = oy + unit.baseline + (descent - ascent) / 2 - s.dy
@@ -226,8 +233,6 @@ export function drawText(ctx: CanvasRenderingContext2D, layout: TextLayout, fill
     if (s.scale !== 1) ctx.scale(s.scale, s.scale)
     ctx.globalAlpha = Math.max(0, Math.min(1, s.opacity))
     ctx.fillStyle = s.fill ?? fill
-    // A character shown in place of its own sits centered in its slot (D269).
-    const shown = s.text ?? unit.text
     const width = shown === unit.text ? unit.width : ctx.measureText(shown).width
     ctx.fillText(shown, -width / 2, (ascent - descent) / 2)
     ctx.restore()
@@ -236,13 +241,25 @@ export function drawText(ctx: CanvasRenderingContext2D, layout: TextLayout, fill
 }
 
 /** How far the characters, in their states, reach beyond the block on each side, in world pixels: what a canvas must add around the block to hold them. */
+/** Whether two sets of states draw the same: both absent, or alike character by character. */
+export function sameUnitStates(a: UnitState[] | null, b: UnitState[] | null): boolean {
+  if (a === b) return true
+  if (!a || !b || a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const p = a[i]!
+    const q = b[i]!
+    if (p.dx !== q.dx || p.dy !== q.dy || p.rotation !== q.rotation || p.scale !== q.scale || p.opacity !== q.opacity || p.fill !== q.fill || p.text !== q.text) return false
+  }
+  return true
+}
+
 export function unitOverflow(layout: TextLayout, states: UnitState[]): { x: number; y: number } {
   let x = 0
   let y = 0
   const { ascent, descent, width, height } = layout
   layout.units.char.forEach((unit, i) => {
     const s = states[i]
-    if (!s || s.opacity <= 0.0005) return
+    if (!s || s.opacity <= 0.0005 || /^\s*$/.test(s.text ?? unit.text)) return
     const cx = unit.left + unit.width / 2 + s.dx
     const cy = unit.baseline + (descent - ascent) / 2 - s.dy
     // The turned and scaled box of the character, by its half diagonal.

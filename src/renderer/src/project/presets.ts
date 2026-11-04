@@ -105,7 +105,7 @@ export const ANIMATION_PRESETS: readonly AnimationPreset[] = [
   { id: 'linesIn', label: 'Lines in', title: 'Each line slides in from the left as it fades in, 0.15 s apart', verb: 'to', duration: 0.5, place: 'start', family: 'Text' },
   { id: 'fadeOutByWord', label: 'Fade out by word', title: 'The words fade out one after another over the last moments', verb: 'fade', duration: 0.3, place: 'end', family: 'Text' },
   { id: 'codeTyping', label: 'Code typing', title: 'The characters are typed in, the gaps between them uneven', verb: 'fade', duration: 0.02, place: 'start', family: 'Text' },
-  { id: 'enchanted', label: 'Enchanted', title: 'Every letter cycles through the rainbow and wiggles, in and out over 4 s', verb: 'to', duration: 4, place: 'start', family: 'Text' },
+  { id: 'enchanted', label: 'Enchanted', title: 'Every letter its own hue, turning once in 8 s, and a wiggle, for 4 s; then back as it was', verb: 'to', duration: 4, place: 'start', family: 'Text' },
   { id: 'slotMachine', label: 'Slot machine', title: 'Every character spins from the start and lands on its own, the first soon, the last after 2 s more', verb: 'to', duration: 3, place: 'start', family: 'Text' },
   // Miscellaneous (D272): for any object.
   {
@@ -124,7 +124,7 @@ export const ANIMATION_PRESETS: readonly AnimationPreset[] = [
       { id: 'blue', label: 'blue' },
       { id: 'purple', label: 'purple' },
       { id: 'white', label: 'white' },
-      { id: 'rainbow', label: 'rainbow, turning' },
+      { id: 'rainbow', label: 'rainbow, turning once in 5 s' },
     ],
   },
   // Each under its verb's family (D278).
@@ -200,18 +200,18 @@ const WRITERS: Record<string, (c: Context, variant: string | undefined, fps: num
   linesIn: (c) => byUnit(c, 'to', ['opacity: [0, 1]', 'x: [-120, 0]'], 'line', 0.15, 0.5, ['easeIn: 0']),
   fadeOutByWord: (c) => byUnit(c, 'fade', ['opacity: 0'], 'word', 0.06, 0.3, []),
   // Typed in with uneven gaps: the stagger a function of the character's index (D269, D272).
-  codeTyping: (c) => byUnit(c, 'fade', ['opacity: [0, 1]'], 'char', '(i) => 0.04 + ((i * 7) % 5) / 100', 0.02, []),
-  // Each letter its own hue cycling at a rate of its own, and a wiggle, from the seconds and the index; the ramps bring it in and out, so the text ends as it began (D277, D278).
-  enchanted: (c) => byUnit(c, 'to', ['fill: (p, i, c, t, speed = 0.5) => Color.hue(t * speed + i / 8)', 'y: (p, i, c, t) => Math.sin(t * 6 + i) * 4'], 'char', 0, 4, []),
+  codeTyping: (c) => byUnit(c, 'fade', ['opacity: [0, 1]'], 'char', '(index) => 0.04 + ((index * 7) % 5) / 100', 0.02, []),
+  // Each letter its own hue, the wheel turned once every `cycle` seconds, and a wiggle, eased in by the ramps; the return takes it back to the text as it was (D277, D278, D285). Written with its parameters named, so the line reads (D281).
+  enchanted: (c) => byUnit(c, 'to', ['fill: (progress, index, letter, seconds, cycle = 8) => Color.hue(seconds / cycle + index / 12)', 'y: (progress, index, letter, seconds) => Math.sin(seconds * 6 + index) * 4'], 'char', 0, 4, ['return: 0.5']),
   // Every character spins from the start and lands on its own, the first soon, the last after `settle` seconds more (D278).
-  slotMachine: (c) => byUnit(c, 'to', ['text: (p, i, c, t, n, settle = 2) => (t < 0.4 + (i / n) * settle ? Text.scramble(i, t) : c)'], 'char', 0, 3, ["ease: 'linear'"]),
-  // Miscellaneous (D272): a color, or the rainbow turning at a rate of its own (D278).
+  slotMachine: (c) => byUnit(c, 'to', ["text: (progress, index, letter, seconds, count, settle = 2) => (letter !== ' ' && seconds < 0.4 + (index / count) * settle ? Text.scramble(index, seconds) : letter)"], 'char', 0, 3, ["ease: 'linear'"]),
+  // Miscellaneous (D272): a color, or the rainbow turned once every `cycle` seconds, the object its own color again after its return (D278, D285).
   colorChange: (c, variant) =>
     variant === 'rainbow'
-      ? { text: statement(c.name, c.object, 'to', ['fill: (p, t, speed = 0.5) => Color.hue(t * speed)', `at: ${f(c.at)}`, 'duration: 4', "ease: 'linear'"]), start: c.at, end: c.at + 4 }
+      ? { text: statement(c.name, c.object, 'to', ['fill: (progress, seconds, cycle = 5) => Color.hue(seconds / cycle)', `at: ${f(c.at)}`, 'duration: 4', "ease: 'linear'", 'return: 0.5']), start: c.at, end: c.at + 4.5 }
       : { text: statement(c.name, c.object, 'to', [`fill: '${COLORS[variant ?? 'red'] ?? COLORS['red']}'`, `at: ${f(c.at)}`, 'duration: 0.5']), start: c.at, end: c.at + 0.5 },
-  shake: (c) => ({ text: statement(c.name, c.object, 'move', ['x: (p) => Math.sin(p * 24) * 12 * (1 - p)', 'relative: true', `at: ${f(c.at)}`, 'duration: 0.6', "ease: 'linear'"]), start: c.at, end: c.at + 0.6 }),
-  blink: (c) => ({ text: statement(c.name, c.object, 'fade', ['opacity: (p) => (Math.floor(p * 6) % 2 === 0 ? 0 : 1)', `at: ${f(c.at)}`, 'duration: 0.6', "ease: 'linear'"]), start: c.at, end: c.at + 0.6 }),
+  shake: (c) => ({ text: statement(c.name, c.object, 'move', ['x: (progress) => Math.sin(progress * 24) * 12 * (1 - progress)', 'relative: true', `at: ${f(c.at)}`, 'duration: 0.6', "ease: 'linear'"]), start: c.at, end: c.at + 0.6 }),
+  blink: (c) => ({ text: statement(c.name, c.object, 'fade', ['opacity: (progress) => (Math.floor(progress * 6) % 2 === 0 ? 0 : 1)', `at: ${f(c.at)}`, 'duration: 0.6', "ease: 'linear'", 'return: 0']), start: c.at, end: c.at + 0.6 }),
   // A relative scale adds to the factor, as the pulse does: a half more, or a half less.
   grow: (c) => ({ text: statement(c.name, c.object, 'resize', ['scale: 0.5', 'relative: true', `at: ${f(c.at)}`, 'duration: 0.5']), start: c.at, end: c.at + 0.5 }),
   shrink: (c) => ({ text: statement(c.name, c.object, 'resize', ['scale: -0.5', 'relative: true', `at: ${f(c.at)}`, 'duration: 0.5']), start: c.at, end: c.at + 0.5 }),

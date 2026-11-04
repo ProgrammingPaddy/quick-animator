@@ -178,6 +178,13 @@ in the Shape tool, or with the resize handles in Select, writes a morph whose ta
 outline as dragged. A target written as a word or as points becomes curves when a point of it
 is dragged.
 
+A marker names a moment: `intro = marker(2)` is the number 2, so `at: intro` reads it, and the
+timeline shows it on the ruler, where it is dragged, renamed, and snapped to. M writes one at
+the playhead.
+
+A Shape's `drawn` is how much of its line is drawn from its start, 0 to 1, 1 unless written;
+the stroke stops there and the fill is whole. `drawn: [0, 1]` writes a line on.
+
 ## Lifetime and visibility
 
 An object exists from `at` until `until`, both in seconds or time references, and nowhere else:
@@ -236,8 +243,10 @@ Timing keys, allowed in every action block:
 - `delay`: seconds added to the start, whatever `at` is.
 - `duration`: seconds. Omitted: 1.
 - `until`: an end time or time reference, instead of `duration`.
+- `hold`: seconds the change is held once reached, before the return; nothing without `return`.
+- `return`: seconds over which the animation goes back to what it found, after its journey and its hold; written, the change does not last, and `0` snaps back. See below.
 - `easeIn`, `easeOut`: seconds of easing at each end. Omitted: 30% of the duration each.
-- `ease`: `'linear'`, `'bounce'` (bounces at the end), `'back'` (overshoots at the end), `'elastic'` (springs at the end), or `'snap'` (fast start, settles); or a function of the progress, `(p) => p * p`, giving the eased progress, 0 to 1; or one of the `Ease` curves: `Ease.ramps(easeIn, easeOut, duration)`, the ramps as a curve; `Ease.part(ease, from, to)`, the part of a curve between two points of its progress, stretched to a whole curve; `Ease.share(ease, from, to)`, the share of the change the curve covers there, which stops part of the way; `ease` a name, a function, or another `Ease` curve. These are what a sliced animation runs on, and go beyond 0 and 1 where `'bounce'` or `'back'` does; a function of your own is kept within 0 and 1. Replaces `easeIn` and `easeOut`.
+- `ease`: `'linear'`, `'bounce'` (bounces at the end), `'back'` (overshoots at the end), `'elastic'` (springs at the end), or `'snap'` (fast start, settles); or a function of the progress, `(p) => p * p`, giving the eased progress, 0 to 1; or one of the `Ease` curves: `Ease.ramps(easeIn, easeOut, duration)`, the ramps as a curve; `Ease.part(ease, from, to)`, the part of a curve between two points of its progress, stretched to a whole curve; `Ease.share(ease, from, to)`, the share of the change the curve covers there, which stops part of the way; `Ease.along(ease, from, to)`, the stretch of the curve as it is there, which a piece of a cut path runs on; `ease` a name, a function, or another `Ease` curve. These are what a sliced animation runs on, and go beyond 0 and 1 where `'bounce'` or `'back'` does; a function of your own is kept within 0 and 1. Replaces `easeIn` and `easeOut`.
 - `relative`: `true` makes the values changes from where the object is when the action starts. Omitted: `false`.
 - `overrides`: the name of a class action this action replaces for its object. See Classes.
 
@@ -248,15 +257,29 @@ same moment both begin from what came before them. Overlapping actions stack as 
 top one running has the say, through its last frame, and the one below shows through from its
 own course when the top one ends.
 
-A value written as a function with a parameter is a function of the progress: `x: (p, t) =>
-Math.sin(t * 40) * 12` is called with the plain progress, 0 to 1 with nothing eased, and the
-seconds since the action began, and what it gives is the value, relative or not, so a shake or
-a blink is one line; a plain number at the top of the function is a rate of its own, `fill:
-(p, t, speed = 0.5) => Color.hue(t * speed)`. The ease is the function's envelope: `'linear'`,
-or ramps of nothing, apply it in full throughout; ramps bring it in over `easeIn` and out over
-`easeOut`, the speed the ramps give, so the thing ends as it began; a named curve weighs it by
-what the curve gives. A function without a parameter, `() => other.x`, stays a link, sampled
-as a value and interpolated to.
+Every animation keeps what it reached, a function's last value too, until another animation
+has its say. Written with `return`, it is an effect: its journey runs on its ease as any
+animation's does, it holds what it reached for `hold` seconds, and over `return` seconds it
+goes back to what the rest of the animations show at that moment, on the ease's own curve, the
+ramps smooth by default; after that it is gone, as if it had never run, and a later animation
+begins from what it found. So `box.to({ fill: '#ff0000', duration: 0.2, hold: 1, return: 0.2
+})` flashes the box red for a second, and `box.resize({ scale: 1.5, duration: 0.3, return:
+0.3 })` is a pulse. A relative change fades out and adds nothing after; a path goes back to
+where the object was; a morph goes back to the outline the rest make; a unit's turn holds and
+returns as an action does. The action's end takes the hold and the return in.
+
+A value written as a function with a parameter is a function of the progress: `x: (progress,
+seconds) => Math.sin(seconds * 40) * 12` is called with the plain progress, 0 to 1 with nothing
+eased, and the seconds since the action began, and what it gives is the value, relative or not,
+so a shake or a blink is one line. The parameters are positional and named as you like, `(p,
+t)` as well as `(progress, seconds)`; a parameter with a default after them is a rate of its
+own, `fill: (progress, seconds, cycle = 5) => Color.hue(seconds / cycle)`. The ease is the
+function's envelope, coming in: `'linear'`, or a ramp of nothing, applies it in full from the
+start; ramps bring it in over `easeIn`, smoothly; a named curve weighs it by what the curve
+gives. Like any animation it keeps what it last gave unless written with `return`, which takes
+it back over those seconds while the seconds in the function keep counting, so a rainbow turns
+as it fades. A function without a parameter, `() => other.x`, stays a link, sampled as a value
+and interpolated to.
 
 Any time can be written as frames at the project's rate: `at: frames(15)`, `duration:
 frames(5)`, `until: frames(240)`; it is the same as the seconds, and stays frames when the GUI
@@ -275,6 +298,15 @@ is then, a smooth one as the curves it is; a morph's first piece gets the outlin
 target. The name stays on the first piece, so `name.start` still names the start and what
 followed `name.end` now follows the cut; a linked end becomes the cut on the first piece. A
 class action is not cut, nor a path from a formula.
+
+An animation by character, word, or line is cut between its units: the units whose turns had
+begun by the cut stay in the first piece, which lasts until they are done, and the rest become
+a second piece on those units alone, `t.char(3, 4, 5).fade({ ... })`, beginning where its
+first unit's turn began, so the two run as the whole did. A hold or a return is never cut: a
+cut in the journey leaves the first piece without them and the second with them. A class
+animation is cut as one, from its own clip or a member's: both pieces keep the values and run
+their shares of the ease, so every member finds its own course. A path from a formula keeps its
+line on both pieces, each on `Ease.along`. What is not cut says why.
 
 A number can be written as a range, `[from, to]`: the one exception, which sets the state at the
 first frame itself. The action begins from the first number
@@ -398,17 +430,30 @@ first's range start holds, so `opacity: [0, 1]` keeps every character unseen unt
 while a later fade to 0 runs the text out from what it was. A word's or a line's action goes to
 each of its characters. A value written as a function with a parameter is a function of the
 unit's turn: it is called with the plain progress of the turn, the unit's index, the unit's own
-text, the seconds since the turn began, and how many units there are, `(p, i, c, t, n) =>
-...`, and what it returns is the value, the ease its envelope as on an object, so `fill: (p, i,
-c, t, speed = 0.5) => Color.hue(t * speed + i / 8)` colors every letter its own hue turning at
-`speed` and `text: (p, i, c, t, n, settle = 2) => (t < 0.4 + (i / n) * settle ?
-Text.scramble(i, t) : c)` spins every character from the start and lands them one after
-another. `Color.hue(hue, saturation, lightness)` is a color a fraction of the way round the
+text, the seconds since the turn began, and how many units there are, `(progress, index,
+letter, seconds, count) => ...`, named as you like, and what it returns is the value, the ease
+its envelope as on an object, the turn held and returned by `hold` and `return` as an action
+is; so `fill:
+(progress, index, letter, seconds, cycle = 8) => Color.hue(seconds / cycle + index / 12)`
+colors every letter its own hue, the wheel turned once every `cycle` seconds, and `text:
+(progress, index, letter, seconds, count, settle = 2) => (seconds < 0.4 + (index / count) *
+settle ? Text.scramble(index, seconds) : letter)` spins every character from the start and
+lands them one after another. `Color.hue(hue, saturation, lightness)` is a color a fraction of the way round the
 wheel, as `'#rrggbb'`; `Text.scramble(index, seconds, alphabet)` a letter or digit that
 changes as the seconds go, the same for the same index and moment. A `path` by unit is its
 shape as changes from the unit's place, `orient` turning the unit. The action lasts until the
 last unit is done, `duration + the gaps`, which is its `end`; the text's own attributes are
 untouched. A `morph` has no `by`, nor has any object but a Text.
+
+`timed: true` on a path makes its points evenly spaced in time rather than traveled by
+distance, as the pencil records a motion, so it plays as it was drawn.
+
+One unit, or a few, by a handle: `title.char(3)`, `title.word(1)`, and `title.line(0)` take
+the verbs, `title.char(0, 2).to({ fill: '#ff0000', at: 1, duration: 0.5 })`, an action by that
+unit on those units alone, staggered among them as written, the rest untouched; `by` has no
+place in such a block. The indexes count as `by` does, from 0, every character of the text, the
+spaces and the breaks between lines too, so `title.char(5)` is `title.text[5]`; one the text
+lacks is noted and skipped. A space takes its turn in a stagger and nothing of it is drawn.
 
 Right-click a Text for Shape, Convert to shape: its letters become `curves`, the outlines of
 its glyphs read from its font's file, the project's or the installed one, where the text was;

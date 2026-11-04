@@ -75,6 +75,8 @@ export interface ActionInfo extends BlockInfo {
   name?: string
   /** The verb as written when that was an old name for `verb`, such as `scale` for a resize (D211). */
   alias?: string
+  /** `text.char(3).verb({ ... })`: the units the action runs on (D286). */
+  unit?: { kind: 'char' | 'word' | 'line'; indexes: number[] }
 }
 
 export interface Timing {
@@ -92,6 +94,12 @@ export interface Timing {
   by?: 'char' | 'word' | 'line'
   /** Seconds between one unit's start and the next, with `by`, 0.05 unless written; or a function of the unit's index giving the gap before that unit (D269). */
   stagger?: number | ((index: number) => number)
+  /** With `by`, the units the action runs on, by index in the text, written as `text.char(3)`; all of them when absent (D286). */
+  units?: number[]
+  /** Seconds the change is held once reached, before the return; nothing without `return` (D285). */
+  hold?: number
+  /** Seconds over which the animation goes back to what it found, after its journey and its hold; written, the change does not last (D285). */
+  return?: number
 }
 
 export interface SceneObject {
@@ -154,11 +162,27 @@ export interface SceneError {
   line?: number
 }
 
+/** `name = marker(seconds)` as parsed (D296): the statement, and where its seconds are written. */
+export interface MarkerInfo {
+  name: string
+  range: Range
+  arg: Range
+}
+
+/** A named moment on the timeline (D296): a plain number in the code, so `at: intro` reads it. */
+export interface Marker {
+  name: string
+  time: number
+  stmt: MarkerInfo
+}
+
 export interface SceneModel {
   source: string
   objects: SceneObject[]
   actions: Action[]
   classActions: ClassAction[]
+  /** The markers, in the order written (D296). */
+  markers: Marker[]
   /** Class name to member object names, in first-seen order. */
   classes: Map<string, string[]>
   /** Group name to the names it lists, resolved: objects and groups, classes expanded (D124). */

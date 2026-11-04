@@ -1,7 +1,7 @@
 import { CLASS_NAMES, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ALIASES, VERB_ATTRS, VERB_NAMES, VERB_PARAMS, canonicalVerb, classes, type Verb } from './registry'
-import { easeFrom, easePart, easeShare, namedEasings, ramps } from './easing'
+import { easeFrom, easePart, easeShare, namedEasings, ramps, easeAlong } from './easing'
 import { parseScene } from './parse'
-import { UNIT_KINDS, unitBegins, unitCount } from './text'
+import { UNIT_KINDS, unitBegins, unitCount, type UnitKind } from './text'
 import { ellipsePathData, serializePathData, smoothPathData } from './pathData'
 import { forgetSampling, samplingContext, stateStretches, valueAt, type Stretch } from './sample'
 import { STATE_DIRECTIONS, STATE_NAMES, type Action, type ActionInfo, type AttrSource, type ClassAction, type SceneError, type SceneModel, type SceneObject, type StateDirection, type StateName, type TimeRef, type Timing } from './types'
@@ -133,7 +133,7 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
   }
   /** Actions whose `overrides` names a class action declared further down, applied once the script has run (D148). */
   const deferredOverrides: { action: Action; name: string }[] = []
-  const model: SceneModel = { source, objects, actions, classActions, classes: new Map(), groups: new Map(), lastActionEnd: null, lastUntil: null, contentEnd: null, lastDeclEnd: parsed.lastDeclEnd, warnings }
+  const model: SceneModel = { source, objects, actions, classActions, markers: [], classes: new Map(), groups: new Map(), lastActionEnd: null, lastUntil: null, contentEnd: null, lastDeclEnd: parsed.lastDeclEnd, warnings }
 
   const actionHandle = (own: Action[], behind: Action | ClassAction): Record<string | symbol, unknown> => ({
     [HANDLE]: behind,
@@ -206,9 +206,16 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
     }
   }
 
-  const addAction = (obj: SceneObject, verb: Verb, args: unknown[]): Record<string | symbol, unknown> => {
+  const addAction = (obj: SceneObject, verb: Verb, args: unknown[], unit?: { kind: UnitKind; indexes: number[] }): Record<string | symbol, unknown> => {
     const mark = raised.length
     const block = readBlock(obj.name, verb, obj.className, args)
+    if (unit) {
+      // The units named by the handle are the action's; a `by` in the block has nothing to add (D286).
+      if (block.timing.by !== undefined) warn(`${obj.name}.${unit.kind}(): by is given by the handle; the block's is dropped`)
+      block.timing.by = unit.kind
+      block.timing.units = unit.indexes
+      if (unit.indexes.length === 0) warn(`${obj.name}.${unit.kind}() needs the index of a ${unit.kind}, such as ${obj.name}.${unit.kind}(0)`)
+    }
     // A path is nothing without its shape: points, or a function of the progress (D192).
     if (verb === 'path' && !('shape' in block.changes)) warn(`${obj.name}.path needs a shape: points [[x, y], ...], curves 'M 0 0 C ...', or a function of the progress, (p) => [x, y]`)
     // Only a Shape morphs (D257): a kind becomes one first, by Convert to shape.
@@ -236,6 +243,19 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
     else return
     delete timing.by
     delete timing.stagger
+    delete timing.units
+  }
+
+  /** `text.char(3)`, and the like: a handle whose verbs run on those units alone (D286). */
+  const unitHandle = (obj: SceneObject, kind: UnitKind, raw: unknown[]): unknown => {
+    const indexes = raw.map((v) => Number(v)).filter((n) => Number.isInteger(n) && n >= 0)
+    if (indexes.length !== raw.length) warn(`${obj.name}.${kind}(): the indexes are whole numbers from 0`)
+    return new Proxy({} as Record<string | symbol, unknown>, {
+      get(_target, key) {
+        if (typeof key !== 'string' || !VERB_NAMES.has(key)) return undefined
+        return (...args: unknown[]) => addAction(obj, canonicalVerb(key)!, args, { kind, indexes })
+      },
+    })
   }
 
   /** `all('name').verb({ ... })`: one action per member declared so far. */
@@ -281,6 +301,8 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
         if (key === HANDLE) return obj
         if (typeof key !== 'string') return undefined
         if (VERB_NAMES.has(key)) return (...args: unknown[]) => addAction(obj, canonicalVerb(key)!, args)
+        // `text.char(3)`, `text.word(1)`, `text.line(0)`: the verbs on those units alone (D286).
+        if (key === 'char' || key === 'word' || key === 'line') return (...indexes: unknown[]) => unitHandle(obj, key, indexes)
         if (key === 'name') return obj.name
         // When the object begins and when it is removed, as time references (D138).
         if (key === 'start' || key === 'end') return timeRef({ kind: key === 'start' ? 'objectStart' : 'objectEnd', actions: [], object: obj })
@@ -360,6 +382,14 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
 
   // Frames as seconds (D276): `at: frames(15)` or `duration: frames(5)`, a count of frames at the project's rate, anywhere a time goes.
   api['frames'] = (count: unknown = 0) => (Number(count) || 0) / fps
+  // A marker is its seconds, a plain number (D296); the timeline learns of it from the statement.
+  const markerTimes: number[] = []
+  api['marker'] = (seconds: unknown = 0) => {
+    const t = Number(seconds)
+    const time = Number.isFinite(t) ? Math.max(0, t) : 0
+    markerTimes.push(time)
+    return time
+  }
 
   // A point tied to the scene (D266): in a Shape's points or a morph's target, `at(x, y)` sits at that place in the scene, whatever the shape's pose.
   api['at'] = (x: unknown = 0, y: unknown = 0) => Object.assign([Number(x) || 0, Number(y) || 0], { tied: true })
@@ -387,6 +417,7 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
     ramps: (easeIn: unknown = 0, easeOut: unknown = 0, duration: unknown = 1) => ramps(Number(easeIn), Number(easeOut), Number(duration)),
     part: (ease: unknown, from: unknown = 0, to: unknown = 1) => easePart(easeFrom(ease), Number(from), Number(to)),
     share: (ease: unknown, from: unknown = 0, to: unknown = 1) => easeShare(easeFrom(ease), Number(from), Number(to)),
+    along: (ease: unknown, from: unknown = 0, to: unknown = 1) => easeAlong(easeFrom(ease), Number(from), Number(to)),
   })
 
   /**
@@ -681,15 +712,18 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
     return life
   }
 
-  /** How many units an action by character, word, or line runs on: counted on the text as written; a text that is code is taken as one unit, with a note. */
-  function unitCountOf(action: Action): number {
+  /** The units an action by character, word, or line runs on, by index (D286): those its handle names that the text has, else all, counted on the text as written; a text that is code is taken as one unit, with a note. */
+  function unitIndexesOf(action: Action): number[] {
     const raw = action.object.attrs['text']
     const text = raw === undefined ? String(classes['Text']?.attrs.find((a) => a.name === 'text')?.default ?? 'Text') : typeof raw === 'function' ? null : String(raw)
-    if (text === null) {
-      warn(`${action.object.name}.${action.verb}: by needs the text written out; a text that is code runs as one`, action)
-      return 1
-    }
-    return unitCount(text, action.timing.by!)
+    let total = 1
+    if (text === null) warn(`${action.object.name}.${action.verb}: by needs the text written out; a text that is code runs as one`, action)
+    else total = unitCount(text, action.timing.by!)
+    const chosen = action.timing.units
+    if (!chosen) return Array.from({ length: total }, (_, i) => i)
+    const have = chosen.filter((i) => i < total)
+    if (have.length < chosen.length) warn(`${action.object.name}.${action.timing.by}(${chosen.join(', ')}): the text has ${total} ${action.timing.by}${total === 1 ? '' : 's'}, 0 to ${total - 1}`, action)
+    return have
   }
 
   function resolveAction(action: Action): [number, number] {
@@ -712,8 +746,29 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
       duration = action.timing.until !== undefined ? Math.max(0, timeOf(action.timing.until, start, `${label} until`) - start) : Math.max(0, action.timing.duration ?? 1)
       // By character, word, or line, the action lasts until the last unit is done: the gaps before every unit after the first, `stagger` each or what a function of the index gives (D268, D269).
       if (action.timing.by !== undefined) {
-        const begins = unitBegins(action.timing.stagger, unitCountOf(action))
+        const begins = unitBegins(action.timing.stagger, unitIndexesOf(action))
         duration += begins.length > 0 ? begins[begins.length - 1]! : 0
+      }
+      // Held, then returned (D285): the hold and the return come after the journey, and a hold is nothing without a return.
+      const seconds = (key: 'hold' | 'return'): number | undefined => {
+        const v = action.timing[key] as unknown
+        if (v === undefined) return undefined
+        if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) {
+          warn(`${label}: ${key} is seconds, 0 or more`, action)
+          return undefined
+        }
+        return v
+      }
+      const back = seconds('return')
+      const hold = seconds('hold')
+      if (hold !== undefined && back === undefined) warn(`${label}: hold goes with return, the seconds it takes to go back`, action)
+      if (back === undefined) {
+        delete action.timing.return
+        delete action.timing.hold
+      } else {
+        action.timing.return = back
+        action.timing.hold = hold ?? 0
+        duration += (hold ?? 0) + back
       }
     } catch (err) {
       throw err instanceof TimingError ? err : new TimingError(err instanceof Error ? err.message : String(err), line)
@@ -726,6 +781,9 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
     return result
   }
 
+  // The markers as written, each with the seconds its call gave (D296); a call without a name has no place on the timeline.
+  model.markers = parsed.markers.map((info, i) => ({ name: info.name, time: markerTimes[i] ?? 0, stmt: info }))
+  if (markerTimes.length !== parsed.markers.length) warn('marker() needs a name of its own, as in intro = marker(2)')
   try {
     for (const action of actions) resolveAction(action)
     for (const obj of objects) resolveLifetime(obj)

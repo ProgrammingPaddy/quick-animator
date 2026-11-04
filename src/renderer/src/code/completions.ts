@@ -20,6 +20,8 @@ const TIMING_DOCS: Record<string, string> = {
   delay: 'Seconds added to the start.',
   duration: 'Seconds. Omitted: 1.',
   until: 'An end time or time reference, instead of duration.',
+  hold: 'Seconds the change is held once reached, before the return. Nothing without return.',
+  return: 'Seconds over which the animation goes back to what it found, after its journey and its hold; written, the change does not last. 0 snaps back.',
   easeIn: 'Seconds of easing at the start. Omitted: 30% of the duration.',
   easeOut: 'Seconds of easing at the end. Omitted: 30% of the duration.',
   ease: "A named curve: 'linear', 'bounce', 'back', 'elastic', or 'snap'. Replaces easeIn and easeOut.",
@@ -34,6 +36,8 @@ const TIMING_PLACEHOLDER: Record<string, string> = {
   delay: '0',
   duration: '1',
   until: '',
+  hold: '0.5',
+  return: '0.3',
   easeIn: '0.3',
   easeOut: '0.3',
   ease: "'linear'",
@@ -59,6 +63,7 @@ const PATH_DOCS: Record<string, string> = {
   orient: 'true: the object turns to face along the path.',
   offset: 'A shift of the whole path, [dx, dy].',
   smooth: 'true: a smooth curve through the points instead of straight lines between them.',
+  timed: 'true: the points are evenly spaced in time, as the pencil records a motion, instead of traveled by distance.',
 }
 
 function pathCompletion(key: string): Completion {
@@ -352,15 +357,15 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
         return { from: word.from, options: [...timeReferenceOptions(model), framesCompletion()], validFor: /^[\w$.()]*$/ }
       }
       // A time as frames (D276), and a stagger as a function of the index (D269).
-      if (key === 'duration' || key === 'delay' || key === 'easeIn' || key === 'easeOut' || key === 'stagger') {
+      if (key === 'duration' || key === 'delay' || key === 'easeIn' || key === 'easeOut' || key === 'stagger' || key === 'hold' || key === 'return') {
         if (!word) return null
         const options: Completion[] = [framesCompletion()]
-        if (key === 'stagger') options.push(snippetCompletion('(i) => ${0.05},', { label: '(i) => ...', info: 'The seconds before each unit, from its index: an uneven rhythm.', type: 'function' }))
+        if (key === 'stagger') options.push(snippetCompletion('(index) => ${0.05},', { label: '(index) => ...', info: 'The seconds before each unit, from its index: an uneven rhythm.', type: 'function' }))
         return { from: word.from, options, validFor: /^[\w$(]*$/ }
       }
       if (key === 'fill') {
         if (!word) return null
-        return { from: word.from, options: [snippetCompletion('(p, t, speed = ${0.5}) => Color.hue(t * speed),', { label: 'Color.hue', info: 'A color a fraction of the way round the wheel, here turning with the seconds; on a unit, (p, i, c, t) => Color.hue(t * 0.5 + i / 8).', type: 'function' })], validFor: /^[\w$(]*$/ }
+        return { from: word.from, options: [snippetCompletion('(progress, seconds, cycle = ${5}) => Color.hue(seconds / cycle),', { label: 'Color.hue', info: 'A color a fraction of the way round the wheel, here turned once every cycle seconds; by unit, (progress, index, letter, seconds, cycle = 8) => Color.hue(seconds / cycle + index / 12).', type: 'function' })], validFor: /^[\w$(]*$/ }
       }
       if (key === 'relative') {
         return { from: word?.from ?? pos, options: [{ label: 'true', type: 'constant' }, { label: 'false', type: 'constant' }], validFor: /^[\w$]*$/ }

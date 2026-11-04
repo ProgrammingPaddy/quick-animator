@@ -64,12 +64,20 @@ function ClassesDialog({ names, model, close }: { names: string[]; model: SceneM
     setNote(null)
   }
 
+  // A name typed but not yet created goes with Apply too (D295): created and ticked, as one expects.
   const apply = () => {
+    const typed = newName.trim()
+    if (typed) {
+      if (!NAME.test(typed)) return shake('Use letters, digits, dashes, and underscores.')
+      if (typed in registry) return shake(`${typed} is a type: every ${typed} is already in all('${typed}').`)
+    }
+    const on = all.filter((c) => checks[c] === true || c === typed)
+    if (typed && !all.includes(typed)) on.push(typed)
     close()
     applyClasses(
       names,
-      all.filter((c) => checks[c] === true),
-      all.filter((c) => checks[c] === false),
+      on,
+      all.filter((c) => checks[c] === false && c !== typed),
     )
   }
 

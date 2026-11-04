@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { memo, useEffect, useMemo, useReducer, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { beginGesture, endGesture } from '../code/editor'
 import { showMenu } from '../components/ContextMenu'
 import { FontField } from '../components/FontField'
@@ -12,11 +12,11 @@ import type { SceneModel, SceneObject } from '../model/types'
 import { newProject, pickProject } from '../project/controller'
 import { askSystemFonts } from '../project/fonts'
 import { convertTextToShape } from '../project/textToShape'
-import { textStyleAt } from '../model/sample'
-import type { TextStyle } from '../model/text'
+import { parseColor, textPadding, textStyleAt, valueAt, worldPose } from '../model/sample'
+import { layoutOf, type TextStyle } from '../model/text'
 import { DEFAULT_EASE_FRACTION, easingFor, unease } from '../model/easing'
-import { addMorph, addObject, addPath, canEdit, setObjectProp, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, pathDragTarget, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestClasses, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, settleMorph, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphRunning, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
-import { requestSavePreset } from '../project/userPresets'
+import { addMorph, addObject, addPath, beginFill, beginOutline, canEdit, paintFill, paintStroke, sketchLine, sketchPath, setObjectProp, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, pathDragTarget, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestClasses, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, settleMorph, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphRunning, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
+import { addUserObject, requestSavePreset } from '../project/userPresets'
 import { makeMover, outlineOf, resetMover, walk, type Mover, type Polygon, type Pushing } from '../preview/collide'
 import { SceneRenderer, type ControlHandle, type Frame, type GuideLine, type Handle } from '../preview/SceneRenderer'
 import { Viewport } from '../preview/Viewport'
@@ -24,6 +24,76 @@ import { dropTargets } from '../state/dropTargets'
 import { matchHotkey } from '../state/hotkeys'
 import { OBJECT_KINDS, TRANSFORM_MODES, useStore, type ActionRef, type Pick, type TransformMode } from '../state/store'
 import { formatTime } from '../state/time'
+
+/** The Paint tool's color and the colors used lately (D293), kept in the browser's storage like the app's other small preferences. */
+interface PaintState {
+  color: string
+  recent: string[]
+  /** The outline's color and width, for Paint's stroke mode and the pencil (D299). */
+  stroke: string
+  width: number
+  mode: 'fill' | 'stroke'
+}
+const PAINT_KEY = 'quick-animator.paint'
+function loadPaint(): PaintState {
+  try {
+    const raw = localStorage.getItem(PAINT_KEY)
+    const saved = raw ? (JSON.parse(raw) as Partial<PaintState>) : null
+    const recent = Array.isArray(saved?.recent) ? saved.recent.filter((c): c is string => typeof c === 'string').slice(0, 8) : []
+    return {
+      color: typeof saved?.color === 'string' ? saved.color : '#4f8cff',
+      recent,
+      stroke: typeof saved?.stroke === 'string' ? saved.stroke : '#ffffff',
+      width: typeof saved?.width === 'number' && saved.width > 0 ? saved.width : 3,
+      mode: saved?.mode === 'stroke' ? 'stroke' : 'fill',
+    }
+  } catch {
+    return { color: '#4f8cff', recent: [], stroke: '#ffffff', width: 3, mode: 'fill' }
+  }
+}
+function savePaint(paint: PaintState): void {
+  try {
+    localStorage.setItem(PAINT_KEY, JSON.stringify(paint))
+  } catch {
+    // Nothing kept between runs; the tool still works.
+  }
+}
+
+/** The samples of a sketch at an even rate (D297): the point at each tick, between the recorded ones, so a timed path's points are evenly spaced in time. */
+function resample(samples: { t: number; x: number; y: number }[], rate: number): Point[] {
+  const last = samples[samples.length - 1]!
+  const n = Math.max(2, Math.round(last.t * rate) + 1)
+  const out: Point[] = []
+  let j = 0
+  for (let k = 0; k < n; k++) {
+    const t = (k / (n - 1)) * last.t
+    while (j + 1 < samples.length && samples[j + 1]!.t <= t) j++
+    const a = samples[j]!
+    const b = samples[Math.min(j + 1, samples.length - 1)]!
+    const span = b.t - a.t
+    const w = span > 1e-9 ? Math.max(0, Math.min(1, (t - a.t) / span)) : 0
+    out.push({ x: a.x + (b.x - a.x) * w, y: a.y + (b.y - a.y) * w })
+  }
+  return out
+}
+
+/** The colors a scene writes, the fills and strokes of its objects and their changes, each once, in the order written (D294). */
+function colorsOf(model: SceneModel | null): string[] {
+  const out: string[] = []
+  const add = (v: unknown): void => {
+    if (typeof v === 'string' && parseColor(v) && !out.includes(v)) out.push(v)
+  }
+  for (const obj of model?.objects ?? []) {
+    add(obj.attrs['fill'])
+    add(obj.attrs['stroke'])
+    for (const a of obj.actions) {
+      add(a.changes['fill'])
+      add(a.from['fill'])
+      add(a.changes['stroke'])
+    }
+  }
+  return out
+}
 
 const MODE_LABEL: Record<TransformMode, string> = { all: 'Transform', move: 'Move', rotate: 'Rotate', resize: 'Resize' }
 const MODE_TIP: Record<TransformMode, string> = {
@@ -184,7 +254,7 @@ interface Drag {
   /** The playhead has been moved to the end of what a Shift-drag made. */
   shown: boolean
   /** What a click without movement does. */
-  click: 'cycle' | 'object' | 'none'
+  click: 'object' | 'none'
   /** The values the drag has written so far, as name:attr, so one brought back to its start is still written. */
   touched: Set<string>
   /** The moves written for what this animation's drag has pushed, by object, and how far each was pushed last (D136). */
@@ -275,8 +345,8 @@ function restingTime(gesture: { restore: number; from: number; editing?: boolean
  * selected actions changes their durations (D97), otherwise Shift and the wheel pan sideways,
  * Alt and the wheel pan up and down, the middle button drags the view, and scrollbars show
  * where the view sits in a stable area around the frame (D82, D85). Click selects, Ctrl-click
- * adds or removes, a drag on empty space selects what it touches, Ctrl extends (D89), and a
- * click on the selected object cycles the mode (D79). The selection shows handles for its mode
+ * adds or removes, a drag on empty space selects what it touches, Ctrl extends (D89); the mode
+ * is set by the buttons above alone (D79, revised by D282). The selection shows handles for its mode
  * (D86): on the one object, on a group's own box, or on the upright box around an ad-hoc
  * selection (D96, D124): the body moves, corners and edges resize keeping the far side or the
  * center in place (D104), the handle above rotates around the center of the box, past a full
@@ -290,6 +360,12 @@ function restingTime(gesture: { restore: number; from: number; editing?: boolean
  * angles to a step (D91). A tool button then a click places an object. Right-click adds objects
  * or acts on the one under the cursor.
  */
+/** The readout of the playhead time under the view: it alone follows every frame. */
+const PreviewTime = memo(function PreviewTime({ fps }: { fps: number }) {
+  const time = useStore((s) => s.time)
+  return <span>{formatTime(time, fps)}</span>
+})
+
 export function PreviewPane() {
   const hostRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -326,12 +402,45 @@ export function PreviewPane() {
   const [zoom, setZoom] = useState(1)
   const [, bump] = useReducer((n: number) => n + 1, 0)
   const settings = useStore((s) => s.settings)
-  const time = useStore((s) => s.time)
+  // The playhead matters to the pane's own markup only through the text bar, so it is followed only while Texts can be selected.
+  const time = useStore((s) => (s.selection.length > 0 && s.tool === 'select' ? s.time : 0))
   const tool = useStore((s) => s.tool)
   // The Texts among the selection, for the text bar (D270), and a Text being edited in place.
   const fonts = useStore((s) => s.fonts)
   const systemFonts = useStore((s) => s.systemFonts)
-  const [textEdit, setTextEdit] = useState<{ name: string; original: string; value: string; left: number; top: number; width: number; height: number; style: TextStyle; zoom: number } | null>(null)
+  /** The Paint tool's color and recent colors (D293). */
+  const [brush, setBrush] = useState<PaintState>(loadPaint)
+  const brushRef = useRef(brush)
+  brushRef.current = brush
+  const setBrushColor = (color: string) => setBrush((p) => (p.mode === 'stroke' ? { ...p, stroke: color } : { ...p, color }))
+  const rememberBrush = (color: string) =>
+    setBrush((p) => {
+      const next = { ...(p.mode === 'stroke' ? { ...p, stroke: color } : { ...p, color }), recent: [color, ...p.recent.filter((c) => c !== color)].slice(0, 8) }
+      savePaint(next)
+      return next
+    })
+  const setBrushPart = (part: Partial<PaintState>) =>
+    setBrush((p) => {
+      const next = { ...p, ...part }
+      savePaint(next)
+      return next
+    })
+  /** The dropper (D294): the next click takes an object's fill as the color. */
+  const [dropping, setDropping] = useState(false)
+  const droppingRef = useRef(dropping)
+  droppingRef.current = dropping
+  /** The colors the project writes, for the bar (D294). */
+  const scene = useStore((s) => s.model)
+  const projectColors = useMemo(() => colorsOf(scene), [scene])
+  const pickColor = (name: string, time: number) => {
+    const s = useStore.getState()
+    const obj = s.model?.objects.find((o) => o.name === name)
+    const fill = obj && s.model ? valueAt(s.model, obj, brushRef.current.mode === 'stroke' ? 'stroke' : 'fill', time) : undefined
+    if (typeof fill === 'string' && parseColor(fill)) rememberBrush(fill)
+    else s.setNotice('Nothing here has a color to take')
+    setDropping(false)
+  }
+  const [textEdit, setTextEdit] = useState<{ name: string; original: string; value: string; left: number; top: number; width: number; height: number; style: TextStyle; zoom: number; padding: number; paddingTop: number; lineHeight: number; color: string } | null>(null)
   const textEditRef = useRef(textEdit)
   textEditRef.current = textEdit
   const project = useStore((s) => s.project)
@@ -347,6 +456,9 @@ export function PreviewPane() {
   const anchor = useStore((s) => s.anchor)
   const setTool = useStore((s) => s.setTool)
   const addKind = useStore((s) => s.addKind)
+  const addPreset = useStore((s) => s.addPreset)
+  const setAddPreset = useStore((s) => s.setAddPreset)
+  const userPresets = useStore((s) => s.userPresets)
   const pathMode = useStore((s) => s.pathMode)
   const shapeMode = useStore((s) => s.shapeMode)
   const pick = useStore((s) => s.pick)
@@ -1174,7 +1286,41 @@ export function PreviewPane() {
 
     // The Object tool places one object per click and stays on (D163, D203).
     if (store.tool === 'object') {
-      addObject(store.addKind, located.world.x, located.world.y)
+      // A preset chosen in the bar is placed instead of a kind (D300).
+      const preset = store.addPreset ? store.userPresets.find((u) => u.id === store.addPreset) : undefined
+      if (preset) addUserObject(preset, located.world.x, located.world.y)
+      else addObject(store.addKind, located.world.x, located.world.y)
+      return
+    }
+    // The Paint tool (D293, D294): a click fills what is under it with the color; Alt, or the dropper, takes the color under it instead.
+    if (store.tool === 'paint') {
+      if (!located.hit || !canEdit()) return
+      if (e.altKey || droppingRef.current) {
+        pickColor(located.hit, store.time)
+        return
+      }
+      const b = brushRef.current
+      const outline = b.mode === 'stroke'
+      const color = outline ? b.stroke : b.color
+      if (e.shiftKey) {
+        // A color change made as any Shift-made animation is (D103, D127): from where the playhead was before Shift looked ahead, for the proposed length, pinned as the pin says, the next one following in Chain mode.
+        const gesture = gestureRef.current
+        const pinNow = gesture?.editing ? 'start' : store.pin
+        const from = gesture?.from ?? store.time
+        const length = gesture?.duration ?? 1
+        const end = outline ? beginOutline(located.hit, color, b.width, pinNow, from, length) : beginFill(located.hit, color, pinNow, from, length)
+        if (end !== null) {
+          if (gesture && !gesture.editing && pinNow === 'start' && store.chain) gesture.from = end
+          if (pinNow === 'start') useStore.getState().setTime(end)
+        }
+      } else if (outline) paintStroke(located.hit, color, b.width, store.time)
+      else paintFill(located.hit, color, store.time)
+      rememberBrush(color)
+      return
+    }
+    // The Pencil (D297): on an object, its motion sketched as the playhead runs; on empty space, a line drawn, with Shift written on over its own time (D298).
+    if (store.tool === 'pencil') {
+      if (canEdit()) beginSketch(host, e, located.hit, located.world, located.paneX, located.paneY)
       return
     }
     // The Shape tool (D236): Create draws a shape point by point; Edit works on the selected shape's points, a press on a Shape picks it, and empty space lets the points go.
@@ -1459,7 +1605,6 @@ export function PreviewPane() {
       base.set(obj.name, values)
       locals.set(obj.name, toLocal(frame, { x: values['x']!, y: values['y']! }))
     }
-    const alreadySingle = selection.length === 1 && selection[0] === hit && store.selectedActions.length === 0
     const angle0 = Math.atan2(located.world.y - frame.y, located.world.x - frame.x)
     // A move knows the dragged things' box and everyone else's, for edge snapping and collision (D135, D136).
     const dragged = new Set<string>()
@@ -1538,7 +1683,7 @@ export function PreviewPane() {
       moved: false,
       created: false,
       shown: false,
-      click: alreadySingle && !e.shiftKey && !handle ? 'cycle' : selected && !handle && !e.shiftKey ? 'object' : 'none',
+      click: selected && !handle && !e.shiftKey ? 'object' : 'none',
       touched: new Set(),
       pushedActions: new Map(),
       pushedShifts: new Map(),
@@ -1822,10 +1967,7 @@ export function PreviewPane() {
       },
       (ev) => {
         const s = useStore.getState()
-        if (!drag.moved) {
-          if (drag.click === 'cycle') s.cycleTransformMode()
-          else if (drag.click === 'object') s.select([drag.primary])
-        }
+        if (!drag.moved && drag.click === 'object') s.select([drag.primary])
         dragRef.current = null
         setDragging(null)
         renderer.clearGuides()
@@ -1870,15 +2012,91 @@ export function PreviewPane() {
     const bounds = host.getBoundingClientRect()
     const zoom = bounds.width / Math.max(1e-9, rect.right - rect.left)
     const style = textStyleAt(s.model, obj, s.time)
+    // The editor's lines sit where the drawn ones are (D270): the block with its padding around the lines, each line
+    // as tall as the layout's step, and the first baseline where the canvas puts it, which is the step's half-leading
+    // above the padding. The drawn text is hidden while the editor shows the words.
+    const pose = worldPose(s.model, obj, s.time)
+    const layout = layoutOf(style)
+    const pad = textPadding(style)
+    const k = pose.scale * zoom
+    const step = style.fontSize * style.lineHeight
+    const lead = (step - layout.ascent - layout.descent) / 2
+    const above = Math.max(0, lead - pad)
+    const width = (layout.width + 2 * pad) * k
+    const height = (layout.height + 2 * pad) * k
+    const fill = valueAt(s.model, obj, 'fill', s.time)
     s.select([name])
-    setTextEdit({ name, original: style.text, value: style.text, left: (f.x - f.width / 2 - rect.left) * zoom, top: (rect.top - (f.y + f.height / 2)) * zoom, width: Math.max(40, f.width * zoom), height: Math.max(20, f.height * zoom), style, zoom })
+    renderer.setEditing(name)
+    paintRef.current()
+    setTextEdit({ name, original: style.text, value: style.text, left: (pose.x - rect.left) * zoom - width / 2, top: (rect.top - pose.y) * zoom - height / 2 - above * k, width: Math.max(40, width), height: Math.max(20, height + above * k), style, zoom: k, padding: pad * k, paddingTop: Math.max(0, pad - lead) * k, lineHeight: step * k, color: typeof fill === 'string' ? fill : '#ffffff' })
   }
 
   const endTextEdit = (keep: boolean) => {
     const edit = textEditRef.current
     if (!edit) return
     setTextEdit(null)
+    rendererRef.current?.setEditing(null)
+    paintRef.current()
     if (keep && edit.value !== edit.original) setObjectProp(edit.name, 'text', edit.value)
+  }
+
+  /**
+   * A sketch with the pencil (D297): the playhead runs from where it was while the pointer is
+   * down, and each frame's point is kept. On an object, the object is held under the pointer,
+   * keeping the pointer's offset from its center, and the motion is written as a timed path when
+   * the pointer is let go; on empty space, the trail becomes a line, with Shift written on over
+   * the sketch's own length (D298). The playhead goes back to where it was.
+   */
+  const beginSketch = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, target: string | null, world0: Point, paneX: number, paneY: number) => {
+    const viewport = viewportRef.current
+    const renderer = rendererRef.current
+    if (!viewport || !renderer) return
+    const start = useStore.getState().time
+    const t0 = performance.now()
+    const samples: { t: number; x: number; y: number }[] = []
+    const trailWorld: Point[] = [world0]
+    const trail: Point[] = [{ x: paneX, y: paneY }]
+    let latest = world0
+    const frame = target ? renderer.frameOf(target) : null
+    const delta = frame ? { x: world0.x - frame.x, y: world0.y - frame.y } : { x: 0, y: 0 }
+    const where = (): Point => ({ x: latest.x - delta.x, y: latest.y - delta.y })
+    const writeOn = e.shiftKey
+    samples.push({ t: 0, ...where() })
+    if (target) renderer.setFollow(target, where())
+    setSketch([...trail])
+    let handle = 0
+    const tick = () => {
+      const elapsed = (performance.now() - t0) / 1000
+      samples.push({ t: elapsed, ...where() })
+      useStore.getState().setTime(start + elapsed)
+      if (target) renderer.setFollow(target, where())
+      handle = requestAnimationFrame(tick)
+    }
+    handle = requestAnimationFrame(tick)
+    capture(
+      host,
+      e.pointerId,
+      (ev) => {
+        const bounds = host.getBoundingClientRect()
+        const px = ev.clientX - bounds.left
+        const py = ev.clientY - bounds.top
+        latest = viewport.toWorld(px, py)
+        trailWorld.push(latest)
+        trail.push({ x: px, y: py })
+        setSketch([...trail])
+      },
+      () => {
+        cancelAnimationFrame(handle)
+        const duration = (performance.now() - t0) / 1000
+        samples.push({ t: duration, ...where() })
+        renderer.setFollow(null, null)
+        setSketch(null)
+        useStore.getState().setTime(start)
+        if (target) sketchPath(target, resample(samples, 30), start, duration)
+        else sketchLine(trailWorld, brushRef.current.stroke, brushRef.current.width, start, duration, writeOn)
+        paintRef.current()
+      },
+    )
   }
 
   /** The Texts among the selection, with their looks at the playhead, for the text bar (D270). */
@@ -1945,12 +2163,12 @@ export function PreviewPane() {
         // On a points path the segment is the one ending at the point an insertion would take the place of.
         const seg = insert.kind === 'curves' ? insert.seg : insert.at
         const segItems = segmentItems(pathSegmentKind(pathAction, seg), (kind) => setPathSegment(pathAction, seg, kind))
-        showMenu(e, [{ label: 'Add point here', run: () => (insert.kind === 'points' ? insertPathPoints(pathAction, insert.at, [world]) : void insertPathAnchor(pathAction, insert.seg, insert.t)) }, ...segItems, ...pathSub])
+        showMenu(e, [{ label: 'Add point', run: () => (insert.kind === 'points' ? insertPathPoints(pathAction, insert.at, [world]) : void insertPathAnchor(pathAction, insert.seg, insert.t)) }, ...segItems, ...pathSub])
         return
       }
       if (!hit) {
         showMenu(e, [
-          { label: 'Add point here', run: () => insertPathPoints(pathAction, anchors.length, [world]) },
+          { label: 'Add point', run: () => insertPathPoints(pathAction, anchors.length, [world]) },
           ...pathSub,
           { label: 'Add', children: OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, world.x, world.y) })) },
         ])
@@ -1976,7 +2194,7 @@ export function PreviewPane() {
         // On a points shape the segment is the one ending at the point an insertion would take the place of; the whole shape's items sit one level down (D256).
         const seg = insert.kind === 'curves' ? insert.seg : insert.at
         const segItems = segmentItems(shapeSegmentKind(shape.name, seg), (kind) => setShapeSegment(shape.name, seg, kind))
-        showMenu(e, [{ label: 'Add point here', run: () => (insert.kind === 'points' ? insertShapePoints(shape.name, insert.at, [world]) : void insertShapeAnchor(shape.name, insert.seg, insert.t)) }, ...segItems, { label: 'Shape', children: shapeItems(shape.name) }])
+        showMenu(e, [{ label: 'Add point', run: () => (insert.kind === 'points' ? insertShapePoints(shape.name, insert.at, [world]) : void insertShapeAnchor(shape.name, insert.seg, insert.t)) }, ...segItems, { label: 'Shape', children: shapeItems(shape.name) }])
         return
       }
     }
@@ -1987,7 +2205,7 @@ export function PreviewPane() {
         showMenu(e, [
           { label: 'Jump to code', run: () => jumpToObject(group.name) },
           { label: 'Rename', run: () => requestRename({ object: group.name }) },
-          { label: 'Save as preset', run: () => requestSavePreset({ object: group.name }) },
+          { label: 'Save preset', run: () => requestSavePreset({ object: group.name }) },
           { label: 'Select', keyword: hit, run: () => s.select([hit]) },
           { label: 'Ungroup', keyword: group.name, run: () => ungroup(group.name) },
         ])
@@ -2007,7 +2225,7 @@ export function PreviewPane() {
         ...(many ? [] : [{ label: 'Rename', run: () => requestRename({ object: hit }) }]),
         ...(shapeSub.length > 0 ? [{ label: 'Shape', children: shapeSub }] : []),
         ...(pathSub.length > 0 ? [{ label: 'Path', children: pathSub }] : []),
-        ...(many ? [] : [{ label: 'Save as preset', run: () => requestSavePreset({ object: hit }) }]),
+        ...(many ? [] : [{ label: 'Save preset', run: () => requestSavePreset({ object: hit }) }]),
         { label: 'Classes', run: () => requestClasses(targets) },
         {
           label: 'Collision',
@@ -2029,7 +2247,7 @@ export function PreviewPane() {
           ],
         },
         { label: many ? `Duplicate ${targets.length} objects` : 'Duplicate', run: () => duplicateObjects(targets) },
-        { label: many ? `Delete ${targets.length} objects` : 'Delete object', run: () => deleteObjects(targets), danger: true },
+        { label: many ? `Delete ${targets.length} objects` : 'Delete', run: () => deleteObjects(targets), danger: true },
       ])
     } else {
       showMenu(e, [{ label: 'Add', children: OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, world.x, world.y) })) }])
@@ -2061,7 +2279,7 @@ export function PreviewPane() {
 
   return (
     <div
-      className={`preview${tool === 'object' ? ' placing' : tool === 'path' || tool === 'shape' ? ' drawing' : ''} mode-${transformMode}`}
+      className={`preview${tool === 'object' ? ' placing' : tool === 'paint' ? (dropping ? ' dropping' : ' painting') : tool === 'pencil' ? ' sketching' : tool === 'path' || tool === 'shape' ? ' drawing' : ''} mode-${transformMode}`}
       ref={hostRef}
       onPointerDown={onPointerDown}
       onPointerMove={() => (hoverRef.current = true)}
@@ -2076,7 +2294,7 @@ export function PreviewPane() {
           className="preview-text-edit"
           autoFocus
           spellCheck={false}
-          style={{ left: textEdit.left, top: textEdit.top, width: textEdit.width, height: textEdit.height, fontFamily: `"${textEdit.style.font}", "Segoe UI", sans-serif`, fontSize: textEdit.style.fontSize * textEdit.zoom, fontWeight: textEdit.style.weight, fontStyle: textEdit.style.italic ? 'italic' : 'normal', textAlign: textEdit.style.align, lineHeight: textEdit.style.lineHeight, letterSpacing: textEdit.style.letterSpacing * textEdit.zoom }}
+          style={{ left: textEdit.left, top: textEdit.top, width: textEdit.width, height: textEdit.height, padding: `${textEdit.paddingTop}px ${textEdit.padding}px 0`, fontFamily: `"${textEdit.style.font}", "Segoe UI", sans-serif`, fontSize: textEdit.style.fontSize * textEdit.zoom, fontWeight: textEdit.style.weight, fontStyle: textEdit.style.italic ? 'italic' : 'normal', textAlign: textEdit.style.align, lineHeight: `${textEdit.lineHeight}px`, letterSpacing: textEdit.style.letterSpacing * textEdit.zoom, color: textEdit.color }}
           value={textEdit.value}
           onChange={(e) => setTextEdit({ ...textEdit, value: e.target.value })}
           onPointerDown={stop}
@@ -2104,7 +2322,7 @@ export function PreviewPane() {
             <path d="M6 3l12 10h-6l3.5 7-2.5 1.2-3.5-7L6 18z" fill="currentColor" />
           </svg>
         </button>
-        <button className={tool === 'object' ? 'active' : ''} onClick={() => setTool(tool === 'object' ? 'select' : 'object')} title="Object: click to place one (Escape to leave)" aria-pressed={tool === 'object'} aria-label="Object">
+        <button className={tool === 'object' ? 'active' : ''} onClick={() => setTool(tool === 'object' ? 'select' : 'object')} title="Object" aria-pressed={tool === 'object'} aria-label="Object">
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
             <rect x="3" y="4" width="9" height="9" rx="1" fill="none" stroke="currentColor" strokeWidth="1.8" />
             <circle cx="9" cy="16.5" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
@@ -2114,7 +2332,7 @@ export function PreviewPane() {
         <button
           className={tool === 'path' ? 'active' : ''}
           onClick={() => setTool(tool === 'path' ? 'select' : 'path')}
-          title="Path: click an object, then draw (Escape to leave)"
+          title="Path"
           aria-pressed={tool === 'path'}
           aria-label="Path"
         >
@@ -2124,12 +2342,25 @@ export function PreviewPane() {
             <circle cx="21" cy="9" r="2" fill="currentColor" />
           </svg>
         </button>
-        <button className={tool === 'shape' ? 'active' : ''} onClick={() => setTool(tool === 'shape' ? 'select' : 'shape')} title="Shape: draw one, or edit its points (Escape to leave)" aria-pressed={tool === 'shape'} aria-label="Shape">
+        <button className={tool === 'shape' ? 'active' : ''} onClick={() => setTool(tool === 'shape' ? 'select' : 'shape')} title="Shape" aria-pressed={tool === 'shape'} aria-label="Shape">
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
             <path d="M12 3l9 7-3.5 10h-11L3 10z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
             <circle cx="12" cy="3" r="2" fill="currentColor" />
             <circle cx="21" cy="10" r="2" fill="currentColor" />
             <circle cx="3" cy="10" r="2" fill="currentColor" />
+          </svg>
+        </button>
+        <button className={tool === 'pencil' ? 'active' : ''} onClick={() => setTool(tool === 'pencil' ? 'select' : 'pencil')} title="Pencil" aria-pressed={tool === 'pencil'} aria-label="Pencil">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path d="M4 20l2-5L17 4l3 3L9 18z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+            <path d="M14 7l3 3" fill="none" stroke="currentColor" strokeWidth="1.8" />
+          </svg>
+        </button>
+        <button className={tool === 'paint' ? 'active' : ''} onClick={() => setTool(tool === 'paint' ? 'select' : 'paint')} title="Paint" aria-pressed={tool === 'paint'} aria-label="Paint">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path d="M4 11l7-7 8 8-7 7z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+            <path d="M3 12h13" fill="none" stroke="currentColor" strokeWidth="1.8" />
+            <path d="M19.5 14.5c1.2 1.6 1.8 2.8 1.8 3.7a1.8 1.8 0 0 1-3.6 0c0-.9.6-2.1 1.8-3.7z" fill="currentColor" />
           </svg>
         </button>
       </div>
@@ -2138,15 +2369,22 @@ export function PreviewPane() {
         {tool === 'object' && (
           <div className="preview-modes" role="group" aria-label="Kind of object to add">
             {OBJECT_KINDS.filter((k) => k !== SHAPE).map((k) => (
-              <button key={k} className={addKind === k ? 'active' : ''} onClick={() => setAddKind(k)} title={`Each click adds a ${k}`} aria-pressed={addKind === k}>
+              <button key={k} className={addKind === k && !addPreset ? 'active' : ''} onClick={() => setAddKind(k)} title={`Each click adds a ${k}`} aria-pressed={addKind === k && !addPreset}>
                 {k}
               </button>
             ))}
+            {userPresets
+              .filter((p) => p.kind === 'object' || p.kind === 'group')
+              .map((p) => (
+                <button key={p.id} className={addPreset === p.id ? 'active' : ''} onClick={() => setAddPreset(p.id)} title={`Each click adds ${p.label}`} aria-pressed={addPreset === p.id}>
+                  {p.label}
+                </button>
+              ))}
           </div>
         )}
         {selectedTexts.length > 0 && (
           <div className="preview-modes text-bar" role="group" aria-label="Text">
-            <FontField compact value={textSame('font') ?? ''} options={families} placeholder={selectedTexts.length > 1 ? 'Mixed' : 'Font'} title="Font family: installed, or a file in assets/fonts" onCommit={(f) => writeTexts('font', f)} />
+            <FontField compact value={textSame('font') ?? ''} options={families} placeholder={selectedTexts.length > 1 ? 'Mixed' : 'Font'} title="Font" onCommit={(f) => writeTexts('font', f)} />
             <NumberField label="Font size" value={Math.round(selectedTexts[0]!.style.fontSize)} unit="px" min={1} step={1} onChange={(v) => setAttrsAtMany(selectedTexts.map((t) => ({ name: t.name, attrs: { fontSize: v } })), useStore.getState().time)} />
             <button className={(textSame('weight') ?? 0) >= 600 ? 'active' : ''} onClick={() => writeTexts('weight', (textSame('weight') ?? 0) >= 600 ? 400 : 700)} title="Bold" aria-pressed={(textSame('weight') ?? 0) >= 600}>
               <b>B</b>
@@ -2187,6 +2425,40 @@ export function PreviewPane() {
             </button>
           </div>
         )}
+        {tool === 'paint' && (
+          <div className="paint-bar" role="group" aria-label="Paint">
+            <div className="preview-modes" role="group" aria-label="Fill or outline">
+              <button className={brush.mode === 'fill' ? 'active' : ''} onClick={() => setBrushPart({ mode: 'fill' })} title="Paint the fill" aria-pressed={brush.mode === 'fill'}>
+                Fill
+              </button>
+              <button className={brush.mode === 'stroke' ? 'active' : ''} onClick={() => setBrushPart({ mode: 'stroke' })} title="Paint the outline" aria-pressed={brush.mode === 'stroke'}>
+                Stroke
+              </button>
+            </div>
+            <input type="color" value={brush.mode === 'stroke' ? brush.stroke : brush.color} onChange={(e) => setBrushColor(e.target.value)} title="Color" aria-label="Color" />
+            {brush.mode === 'stroke' && <NumberField label="Width" value={brush.width} unit="px" onChange={(width) => setBrushPart({ width })} />}
+            <button className={`dropper${dropping ? ' active' : ''}`} onClick={() => setDropping(!dropping)} title="Take a color from an object (Alt-click)" aria-pressed={dropping} aria-label="Dropper">
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                <path d="M4 20l1-4 9-9 3 3-9 9z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+                <path d="M13 6l2-2a2.1 2.1 0 0 1 3 3l-2 2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+            </button>
+            {brush.recent.length > 0 && <span className="paint-sep" aria-hidden="true" />}
+            {brush.recent.map((c) => (
+              <button key={c} className={`swatch${c === brush.color ? ' active' : ''}`} style={{ background: c }} onClick={() => setBrushColor(c)} title={c} aria-label={c} />
+            ))}
+            {projectColors.length > 0 && <span className="paint-sep" aria-hidden="true" />}
+            {projectColors.map((c) => (
+              <button key={`p${c}`} className={`swatch${c === brush.color ? ' active' : ''}`} style={{ background: c }} onClick={() => setBrushColor(c)} title={`${c}, in the project`} aria-label={`${c}, in the project`} />
+            ))}
+          </div>
+        )}
+        {tool === 'pencil' && (
+          <div className="paint-bar" role="group" aria-label="Pencil">
+            <input type="color" value={brush.stroke} onChange={(e) => setBrushPart({ stroke: e.target.value })} title="Line color" aria-label="Line color" />
+            <NumberField label="Width" value={brush.width} unit="px" onChange={(width) => setBrushPart({ width })} />
+          </div>
+        )}
         {tool === 'select' && selection.length > 0 && (
           <>
             <div className="preview-modes" role="group" aria-label="Drag mode">
@@ -2203,31 +2475,6 @@ export function PreviewPane() {
             >
               {anchor === 'edge' ? 'Edge' : 'Center'}
             </button>
-            <button
-              className="preview-toggle"
-              onClick={() => {
-                const next = pin === 'start' ? 'end' : 'start'
-                setPin(next)
-                // With an animation selected, the playhead goes to the end the pin names (D187).
-                const s = useStore.getState()
-                const ref = s.selectedActions.find((r) => s.selection.includes(r.object)) ?? s.selectedActions[0]
-                const action = ref ? s.model?.objects.find((o) => o.name === ref.object)?.actions[ref.index] : undefined
-                if (action) s.setTime(next === 'end' ? action.end : action.start)
-              }}
-              title={pin === 'start' ? 'Shift-drags start at the playhead' : 'Shift-drags end at the playhead'}
-            >
-              {pin === 'start' ? 'Starts at playhead' : 'Ends at playhead'}
-            </button>
-            {pin === 'start' && (
-              <button
-                className={`preview-toggle${chain ? ' on' : ''}`}
-                onClick={() => setChain(!chain)}
-                title={chain ? 'Shift-drags follow one another' : 'Shift-drags all start at the playhead'}
-                aria-pressed={chain}
-              >
-                Chain
-              </button>
-            )}
             {(altDown || dragging === 'aspect') && <span className="preview-chip">Keeping proportions</span>}
           </>
         )}
@@ -2240,6 +2487,26 @@ export function PreviewPane() {
             </button>
           ))}
         </div>
+        <button
+          className="preview-toggle"
+          onClick={() => {
+            const next = pin === 'start' ? 'end' : 'start'
+            setPin(next)
+            // With an animation selected, the playhead goes to the end the pin names (D187).
+            const s = useStore.getState()
+            const ref = s.selectedActions.find((r) => s.selection.includes(r.object)) ?? s.selectedActions[0]
+            const action = ref ? s.model?.objects.find((o) => o.name === ref.object)?.actions[ref.index] : undefined
+            if (action) s.setTime(next === 'end' ? action.end : action.start)
+          }}
+          title={pin === 'start' ? 'Shift-drags start at the playhead' : 'Shift-drags end at the playhead'}
+        >
+          {pin === 'start' ? 'Starts at playhead' : 'Ends at playhead'}
+        </button>
+        {pin === 'start' && (
+          <button className={`preview-toggle${chain ? ' on' : ''}`} onClick={() => setChain(!chain)} title={chain ? 'Shift-drags follow one another' : 'Shift-drags all start at the playhead'} aria-pressed={chain}>
+            Chain
+          </button>
+        )}
         <button className={previewSnap.on ? 'on' : ''} onClick={() => setPreviewSnap({ on: !previewSnap.on })} title={previewSnap.on ? 'Snapping to the grid' : 'Free placement'} aria-pressed={previewSnap.on}>
           Grid
         </button>
@@ -2268,11 +2535,13 @@ export function PreviewPane() {
       </div>
       </div>
       <div className="preview-hud">
-        <span>{formatTime(time, settings.fps)}</span>
+        <PreviewTime fps={settings.fps} />
         <span className="dim">
           {settings.width} x {settings.height}
         </span>
         {tool === 'object' && <span className="hint">Click to place</span>}
+        {tool === 'paint' && <span className="hint">{dropping ? 'Click an object to take its color' : 'Click to paint; Shift-click for a color change; Alt-click takes a color'}</span>}
+        {tool === 'pencil' && <span className="hint">Drag an object to record its motion; drag on empty space for a line, with Shift written on</span>}
         {tool === 'shape' && shapeMode === 'create' && <span className="hint">{drafting ? 'Click for corners, drag to draw; the first point closes and fills, Escape leaves a line' : 'Click to start a shape'}</span>}
         {tool === 'shape' && shapeMode === 'edit' && <span className="hint">{shapeRef.current?.editable ? 'Drag a point, or a box around several; right-click a point or the line for curves and corners' : 'Click a shape, or drag a box around one'}</span>}
         {tool === 'path' && pathMode === 'move' && <span className="hint">Drag any point or line of a path to move the whole path</span>}

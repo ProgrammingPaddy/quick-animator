@@ -302,7 +302,7 @@ function LinksDialog({ target }: { target: LinksTarget }) {
                           e.preventDefault()
                           bake(s)
                         }}
-                        title="Bake: keep the value, drop the link"
+                        title="Bake the evaluated expression"
                       >
                         <BakeIcon />
                       </button>

@@ -7,7 +7,7 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, typ
  * `1 s`, at the project's rate. The app sets the rate and whether the notes show.
  */
 
-const TIMING_LINE = /^\s*(?:at|delay|duration|until|easeIn|easeOut|stagger):\s*(.+?)\s*,?\s*$/
+const TIMING_LINE = /^\s*(?:at|delay|duration|until|hold|return|easeIn|easeOut|stagger):\s*(.+?)\s*,?\s*$/
 const NUMBER = /^-?\d+(?:\.\d+)?$/
 const FRAMES = /^frames\(\s*(-?\d+(?:\.\d+)?)\s*\)$/
 

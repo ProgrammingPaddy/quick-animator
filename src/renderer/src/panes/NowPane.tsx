@@ -204,7 +204,7 @@ function Linked({ expr, shown, disabled, isTime, onCommit, onBake }: { expr: str
         = {shown}
       </span>
       {onBake && (
-        <button className="small bake-button" onClick={onBake} disabled={disabled} title="Bake: keep what it comes to as the value, and drop the link">
+        <button className="small bake-button" onClick={onBake} disabled={disabled} title="Bake the evaluated expression">
           <BakeIcon />
         </button>
       )}
@@ -286,7 +286,8 @@ export function NowPane() {
   const model = useStore((s) => s.model)
   const selection = useStore((s) => s.selection)
   const selectedActions = useStore((s) => s.selectedActions)
-  const time = useStore((s) => s.time)
+  // The playhead matters only while something is shown, so the pane follows it only then.
+  const time = useStore((s) => (s.selection.length > 0 || s.selectedActions.length > 0 ? s.time : 0))
   const fps = useStore((s) => s.settings.fps)
   const openLinksDialog = useStore((s) => s.openLinksDialog)
   const editable = canEdit()
@@ -475,7 +476,7 @@ function ActionView({ model, obj, action, index, fps, editable, openLinks }: { m
               step={0.1}
               min={0}
               disabled={locked}
-              title={`${label}, in seconds, or a time reference such as slide.end`}
+              title={`${label}: seconds, or a time such as slide.end`}
               onCommit={(text) => {
                 const num = parse(text)
                 if (num === null) {
@@ -585,7 +586,7 @@ function ActionView({ model, obj, action, index, fps, editable, openLinks }: { m
               return (
                 <Row key={key} name={label} status={action.timing.relative ? 'from, to: changes' : 'from, to'} onLink={locked ? undefined : () => openLinks(key)} linkTitle={`Link ${key} to something else`}>
                   <span className="now-control now-range">
-                    <Commit value={formatValue(from)} type="number" step={stepFor(key)} disabled={locked} title={`Where ${key} begins, instead of where the object is`} onCommit={write('from')} />
+                    <Commit value={formatValue(from)} type="number" step={stepFor(key)} disabled={locked} title={`Where ${key} begins`} onCommit={write('from')} />
                     <span className="dim">→</span>
                     <Commit value={formatValue(value)} type="number" step={stepFor(key)} disabled={locked} title={`Where ${key} ends`} onCommit={write('to')} />
                   </span>
@@ -611,6 +612,8 @@ function ActionView({ model, obj, action, index, fps, editable, openLinks }: { m
             ? timeRow('until', 'End', action.end, '')
             : timingNumber('duration', action.timing.duration, 1, action.timing.duration === undefined ? 'default' : '', (v) => v !== null && setActionProp(ref, 'duration', Math.max(minimum, v)), { min: minimum, step: 0.1, title: 'Seconds, or code' })}
           {timingNumber('delay', action.timing.delay, 0, action.timing.delay === undefined ? 'default' : '', (v) => setActionProp(ref, 'delay', v === null || v <= 0 ? null : Math.max(0, v)), { min: 0, step: 0.1, title: 'Seconds after the start before it moves, or code' })}
+          {timingNumber('hold', action.timing.hold, 0, action.timing.return === undefined ? 'with return' : action.timing.hold ? '' : 'default', (v) => setActionProp(ref, 'hold', v === null || v <= 0 ? null : Math.max(0, v)), { min: 0, step: 0.1, title: 'Seconds the change is held once reached, before the return' })}
+          {timingNumber('return', action.timing.return, 0, action.timing.return === undefined ? 'keeps' : '', (v) => setActionProp(ref, 'return', v === null ? null : Math.max(0, v)), { min: 0, step: 0.1, title: 'Seconds over which the animation goes back to what it found; empty, the change keeps' })}
           <Row name="ease" status={ease === undefined ? 'default' : ''}>
             <span className="now-control">
               <select
@@ -633,17 +636,24 @@ function ActionView({ model, obj, action, index, fps, editable, openLinks }: { m
                 ))}
                 <option value={CUSTOM}>custom</option>
               </select>
-              {easeMode === CUSTOM && <Commit value={raw('ease') ?? ''} disabled={locked} title="A function of the progress, 0 to 1, giving the eased progress, 0 to 1" onCommit={(t) => t.trim() && setActionProp(ref, 'ease', t.trim(), true)} />}
+              {easeMode === CUSTOM && <Commit value={raw('ease') ?? ''} disabled={locked} title="A function of the progress, 0 to 1" onCommit={(t) => t.trim() && setActionProp(ref, 'ease', t.trim(), true)} />}
             </span>
           </Row>
           {easeMode === RAMPS && timingNumber('easeIn', action.timing.easeIn, easeIn, action.timing.easeIn === undefined ? 'default' : '', (v) => setActionProp(ref, 'easeIn', v === null ? null : Math.max(0, v)), { min: 0, max: span, step: 0.01, slider: true, title: 'Seconds to get up to speed' })}
           {easeMode === RAMPS && timingNumber('easeOut', action.timing.easeOut, easeOut, action.timing.easeOut === undefined ? 'default' : '', (v) => setActionProp(ref, 'easeOut', v === null ? null : Math.max(0, v)), { min: 0, max: span, step: 0.01, slider: true, title: 'Seconds to slow down at the end' })}
           <Row name="relative" status={action.timing.relative ? '' : 'default'}>
-            <input type="checkbox" checked={!!action.timing.relative} disabled={locked} onChange={(e) => setActionProp(ref, 'relative', e.target.checked ? true : null)} title="Values are changes from where the object is when it starts (D51)" />
+            <input type="checkbox" checked={!!action.timing.relative} disabled={locked} onChange={(e) => setActionProp(ref, 'relative', e.target.checked ? true : null)} title="Changes from where it starts" />
           </Row>
-          {obj.className === 'Text' && action.verb !== 'path' && action.verb !== 'morph' && (
+          {obj.className === 'Text' && action.timing.units && (
+            <Row name="by" status="by handle">
+              <span className="dim">
+                {action.timing.by} {action.timing.units.join(', ')}
+              </span>
+            </Row>
+          )}
+          {obj.className === 'Text' && action.verb !== 'path' && action.verb !== 'morph' && !action.timing.units && (
             <Row name="by" status={action.timing.by ? '' : 'default'}>
-              <select className="now-select" value={action.timing.by ?? 'whole'} disabled={locked} onChange={(e) => setActionProp(ref, 'by', e.target.value === 'whole' ? null : e.target.value)} title="The whole text, or each character, word, or line in turn, from its own place (D268)">
+              <select className="now-select" value={action.timing.by ?? 'whole'} disabled={locked} onChange={(e) => setActionProp(ref, 'by', e.target.value === 'whole' ? null : e.target.value)} title="Whole, or each character, word, or line in turn">
                 <option value="whole">whole</option>
                 {UNIT_KINDS.map((kind) => (
                   <option key={kind} value={kind}>
@@ -655,7 +665,7 @@ function ActionView({ model, obj, action, index, fps, editable, openLinks }: { m
           )}
           {action.timing.by && typeof action.timing.stagger === 'function' ? (
             <Row name="stagger" status="by index">
-              <Commit value={raw('stagger') ?? ''} disabled={locked} title="A function of the unit's index giving the seconds before that unit, or a number" onCommit={(t) => t.trim() && setActionProp(ref, 'stagger', t.trim(), true)} />
+              <Commit value={raw('stagger') ?? ''} disabled={locked} title="Seconds before each unit, or a function of its index" onCommit={(t) => t.trim() && setActionProp(ref, 'stagger', t.trim(), true)} />
             </Row>
           ) : (
             action.timing.by && timingNumber('stagger', typeof action.timing.stagger === 'number' ? action.timing.stagger : undefined, DEFAULT_STAGGER, action.timing.stagger === undefined ? 'default' : '', (v) => setActionProp(ref, 'stagger', v === null ? null : Math.max(0, v)), { min: 0, step: 0.01, title: 'Seconds between one unit and the next, or code: a function of the index' })

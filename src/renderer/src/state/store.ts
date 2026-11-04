@@ -19,7 +19,7 @@ export type ObjectKind = 'Rect' | 'Circle' | 'Text' | 'Shape'
 export const OBJECT_KINDS: ObjectKind[] = ['Rect', 'Circle', 'Text', 'Shape']
 
 /** The preview's tool (D203): Select, the default, acts on objects and on the selected path's points; Object places one of the chosen kind per click (D163); Path starts a path on an object, draws points, and moves the path and its points. A tool stays until put away. */
-export type Tool = 'select' | 'object' | 'path' | 'shape'
+export type Tool = 'select' | 'object' | 'path' | 'shape' | 'pencil' | 'paint'
 /** What a press picks (D247). */
 export type Pick = 'object' | 'group' | 'class'
 
@@ -144,9 +144,11 @@ export interface Prefs {
   hotkeys?: Readonly<Record<string, readonly string[]>>
   /** Whether the code pane shows every time as frames beside it, and frames as seconds (D276); on unless turned off. */
   timeHints?: boolean
+  /** Whether an object's clip in the timeline carries its opacity along its bottom, with the handles of its fades (D284); on unless turned off. */
+  clipOpacity?: boolean
 }
 
-export const DEFAULT_PREFS: Prefs = { objectLength: 2, timeHints: true }
+export const DEFAULT_PREFS: Prefs = { objectLength: 2, timeHints: true, clipOpacity: true }
 
 function loadPrefs(): Prefs {
   try {
@@ -158,7 +160,7 @@ function loadPrefs(): Prefs {
     if (saved.hotkeys && typeof saved.hotkeys === 'object') {
       for (const [id, keys] of Object.entries(saved.hotkeys)) if (Array.isArray(keys) && keys.every((k) => typeof k === 'string')) hotkeys[id] = keys
     }
-    return { objectLength: length === null ? null : typeof length === 'number' && length > 0 ? length : DEFAULT_PREFS.objectLength, hotkeys, timeHints: saved.timeHints !== false }
+    return { objectLength: length === null ? null : typeof length === 'number' && length > 0 ? length : DEFAULT_PREFS.objectLength, hotkeys, timeHints: saved.timeHints !== false, clipOpacity: saved.clipOpacity !== false }
   } catch {
     return DEFAULT_PREFS
   }
@@ -412,6 +414,8 @@ interface State {
   hiddenPaths: string[]
   /** The kind of object the Add tool places (D163). */
   addKind: ObjectKind
+  /** The object preset the Object tool places, by id, instead of a kind (D300). */
+  addPreset: string | null
   /** The points of the selected path that are picked: placed, clicked, or boxed; a drag of one moves them all and Delete removes them (D194, D198). */
   pathPoints: number[]
   contextMenu: ContextMenuState | null
@@ -440,7 +444,6 @@ interface State {
   /** Add an object to the selection, or take it out (D89). */
   toggleSelected: (name: string) => void
   setTransformMode: (mode: TransformMode) => void
-  cycleTransformMode: () => void
   setPreviewSnap: (snap: Partial<PreviewSnap>) => void
   setCollide: (on: boolean) => void
   setPush: (on: boolean) => void
@@ -471,6 +474,7 @@ interface State {
   setPathHidden: (key: string, hidden: boolean) => void
   setPathPoints: (indices: number[]) => void
   setAddKind: (kind: ObjectKind) => void
+  setAddPreset: (addPreset: string | null) => void
   openMenu: (menu: ContextMenuState) => void
   closeMenu: () => void
   openDialog: (dialog: DialogState) => void
@@ -551,6 +555,7 @@ function createAppStore() {
       showPaths: loadChoice<'on' | 'off'>(SHOW_PATHS_KEY, ['on', 'off'], 'on') === 'on',
       hiddenPaths: [],
       addKind: 'Rect',
+      addPreset: null,
       pathPoints: [],
       contextMenu: null,
       dialog: null,
@@ -608,7 +613,6 @@ function createAppStore() {
         changeSelection({ selection: normalized(current.includes(name) ? current.filter((n) => n !== name) : [...current, name]), selectedActions: [] })
       },
       setTransformMode: (transformMode) => set({ transformMode }),
-      cycleTransformMode: () => set((s) => ({ transformMode: TRANSFORM_MODES[(TRANSFORM_MODES.indexOf(s.transformMode) + 1) % TRANSFORM_MODES.length]! })),
       setPreviewSnap: (partial) =>
         set((s) => {
           const previewSnap = { ...s.previewSnap, ...partial }
@@ -697,7 +701,8 @@ function createAppStore() {
         }),
       setPathHidden: (key, hidden) => set((s) => ({ hiddenPaths: hidden ? [...new Set([...s.hiddenPaths, key])] : s.hiddenPaths.filter((k) => k !== key) })),
       setPathPoints: (pathPoints) => set({ pathPoints }),
-      setAddKind: (addKind) => set({ addKind }),
+      setAddKind: (addKind) => set({ addKind, addPreset: null }),
+      setAddPreset: (addPreset) => set({ addPreset }),
       openMenu: (contextMenu) => set({ contextMenu }),
       closeMenu: () => set((s) => (s.contextMenu ? { contextMenu: null } : s)),
       openDialog: (dialog) => set({ dialog, contextMenu: null }),

@@ -104,9 +104,16 @@ function GeneralTab() {
       </div>
       <span className="dim">Code pane</span>
       <div className="row">
-        <label className="check" title="Every time in the code with its frames beside it, and frames with their seconds">
+        <label className="check" title="Frames beside every time in the code">
           <input type="checkbox" checked={prefs.timeHints !== false} onChange={(e) => setPrefs({ timeHints: e.target.checked })} />
           frames beside times
+        </label>
+      </div>
+      <span className="dim">Timeline</span>
+      <div className="row">
+        <label className="check" title="An opacity lane on every object clip">
+          <input type="checkbox" checked={prefs.clipOpacity !== false} onChange={(e) => setPrefs({ clipOpacity: e.target.checked })} />
+          opacity on object clips
         </label>
       </div>
     </div>
