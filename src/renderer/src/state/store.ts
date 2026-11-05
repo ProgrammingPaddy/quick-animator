@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { groupCarries, normalizeSelection } from '../model/groups'
 import { GROUP } from '../model/registry'
 import type { SceneError, SceneModel } from '../model/types'
+import { DEFAULT_SETTINGS } from '../../../shared/api'
 import { snapToFrame } from './time'
 
 export interface ProjectSettings {
@@ -146,9 +147,14 @@ export interface Prefs {
   timeHints?: boolean
   /** Whether an object's clip in the timeline carries its opacity along its bottom, with the handles of its fades (D284); on unless turned off. */
   clipOpacity?: boolean
+  /** How many of the colors used lately show beside a color, 0 to 12 (D309); 4 unless set. */
+  recentColors?: number
 }
 
-export const DEFAULT_PREFS: Prefs = { objectLength: 2, timeHints: true, clipOpacity: true }
+export const DEFAULT_PREFS: Prefs = { objectLength: 2, timeHints: true, clipOpacity: true, recentColors: 4 }
+
+/** The most colors used lately that are kept, and the most that show beside a color (D309). */
+export const RECENT_COLORS_MAX = 12
 
 /** The Shape tool's and the pencil's style, and Paint's colors (D304): the fill and whether there is one, the outline and its width, and each one's own opacity. */
 export interface ShapeStyle {
@@ -169,7 +175,7 @@ function loadColors(): string[] {
   try {
     const raw = localStorage.getItem(COLORS_KEY)
     const parsed: unknown = raw ? JSON.parse(raw) : null
-    return Array.isArray(parsed) ? parsed.filter((c): c is string => typeof c === 'string').slice(0, 8) : []
+    return Array.isArray(parsed) ? parsed.filter((c): c is string => typeof c === 'string').slice(0, RECENT_COLORS_MAX) : []
   } catch {
     return []
   }
@@ -203,7 +209,7 @@ function loadPrefs(): Prefs {
     if (saved.hotkeys && typeof saved.hotkeys === 'object') {
       for (const [id, keys] of Object.entries(saved.hotkeys)) if (Array.isArray(keys) && keys.every((k) => typeof k === 'string')) hotkeys[id] = keys
     }
-    return { objectLength: length === null ? null : typeof length === 'number' && length > 0 ? length : DEFAULT_PREFS.objectLength, hotkeys, timeHints: saved.timeHints !== false, clipOpacity: saved.clipOpacity !== false }
+    return { objectLength: length === null ? null : typeof length === 'number' && length > 0 ? length : DEFAULT_PREFS.objectLength, hotkeys, timeHints: saved.timeHints !== false, clipOpacity: saved.clipOpacity !== false, recentColors: typeof saved.recentColors === 'number' && Number.isFinite(saved.recentColors) ? Math.max(0, Math.min(RECENT_COLORS_MAX, Math.round(saved.recentColors))) : DEFAULT_PREFS.recentColors }
   } catch {
     return DEFAULT_PREFS
   }
@@ -455,6 +461,9 @@ interface State {
   showPaths: boolean
   /** Paths hidden for now, while the Path tool is on, as object:index (D209). */
   hiddenPaths: string[]
+  /** The marker whose text is being typed on the ruler, by its index (D307). */
+  markerEdit: number | null
+  setMarkerEdit: (index: number | null) => void
   /** The colors used lately, newest first, for every color picker (D303). */
   recentColors: string[]
   rememberColor: (color: string) => void
@@ -561,7 +570,7 @@ function createAppStore() {
       return model ? normalizeSelection(model, names) : names
     }
     return {
-      settings: { width: 1920, height: 1080, fps: 60, hold: 0, background: '#1c1c1c' },
+      settings: DEFAULT_SETTINGS,
       time: 0,
       playing: false,
       playStart: null,
@@ -603,6 +612,7 @@ function createAppStore() {
       notice: null,
       showPaths: loadChoice<'on' | 'off'>(SHOW_PATHS_KEY, ['on', 'off'], 'on') === 'on',
       hiddenPaths: [],
+      markerEdit: null,
       recentColors: loadColors(),
       shapeStyle: loadShapeStyle(),
       addKind: 'Rect',
@@ -754,9 +764,13 @@ function createAppStore() {
       setPathPoints: (pathPoints) => set({ pathPoints }),
       setAddKind: (addKind) => set({ addKind, addPreset: null }),
       setAddPreset: (addPreset) => set({ addPreset }),
+      setMarkerEdit: (markerEdit) => set({ markerEdit }),
       rememberColor: (color) =>
         set((s) => {
-          const recentColors = [color, ...s.recentColors.filter((c) => c !== color)].slice(0, 8)
+          // A color already among those shown beside a color keeps its place, so the boxes never shuffle under the pointer; any other comes to the front (D309).
+          const index = s.recentColors.indexOf(color)
+          if (index >= 0 && index < (s.prefs.recentColors ?? 0)) return s
+          const recentColors = [color, ...s.recentColors.filter((c) => c !== color)].slice(0, RECENT_COLORS_MAX)
           try {
             localStorage.setItem(COLORS_KEY, JSON.stringify(recentColors))
           } catch {

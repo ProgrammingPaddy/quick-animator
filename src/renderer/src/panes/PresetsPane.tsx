@@ -4,7 +4,7 @@ import { showMenu } from '../components/ContextMenu'
 import { PresetPreview } from '../components/PresetPreview'
 import { labelOn, VERB_COLORS, type Verb } from '../model/registry'
 import { addObject } from '../project/operations'
-import { ANIMATION_PRESETS, applyAnimationPreset, dropTime, presetById, userAnimationPreset, type AnimationPreset } from '../project/presets'
+import { ANIMATION_PRESETS, applyAnimationPreset, dropTime, presetById, presetLength, userAnimationPreset, type AnimationPreset } from '../project/presets'
 import { addUserObject, applyClassPreset, deleteUserPreset } from '../project/userPresets'
 import { dropTargets } from '../state/dropTargets'
 import { OBJECT_KINDS, useStore, type ObjectKind, type UserPreset } from '../state/store'
@@ -336,7 +336,7 @@ export function PresetsPane() {
             </select>
           )}
         </div>
-        <div className="preset-card" style={{ background: color, color: labelOn(color), width: CARD_W }} title={p.title} onPointerDown={beginDrag({ kind: 'animation', id: p.id, user, variant, label: user ? p.label : p.id, color, duration: p.duration, look: OBJECT_LOOK.Rect }, () => applyToSelection(p))}>
+        <div className="preset-card" style={{ background: color, color: labelOn(color), width: CARD_W }} title={p.title} onPointerDown={beginDrag({ kind: 'animation', id: p.id, user, variant, label: user ? p.label : p.id, color, duration: presetLength(p), look: OBJECT_LOOK.Rect }, () => applyToSelection(p))}>
           <span className="ident">{user ? p.label : p.id}</span>
           {p.verb}
         </div>

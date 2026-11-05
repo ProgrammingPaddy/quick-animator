@@ -98,7 +98,7 @@ export function isMember(obj: SceneObject, name: string): boolean {
  * The file runs as plain JavaScript inside a scope that already holds every class, so nothing is
  * imported, and a bare `name = Circle({ ... })` names the object (decision D48).
  */
-export function evaluateScene(source: string, fps = 60): EvaluateResult {
+export function evaluateScene(source: string, fps: number): EvaluateResult {
   const parsed = parseScene(source, CLASS_NAMES, VERB_NAMES)
   // A statement written with an old name for a verb is the verb it now means, and remembers the name for a note (D211).
   for (const info of parsed.actions) {

@@ -2,9 +2,7 @@ import { app, dialog, ipcMain, type BrowserWindow } from 'electron'
 import { promises as fs, watch, type FSWatcher } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import * as opentype from 'opentype.js'
-import type { ProjectData, ProjectFile, ProjectFont, ProjectSettings } from '../shared/api'
-
-const DEFAULT_SETTINGS: ProjectSettings = { width: 1920, height: 1080, fps: 60, hold: 0, background: '#1c1c1c' }
+import { DEFAULT_SETTINGS, type ProjectData, type ProjectFile, type ProjectFont, type ProjectSettings } from '../shared/api'
 
 const TEMPLATE_SCENE = `// The cast: every object, one attribute per line.
 box = Rect({

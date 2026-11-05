@@ -190,6 +190,29 @@ function midAnimationStart(name: string, attrs: string[], time: number): number 
 }
 
 /**
+ * An edit at a time one of the object's own animations ends at, a piece of D263 say, while a
+ * path still carries the other axis in the middle of its run (D313): the animation that ends
+ * here and the axes it takes on, at the values shown, so what is written next shows at this
+ * time, where the path's own end would not (D224). Null when there is nothing to take on.
+ */
+function axesToJoin(name: string, attrs: string[], time: number): { ref: ActionRef; values: Record<string, number> } | null {
+  const { model, fps } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl) return null
+  const slack = frameSeconds(fps) / 2
+  const values: Record<string, number> = {}
+  for (const attr of attrs) {
+    if (attr !== 'x' && attr !== 'y') continue
+    const path = pathHolds(obj, attr, time)
+    const value = valueAt(model, obj, attr, time)
+    if (path && time > path.start + slack && time < path.end - slack && typeof value === 'number') values[attr] = roundAttr(attr, value)
+  }
+  if (Object.keys(values).length === 0) return null
+  const piece = attrs.map((attr) => definingAction(obj, attr, time)).find((a) => !!a?.stmt && !a.classAction && a.verb !== 'path' && !a.timing.relative && Math.abs(a.end - time) <= slack)
+  return piece ? { ref: { object: name, index: obj.actions.indexOf(piece) }, values } : null
+}
+
+/**
  * A plain drag or nudge: these objects show these values at this time, in one step. When a
  * class action defines one of the values right now, the object first overrides it with its own
  * action, which is what then gets edited (D80). In the middle of an animation, an animation from
@@ -211,8 +234,10 @@ export function setAttrsAtMany(entries: { name: string; attrs: Record<string, nu
     }
   }
   const pieces = entries.map(({ name, attrs }) => ({ name, attrs: Object.keys(attrs), from: midAnimationStart(name, Object.keys(attrs), time) })).filter((p) => p.from !== null)
-  const own = pieces.length > 0 && !gestureOpen()
+  const joins = entries.map(({ name, attrs }) => axesToJoin(name, Object.keys(attrs), time)).filter((j) => j !== null)
+  const own = (pieces.length > 0 || joins.length > 0) && !gestureOpen()
   if (own) beginGesture()
+  for (const join of joins) for (const [attr, value] of Object.entries(join.values)) setActionProp(join.ref, attr, value)
   for (const piece of pieces) beginTimed(piece.name, piece.attrs, 'start', piece.from!, time - piece.from!)
   const changed = writeAttrsAtMany(entries, time)
   if (own) endGesture()
@@ -3097,12 +3122,12 @@ export function beginFill(name: string, color: string, pin: Pin, when: number, l
   return appendTimed(name, 'to', { fill: color }, pin, when, length)
 }
 
-/** A marker at a time (D296, D302): `marker(2.5)` at the end of the file; named, its text is asked for at once. */
+/** A marker at a time (D296, D302): `marker(2.5)` at the end of the file; named, its text is typed at once, where it shows on the ruler (D307). */
 export function addMarker(time: number, named = false): void {
   const { source, model } = state()
   if (!model) return
   applyEdits([appendStatement(source, `marker(${formatNumber(Math.max(0, roundSeconds(time)))})`)])
-  if (named) requestMarkerLabel((state().model?.markers.length ?? 1) - 1)
+  if (named) useStore.getState().setMarkerEdit((state().model?.markers.length ?? 1) - 1)
 }
 
 /** A marker moved to a time: its seconds rewritten, as frames when written as frames (D276). */
@@ -3124,18 +3149,6 @@ export function setMarkerLabel(index: number, label: string): void {
   const text = label.trim()
   if (marker.stmt.label) applyEdits([text ? { from: marker.stmt.label.from, to: marker.stmt.label.to, insert: formatValue(text) } : { from: marker.stmt.arg.to, to: marker.stmt.label.to, insert: '' }])
   else if (text) applyEdits([{ from: marker.stmt.arg.to, to: marker.stmt.arg.to, insert: `, ${formatValue(text)}` }])
-}
-
-/** Ask for a marker's text (D302), as Reaper does. */
-export function requestMarkerLabel(index: number): void {
-  const marker = state().model?.markers[index]
-  if (!marker) return
-  useStore.getState().openDialog({
-    title: marker.label ? 'Rename marker' : 'Name marker',
-    input: { label: 'Text', value: marker.label ?? '' },
-    confirmLabel: marker.label ? 'Rename' : 'Name',
-    onConfirm: (value) => setMarkerLabel(index, value),
-  })
 }
 
 /** A marker's statement taken out of the file (D296). */
@@ -3212,12 +3225,11 @@ export function sketchPath(name: string, worlds: Point[], pin: Pin, when: number
   }
 }
 
-/** A line sketched with the pencil (D297): a Shape through the points, simplified and smoothed, in the given outline, no fill, from `at`. Returns its name. */
+/** A line sketched with the pencil (D297): a Shape through the points, simplified and smoothed, in the given outline, no fill, from `at`; a single point is a dot, a line that ends where it begins (D311). Returns its name. */
 export function sketchLine(worlds: Point[], stroke: string, width: number, strokeOpacity: number, at: number): string | null {
   const { model } = state()
-  if (!model || worlds.length < 2) return null
-  const simplified = simplifyPoints(worlds, 2)
-  if (simplified.length < 2) return null
+  if (!model || worlds.length === 0) return null
+  const simplified = worlds.length === 1 ? [worlds[0]!, worlds[0]!] : simplifyPoints(worlds, 2)
   let left = Infinity
   let right = -Infinity
   let bottom = Infinity

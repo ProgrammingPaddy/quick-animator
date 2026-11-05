@@ -11,7 +11,8 @@ const TIMING_LINE = /^\s*(?:at|delay|duration|until|hold|return|easeIn|easeOut|s
 const NUMBER = /^-?\d+(?:\.\d+)?$/
 const FRAMES = /^frames\(\s*(-?\d+(?:\.\d+)?)\s*\)$/
 
-const config = { fps: 60, enabled: true }
+/** Nothing shows until the app has said the rate. */
+const config = { fps: 0, enabled: false }
 const refresh = StateEffect.define<null>()
 
 /** Set the rate and whether the notes show; the open editor, if any, redraws them. */

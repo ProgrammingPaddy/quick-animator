@@ -180,14 +180,16 @@ is dragged.
 
 A marker is a moment on the ruler: `marker(2)`, numbered by its place in time, or `marker(2,
 'Intro')` with its text; assigned, `intro = marker(2, 'Intro')` is the number 2, so `at: intro`
-reads it. M writes one at the playhead, Shift+M one with text; a marker is dragged, named, and
-snapped to on the ruler.
+reads it. M writes one at the playhead, Shift+M one with its text typed at once; a marker is dragged,
+snapped to, and named on the ruler, its text typed where it shows.
 
 A Shape's `fillOpacity` and `strokeOpacity` are the fill's and the outline's own opacities, 0 to
 1 on top of `opacity`, as SVG's fill-opacity and stroke-opacity, which an import keeps.
 
 A Shape's `drawn` is how much of its line is drawn from its start, 0 to 1, 1 unless written;
-the stroke stops there and the fill is whole. `drawn: [0, 1]` writes a line on.
+the stroke stops there and the fill is whole. `drawn: [0, 1]` writes a line on. A line whose two
+points are the same is a dot, round and as wide as its stroke, there as soon as any of it is
+drawn; the pencil writes one for a click.
 
 ## Lifetime and visibility
 

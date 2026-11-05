@@ -53,10 +53,11 @@ function hsvToHex(h: number, s: number, v: number): string {
 }
 
 /**
- * A color, picked the same way everywhere (D303): a swatch that opens a picker with a hue bar,
- * a square of saturation and brightness, the hex, the colors used lately, and every color the
- * project writes; with `onDrop`, a dropper that takes a color from the preview. A color picked
- * from the lists or let go of in the picker joins the colors used lately.
+ * A color, picked the same way everywhere (D303, D309): the color itself, wide, with the colors
+ * used lately beside it as small boxes, as many as the preference says; the color opens a picker
+ * with a hue bar, a square of saturation and brightness, the hex, the colors used lately, and
+ * every color the project writes; with `onDrop`, a dropper that takes a color from the preview.
+ * A color picked from the lists or let go of in the picker joins the colors used lately.
  */
 export function ColorPicker({ value, onChange, onDrop, disabled, title, onOpen, onClose }: { value: string; onChange: (hex: string) => void; onDrop?: () => void; disabled?: boolean; title?: string; onOpen?: () => void; onClose?: () => void }) {
   const [open, setOpen] = useState(false)
@@ -65,12 +66,15 @@ export function ColorPicker({ value, onChange, onDrop, disabled, title, onOpen, 
   const buttonRef = useRef<HTMLButtonElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
   const recent = useStore((s) => s.recentColors)
+  const beside = useStore((s) => s.prefs.recentColors ?? 0)
   const rememberColor = useStore((s) => s.rememberColor)
   const model = useStore((s) => s.model)
   const project = useMemo(() => colorsOf(model), [model])
   const valid = parseColor(value) ? value : '#ffffff'
   const hsv = useMemo(() => hexToHsv(valid), [valid])
   const hueRef = useRef(hsv.h)
+  /** The color the picker was opened on: only a color changed in it is one used lately. */
+  const openedOn = useRef(value)
   if (hsv.s > 1e-6 && hsv.v > 1e-6) hueRef.current = hsv.h
 
   useEffect(() => setHex(value), [value])
@@ -79,6 +83,7 @@ export function ColorPicker({ value, onChange, onDrop, disabled, title, onOpen, 
     if (disabled) return
     const r = buttonRef.current?.getBoundingClientRect()
     if (r) setAt({ left: Math.min(r.left, window.innerWidth - 232), top: r.bottom + 4 })
+    openedOn.current = value
     setOpen(true)
     onOpen?.()
   }
@@ -86,7 +91,7 @@ export function ColorPicker({ value, onChange, onDrop, disabled, title, onOpen, 
     if (!open) return
     setOpen(false)
     onClose?.()
-    if (parseColor(value)) rememberColor(value)
+    if (value !== openedOn.current && parseColor(value)) rememberColor(value)
   }
 
   useEffect(() => {
@@ -141,6 +146,7 @@ export function ColorPicker({ value, onChange, onDrop, disabled, title, onOpen, 
         style={{ background: c }}
         title={c}
         aria-label={c}
+        disabled={disabled}
         onClick={() => {
           onChange(c)
           rememberColor(c)
@@ -149,8 +155,13 @@ export function ColorPicker({ value, onChange, onDrop, disabled, title, onOpen, 
     ))
 
   return (
-    <>
+    <span className="color-well">
       <button ref={buttonRef} className="color-swatch" style={{ background: valid }} disabled={disabled} title={title ?? valid} aria-label={title ?? 'Color'} onClick={() => (open ? hide() : show())} />
+      {beside > 0 && recent.length > 0 && (
+        <span className="color-recent" role="group" aria-label="Recent colors">
+          {swatches(recent.slice(0, beside), 'b')}
+        </span>
+      )}
       {open && (
         <div ref={popRef} className="color-picker" style={{ left: at.left, top: at.top }} role="dialog" aria-label="Color">
           <div
@@ -212,17 +223,19 @@ export function ColorPicker({ value, onChange, onDrop, disabled, title, onOpen, 
             )}
           </div>
           {recent.length > 0 && (
-            <div className="color-list" title="Used lately">
-              {swatches(recent, 'r')}
+            <div className="color-group">
+              <span className="color-label">Recent</span>
+              <div className="color-list">{swatches(recent, 'r')}</div>
             </div>
           )}
           {project.length > 0 && (
-            <div className="color-list project" title="In the project">
-              {swatches(project, 'p')}
+            <div className="color-group">
+              <span className="color-label">Project</span>
+              <div className="color-list">{swatches(project, 'p')}</div>
             </div>
           )}
         </div>
       )}
-    </>
+    </span>
   )
 }

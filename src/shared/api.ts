@@ -8,6 +8,9 @@ export interface ProjectSettings {
   background: string
 }
 
+/** A new project's settings, and what the panes show before a project is open: the one place a frame rate is written (D312). */
+export const DEFAULT_SETTINGS: ProjectSettings = { width: 1920, height: 1080, fps: 60, hold: 0, background: '#1c1c1c' }
+
 /** A scene file with its path relative to the project folder, such as `scenes/main.js`. */
 export interface ProjectFile {
   file: string

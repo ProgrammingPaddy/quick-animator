@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent }
 import { updateSettings } from '../project/controller'
 import { roundSeconds } from '../project/operations'
 import { bindingsOf, conflictsOf, HOTKEYS, keyLabel, keyOf, NO_OVERRIDES, SCOPE_LABEL, SCOPES, type Hotkey } from '../state/hotkeys'
-import { DEFAULT_PREFS, useStore } from '../state/store'
+import { DEFAULT_PREFS, RECENT_COLORS_MAX, useStore } from '../state/store'
 import { NumberField } from './NumberField'
 
 export function PreferencesDialogLayer() {
@@ -108,6 +108,10 @@ function GeneralTab() {
           <input type="checkbox" checked={prefs.timeHints !== false} onChange={(e) => setPrefs({ timeHints: e.target.checked })} />
           frames beside times
         </label>
+      </div>
+      <span className="dim">Recent colors</span>
+      <div className="row">
+        <NumberField label="Shown beside a color, 0 to 12" value={prefs.recentColors ?? 0} unit="" min={0} onChange={(v) => setPrefs({ recentColors: Math.min(RECENT_COLORS_MAX, Math.round(v)) })} />
       </div>
       <span className="dim">Timeline</span>
       <div className="row">

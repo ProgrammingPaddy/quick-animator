@@ -13,7 +13,7 @@ import type { SceneModel, SceneObject } from '../model/types'
 import { newProject, pickProject } from '../project/controller'
 import { askSystemFonts } from '../project/fonts'
 import { convertTextToShape } from '../project/textToShape'
-import { parseColor, textPadding, textStyleAt, valueAt, worldPose } from '../model/sample'
+import { journeyOf, parseColor, textPadding, textStyleAt, valueAt, worldPose } from '../model/sample'
 import { layoutOf, type TextStyle } from '../model/text'
 import { DEFAULT_EASE_FRACTION, easingFor, unease } from '../model/easing'
 import { addMorph, addObject, addPath, beginFill, beginOutline, canEdit, paintFill, paintStroke, sketchLine, sketchPath, writeOnLine, setObjectProp, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, pathDragTarget, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestClasses, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, settleMorph, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphRunning, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
@@ -329,6 +329,8 @@ export function PreviewPane() {
   const [drafting, setDrafting] = useState(false)
   /** A line being drawn for the selected path, in pane pixels, until the pointer is let go (D194). */
   const [sketch, setSketch] = useState<{ x: number; y: number }[] | null>(null)
+  /** Whether the trail being drawn is a line of the pencil's, shown as it will be, rather than a path (D311). */
+  const [sketchInk, setSketchInk] = useState(false)
   const [marquee, setMarquee] = useState<Marquee | null>(null)
   const [zoom, setZoom] = useState(1)
   const [, bump] = useReducer((n: number) => n + 1, 0)
@@ -624,7 +626,9 @@ export function PreviewPane() {
       // With an animation selected, Shift jumps to its end: what is dragged then is its end state, and nothing new is made (D157).
       const picked = s.selectedActions.find((r) => s.selection.includes(r.object)) ?? s.selectedActions[0]
       const editing = picked ? s.model.objects.find((o) => o.name === picked.object)?.actions[picked.index] : undefined
-      if (editing) {
+      // In Chain mode, with the playhead resting at the selected animation's end, Shift goes on with the chain (D310): the next animation follows that one, as long as it was, and nothing is edited.
+      const last = editing && hoverRef.current && s.chain && s.pin === 'start' && Math.abs(editing.end - s.time) < 0.5 / s.settings.fps ? editing : null
+      if (editing && !last) {
         if (e.target instanceof Element && e.target.closest('.cm-editor')) (document.activeElement as HTMLElement | null)?.blur()
         // Shift previews the end the pin does not name: the end with Starts at playhead, the start with Ends at playhead (D187).
         const editEnd = s.pin === 'end' ? 'start' : 'end'
@@ -635,8 +639,16 @@ export function PreviewPane() {
       if (!hoverRef.current || s.pin !== 'start') return
       // The code pane may still hold the focus from an earlier click; the pointer being here says what Shift is for.
       if (e.target instanceof Element && e.target.closest('.cm-editor')) (document.activeElement as HTMLElement | null)?.blur()
-      gestureRef.current = { restore: s.time, from: s.time, duration: 1 }
-      s.setTime(s.time + 1)
+      const from = last ? last.end : s.time
+      const duration = last ? Math.max(1 / s.settings.fps, journeyOf(last)) : 1
+      gestureRef.current = { restore: s.time, from, duration }
+      s.setTime(from + duration)
+    }
+    // Shift held with another key is that key's hotkey, not a gesture (D310): the look ahead ends first, as letting go of Shift ends it, so the hotkey acts where the playhead rests.
+    const onOtherKey = (e: KeyboardEvent) => {
+      if (e.key === 'Shift' || e.key === 'Alt' || e.key === 'Control' || e.key === 'Meta' || !gestureRef.current || dragRef.current) return
+      useStore.getState().setTime(restingTime(gestureRef.current))
+      gestureRef.current = null
     }
     // Typing in the code pane or a field takes the pointer's say away until it moves over the pane again.
     const onFocusIn = (e: FocusEvent) => {
@@ -645,6 +657,7 @@ export function PreviewPane() {
     const onBlur = () => setAltDown(false)
     window.addEventListener('keyup', onKeyUp)
     window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keydown', onOtherKey, true)
     window.addEventListener('blur', onBlur)
     document.addEventListener('focusin', onFocusIn)
 
@@ -652,6 +665,7 @@ export function PreviewPane() {
       host.removeEventListener('wheel', onWheel)
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keydown', onOtherKey, true)
       window.removeEventListener('blur', onBlur)
       document.removeEventListener('focusin', onFocusIn)
       unsubscribe()
@@ -1232,10 +1246,7 @@ export function PreviewPane() {
         const from = gesture?.from ?? store.time
         const length = gesture?.duration ?? 1
         const end = outline ? beginOutline(located.hit, color, st.strokeWidth, pinNow, from, length) : beginFill(located.hit, color, pinNow, from, length)
-        if (end !== null) {
-          if (gesture && !gesture.editing && pinNow === 'start' && store.chain) gesture.from = end
-          if (pinNow === 'start') useStore.getState().setTime(end)
-        }
+        if (end !== null) madeWithShift(end, pinNow)
       } else if (outline) paintStroke(located.hit, color, st.strokeWidth, store.time)
       else paintFill(located.hit, color, store.time)
       rememberColor(color)
@@ -1470,7 +1481,8 @@ export function PreviewPane() {
     // Moving an object that a path places moves the path (D197, D205), as a drag during a move edits the move: the first anchor at the path's start, the last anywhere after, with the playhead taken to the path's end while it runs. The path selected, or merely owning the place; with Shift, only the selected path.
     const selectedRef = store.selectedActions.find((r) => r.object === subject.name)
     const pathSelected = selectedRef && subject.actions[selectedRef.index]?.verb === 'path' ? selectedRef.index : null
-    if (op === 'move' && objects.length === 1 && !isGroup && !(e.ctrlKey || e.metaKey) && (!e.shiftKey || pathSelected !== null)) {
+    const making = !!gestureRef.current && !gestureRef.current.editing
+    if (op === 'move' && objects.length === 1 && !isGroup && !(e.ctrlKey || e.metaKey) && (!e.shiftKey || (pathSelected !== null && !making))) {
       const target = pathDragTarget(subject.name, pathSelected, store.time)
       if (target) {
         if (target.showTime !== null) store.setTime(target.showTime)
@@ -1963,11 +1975,23 @@ export function PreviewPane() {
     if (keep && edit.value !== edit.original) setObjectProp(edit.name, 'text', edit.value)
   }
 
+  /** After an animation made with Shift by a click or a stroke (D103, D127, D310): the playhead shows its end, or in Chain mode the end of the one that would follow it. */
+  const madeWithShift = (end: number, pinNow: 'start' | 'end') => {
+    const s = useStore.getState()
+    const gesture = gestureRef.current
+    if (!gesture || pinNow !== 'start') return
+    if (!gesture.editing && s.chain) {
+      gesture.from = end
+      s.setTime(end + gesture.duration)
+    } else s.setTime(end)
+  }
+
   /**
    * A sketch with the pencil (D297, D305): the trail is kept while the pointer is down, and the
    * playhead stays where it is. On an object the trail becomes a path along it, from the
    * playhead, or as any Shift-made animation when Shift is held (D103); on empty space it becomes
-   * a line, written on with Shift the same way (D298).
+   * a line, written on with Shift the same way (D298). A press let go of where it began is a
+   * dot, wherever it is (D311).
    */
   const beginSketch = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, target: string | null, world0: Point, paneX: number, paneY: number) => {
     const viewport = viewportRef.current
@@ -1976,6 +2000,7 @@ export function PreviewPane() {
     const trail: Point[] = [{ x: paneX, y: paneY }]
     const withShift = e.shiftKey
     setSketch([...trail])
+    setSketchInk(!target)
     capture(
       host,
       e.pointerId,
@@ -1989,20 +2014,21 @@ export function PreviewPane() {
       },
       () => {
         setSketch(null)
+        setSketchInk(false)
         const s = useStore.getState()
         const gesture = gestureRef.current
         const pinNow = gesture?.editing ? 'start' : s.pin
         const from = gesture?.from ?? s.time
         const length = gesture?.duration ?? 1
+        const moved = trail.some((p) => Math.hypot(p.x - trail[0]!.x, p.y - trail[0]!.y) >= 3)
         let end: number | null = null
-        if (target) end = sketchPath(target, trailWorld, pinNow, from, length)
+        if (target && moved) end = sketchPath(target, trailWorld, pinNow, from, length)
         else {
           const st = styleRef.current
-          const name = sketchLine(trailWorld, st.stroke, st.strokeWidth, st.strokeOpacity, s.time)
+          const name = sketchLine(moved ? trailWorld : [world0], st.stroke, st.strokeWidth, st.strokeOpacity, s.time)
           if (name && withShift) end = writeOnLine(name, pinNow, from, length)
         }
-        if (end !== null && gesture && !gesture.editing && pinNow === 'start' && s.chain) gesture.from = end
-        if (end !== null && gesture && pinNow === 'start') useStore.getState().setTime(end)
+        if (end !== null) madeWithShift(end, pinNow)
         paintRef.current()
       },
     )
@@ -2051,6 +2077,11 @@ export function PreviewPane() {
   const textSame = <K extends keyof TextStyle>(key: K): TextStyle[K] | null => (selectedTexts.length > 0 && selectedTexts.every((t) => t.style[key] === selectedTexts[0]!.style[key]) ? selectedTexts[0]!.style[key] : null)
 
   const onContextMenu = (e: ReactMouseEvent<HTMLDivElement>) => {
+    // Only the scene has menus (D308): a right-click on a button, a field, or a bar of the pane does nothing.
+    if (e.target !== e.currentTarget && e.target !== canvasRef.current) {
+      e.preventDefault()
+      return
+    }
     const located = locate(e.currentTarget, e.clientX, e.clientY)
     if (!located) {
       e.preventDefault()
@@ -2245,9 +2276,9 @@ export function PreviewPane() {
       {marquee && (
         <div className="preview-marquee" style={{ left: Math.min(marquee.x0, marquee.x1), top: Math.min(marquee.y0, marquee.y1), width: Math.abs(marquee.x1 - marquee.x0), height: Math.abs(marquee.y1 - marquee.y0) }} />
       )}
-      {sketch && sketch.length > 1 && (
+      {sketch && sketch.length > 0 && (
         <svg className="preview-sketch">
-          <polyline points={sketch.map((p) => `${p.x},${p.y}`).join(' ')} />
+          <polyline points={(sketch.length > 1 ? sketch : [sketch[0]!, sketch[0]!]).map((p) => `${p.x},${p.y}`).join(' ')} style={sketchInk ? { stroke: style.stroke, strokeWidth: Math.max(1, style.strokeWidth * zoom), strokeOpacity: style.strokeOpacity } : undefined} />
         </svg>
       )}
       <div className="preview-palette" onPointerDown={stop} role="group" aria-label="Tool">
@@ -2473,7 +2504,7 @@ export function PreviewPane() {
         </span>
         {tool === 'object' && <span className="hint">Click to place</span>}
         {tool === 'paint' && <span className="hint">{dropping ? 'Click an object to take its color' : 'Click to paint; Shift-click for a color change; Alt-click takes a color'}</span>}
-        {tool === 'pencil' && <span className="hint">Drag an object for a path along the stroke; drag on empty space for a line; Shift animates</span>}
+        {tool === 'pencil' && <span className="hint">Click for a dot, drag for a line, drag an object for its path; Shift animates</span>}
         {tool === 'shape' && shapeMode === 'create' && <span className="hint">{drafting ? 'Click for corners, drag to draw; the first point closes and fills, Escape leaves a line' : 'Click to start a shape'}</span>}
         {tool === 'shape' && shapeMode === 'edit' && <span className="hint">{shapeRef.current?.editable ? 'Drag a point, or a box around several; right-click a point or the line for curves and corners' : 'Click a shape, or drag a box around one'}</span>}
         {tool === 'path' && pathMode === 'move' && <span className="hint">Drag any point or line of a path to move the whole path</span>}

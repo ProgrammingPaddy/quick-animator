@@ -24,7 +24,8 @@ export interface AnimationPreset {
   label: string
   title: string
   verb: Verb
-  duration: number
+  /** How long it runs, in seconds, or one frame of the project (D312). */
+  duration: number | 'frame'
   place: 'start' | 'end'
   variants?: readonly Variant[]
   /** The family the pane lists it under when that is not its verb's: Text, for the ones by character, word, or line (D268). */
@@ -34,8 +35,8 @@ export interface AnimationPreset {
 export const ANIMATION_PRESETS: readonly AnimationPreset[] = [
   { id: 'fadeIn', label: 'Fade in', title: 'Fades in, 0.3 s', verb: 'fade', duration: 0.3, place: 'start' },
   { id: 'fadeOut', label: 'Fade out', title: 'Fades out over the last 0.3 s', verb: 'fade', duration: 0.3, place: 'end' },
-  { id: 'popIn', label: 'Pop in', title: 'Appears in one frame', verb: 'fade', duration: 1 / 60, place: 'start' },
-  { id: 'popOut', label: 'Pop out', title: 'Disappears in the last frame', verb: 'fade', duration: 1 / 60, place: 'end' },
+  { id: 'popIn', label: 'Pop in', title: 'Appears in one frame', verb: 'fade', duration: 'frame', place: 'start' },
+  { id: 'popOut', label: 'Pop out', title: 'Disappears in the last frame', verb: 'fade', duration: 'frame', place: 'end' },
   {
     id: 'slideIn',
     label: 'Slide in',
@@ -287,9 +288,14 @@ function endOf(obj: SceneObject): number {
   return own.length > 0 ? Math.max(...own.map((a) => a.end)) : obj.at + 1
 }
 
+/** How long a preset runs, in seconds, at the project's rate (D312). */
+export function presetLength(preset: AnimationPreset): number {
+  return preset.duration === 'frame' ? frameSeconds(useStore.getState().settings.fps) : preset.duration
+}
+
 /** Where a preset goes on an object when nothing says otherwise (D219): its first frame, or ending at its last. */
 export function defaultTime(preset: AnimationPreset, obj: SceneObject): number {
-  return preset.place === 'end' ? Math.max(obj.at, endOf(obj) - preset.duration) : obj.at
+  return preset.place === 'end' ? Math.max(obj.at, endOf(obj) - presetLength(preset)) : obj.at
 }
 
 /**
@@ -300,7 +306,7 @@ export function defaultTime(preset: AnimationPreset, obj: SceneObject): number {
 export function dropTime(preset: AnimationPreset, obj: SceneObject, playhead: number): number {
   const inside = playhead > obj.at && playhead < endOf(obj)
   if (!inside) return defaultTime(preset, obj)
-  return preset.place === 'end' ? Math.max(obj.at, playhead - preset.duration) : playhead
+  return preset.place === 'end' ? Math.max(obj.at, playhead - presetLength(preset)) : playhead
 }
 
 /**
@@ -341,8 +347,8 @@ export function applyAnimationPreset(id: string, variant: string | undefined, ta
   }
 }
 
-/** A small scene that shows a preset on a sample rectangle, for the preview card (D219): the source, and how long one showing takes. */
-export function presetDemo(id: string, variant: string | undefined): { source: string; length: number } | null {
+/** A small scene that shows a preset on a sample rectangle, for the preview card (D219), at the project's rate: the source, and how long one showing takes. */
+export function presetDemo(id: string, variant: string | undefined, fps: number): { source: string; length: number } | null {
   const preset = presetById(id)
   const writer = writerFor(id)
   if (!preset || !writer) return null
@@ -352,7 +358,7 @@ export function presetDemo(id: string, variant: string | undefined): { source: s
   const demoText = 'Quick\\nAnimator'
   const units = text ? Object.fromEntries((['char', 'word', 'line'] as const).map((k) => [k, unitCount(demoText.replace('\\n', '\n'), k)])) : null
   const at = preset.place === 'end' ? (text ? 1.2 : 0.6) : 0.2
-  const written = writer({ object: 'demo', name: WRITERS[id] ? preset.id : presetIdent(preset.label), at, frame: { width: 1920, height: 1080 }, size: { width: 400, height: 240 } }, variant, 60)
+  const written = writer({ object: 'demo', name: WRITERS[id] ? preset.id : presetIdent(preset.label), at, frame: { width: 1920, height: 1080 }, size: { width: 400, height: 240 } }, variant, fps)
   const by = /by: '(\w+)'/.exec(written.text)?.[1] as 'char' | 'word' | 'line' | undefined
   const stagger = Number(/stagger: ([\d.]+)/.exec(written.text)?.[1] ?? DEFAULT_STAGGER)
   const end = units && by ? written.end + stagger * Math.max(0, units[by]! - 1) : written.end

@@ -265,6 +265,8 @@ function unitOpacity(v: unknown): number {
 function drawnCurves(curves: { x: number; y: number }[][], fraction: number): { x: number; y: number }[][] {
   let total = 0
   for (const curve of curves) for (let i = 0; i + 1 < curve.length; i++) total += Math.hypot(curve[i + 1]!.x - curve[i]!.x, curve[i + 1]!.y - curve[i]!.y)
+  // A dot has no length to draw along (D311): it is there as soon as any of it is.
+  if (total < 1e-9) return fraction > 0 ? curves : []
   let left = total * fraction
   const out: { x: number; y: number }[][] = []
   for (const curve of curves) {
@@ -293,7 +295,6 @@ function strokeGeometry(curves: { x: number; y: number }[][], width: number): TH
   const positions: number[] = []
   const half = width / 2
   const tri = (a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }) => positions.push(a.x, a.y, 0, b.x, b.y, 0, c.x, c.y, 0)
-  const steps = 8
   for (const curve of curves) {
     if (curve.length < 2) continue
     for (let i = 0; i + 1 < curve.length; i++) {
@@ -308,7 +309,10 @@ function strokeGeometry(curves: { x: number; y: number }[][], width: number): TH
       tri({ x: a.x + nx, y: a.y + ny }, { x: b.x + nx, y: b.y + ny }, { x: b.x - nx, y: b.y - ny })
       tri({ x: a.x + nx, y: a.y + ny }, { x: b.x - nx, y: b.y - ny }, { x: a.x - nx, y: a.y - ny })
     }
-    for (const p of curve) {
+    for (let j = 0; j < curve.length; j++) {
+      const p = curve[j]!
+      // The ends are the line's round caps, and all there is of a dot (D311): finer than the joins, which the pieces mostly cover.
+      const steps = j === 0 || j === curve.length - 1 ? 24 : 8
       for (let k = 0; k < steps; k++) {
         const a0 = (k / steps) * 2 * Math.PI
         const a1 = ((k + 1) / steps) * 2 * Math.PI

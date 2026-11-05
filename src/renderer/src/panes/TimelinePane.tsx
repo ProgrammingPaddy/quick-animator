@@ -37,13 +37,13 @@ import {
   ownAction,
   removeFromClass,
   requestClasses,
-  requestMarkerLabel,
   requestRename,
   retimeActions,
   roundSeconds,
   selectClass,
   selectClassAction,
   setActionFrom,
+  setMarkerLabel,
   setMarkerTime,
   setActionProp,
   setActionTiming,
@@ -298,6 +298,38 @@ const Idents = ({ words }: { words: string[] }) => (
  * its place and shows the class clip switched off (D80). Opacity lanes, on objects and classes
  * alike, have handles on every fade and toggle existence on a double-click (D83, D93).
  */
+/** A marker's text typed where it shows on the ruler (D307): Enter or a click away keeps it, Escape gives up. */
+function MarkerInput({ initial, placeholder, onDone }: { initial: string; placeholder: string; onDone: (text: string | null) => void }) {
+  const [value, setValue] = useState(initial)
+  const done = useRef(false)
+  const finish = (text: string | null) => {
+    if (done.current) return
+    done.current = true
+    onDone(text)
+  }
+  return (
+    <input
+      autoFocus
+      spellCheck={false}
+      value={value}
+      placeholder={placeholder}
+      size={Math.max(4, (value || placeholder).length + 1)}
+      aria-label="Marker text"
+      onFocus={(e) => e.currentTarget.select()}
+      onChange={(e) => setValue(e.target.value)}
+      onPointerDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation()
+        if (e.key === 'Enter') finish(value)
+        else if (e.key === 'Escape') finish(null)
+      }}
+      onBlur={() => finish(value)}
+    />
+  )
+}
+
 export function TimelinePane() {
   const playing = useStore((s) => s.playing)
   const clipOpacity = useStore((s) => s.prefs.clipOpacity !== false)
@@ -307,6 +339,7 @@ export function TimelinePane() {
   const setHoverTimeline = useStore((s) => s.setHoverTimeline)
   /** The time a drag has snapped to, drawn as a guide line across the lanes while it lasts (D179). */
   const [snapLine, setSnapLine] = useState<number | null>(null)
+  const markerEdit = useStore((s) => s.markerEdit)
   const frameSnap = useStore((s) => s.frameSnap)
   const wheelStep = useStore((s) => s.wheelStep)
   const fps = useStore((s) => s.settings.fps)
@@ -959,7 +992,7 @@ export function TimelinePane() {
     e.preventDefault()
     showMenu(e, [
       { label: 'Go to', keyword: timecode(m.time, fps), run: () => useStore.getState().setTime(m.time) },
-      ...(canEdit() ? [{ label: m.label ? 'Rename' : 'Name', run: () => requestMarkerLabel(index) }, { label: 'Delete', run: () => deleteMarker(index), danger: true }] : []),
+      ...(canEdit() ? [{ label: m.label ? 'Rename' : 'Name', run: () => useStore.getState().setMarkerEdit(index) }, { label: 'Delete', run: () => deleteMarker(index), danger: true }] : []),
     ])
   }
 
@@ -1749,17 +1782,31 @@ export function TimelinePane() {
           {model?.markers.map((m, i) => (
             <div
               key={i}
-              className="marker"
+              className={`marker${markerEdit === i ? ' editing' : ''}`}
               style={{ left: xAt(m.time) }}
-              title={`${markerText(m, i)}  ${timecode(m.time, fps)}`}
+              title={markerEdit === i ? undefined : `${markerText(m, i)}  ${timecode(m.time, fps)}`}
               onPointerDown={beginMarkerDrag(i, m)}
               onDoubleClick={(e) => {
                 e.stopPropagation()
-                if (canEdit()) requestMarkerLabel(i)
+                if (canEdit()) useStore.getState().setMarkerEdit(i)
               }}
               onContextMenu={markerMenu(i, m)}
             >
-              <span>{markerText(m, i)}</span>
+              {markerEdit === i ? (
+                <span>
+                  {markerNumber(i)}
+                  <MarkerInput
+                    initial={m.label ?? ''}
+                    placeholder={m.name ?? 'Name'}
+                    onDone={(text) => {
+                      useStore.getState().setMarkerEdit(null)
+                      if (text !== null && text.trim() !== (m.label ?? '')) setMarkerLabel(i, text)
+                    }}
+                  />
+                </span>
+              ) : (
+                <span>{markerText(m, i)}</span>
+              )}
             </div>
           ))}
           <Playhead kind="head" scrollTime={view.scrollTime} pps={view.pps} width={width} />

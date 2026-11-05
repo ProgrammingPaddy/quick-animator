@@ -5,6 +5,7 @@ import { SHAPE } from '../model/registry'
 import { existsAt, shapeSegsAt, textStyleAt, textUnitStates, valueAt } from '../model/sample'
 import { drawText, layoutOf } from '../model/text'
 import { presetDemo } from '../project/presets'
+import { useStore } from '../state/store'
 
 const WIDTH = 240
 const HEIGHT = 135
@@ -18,8 +19,9 @@ const SCALE = WIDTH / 1920
  */
 export function PresetPreview({ id, variant, left, top, label }: { id: string; variant: string | undefined; left: number; top: number; label: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const demo = useMemo(() => presetDemo(id, variant), [id, variant])
-  const model = useMemo(() => (demo ? evaluateScene(demo.source, 60).model : null), [demo])
+  const fps = useStore((s) => s.settings.fps)
+  const demo = useMemo(() => presetDemo(id, variant, fps), [id, variant, fps])
+  const model = useMemo(() => (demo ? evaluateScene(demo.source, fps).model : null), [demo, fps])
 
   useEffect(() => {
     const canvas = canvasRef.current
