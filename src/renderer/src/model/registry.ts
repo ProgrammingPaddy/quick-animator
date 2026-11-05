@@ -89,6 +89,8 @@ export const classes: Record<string, ClassSchema> = {
       { name: 'smooth', type: 'boolean', default: false, doc: 'A curve through the points instead of straight lines between them.', animatable: false },
       { name: 'stroke', type: 'color', default: '#ffffff', doc: 'Outline color, as #rrggbb.', animatable: true },
       { name: 'strokeWidth', type: 'number', default: 0, doc: 'Outline width in pixels. 0 draws none.', animatable: true },
+      { name: 'fillOpacity', type: 'number', default: 1, doc: "The fill's own opacity, 0 to 1, on top of opacity, as SVG's fill-opacity (D304).", animatable: true },
+      { name: 'strokeOpacity', type: 'number', default: 1, doc: "The outline's own opacity, 0 to 1, on top of opacity, as SVG's stroke-opacity (D304).", animatable: true },
       { name: 'drawn', type: 'number', default: 1, doc: 'How much of the line is drawn, 0 to 1 from its start (D298). Animate it to write the shape on.', animatable: true },
     ],
   },

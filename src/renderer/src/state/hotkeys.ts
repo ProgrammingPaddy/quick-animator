@@ -48,6 +48,7 @@ export const HOTKEYS: readonly Hotkey[] = [
   { id: 'export', label: 'Export', what: 'Export the project as a video or an image sequence.', scope: 'global', defaults: ['Ctrl+E'] },
   { id: 'help', label: 'Help', what: 'Open or close the help.', scope: 'global', defaults: ['F1'] },
   { id: 'marker', label: 'Marker', what: 'A marker at the playhead.', scope: 'global', defaults: ['M'] },
+  { id: 'markerNamed', label: 'Named marker', what: 'A marker at the playhead, its text asked for.', scope: 'global', defaults: ['Shift+M'] },
   { id: 'razor', label: 'Razor', what: "The timeline's razor, or back to the pointer: with the razor, a click on an animation slices it there.", scope: 'global', defaults: ['R'] },
   { id: 'closeShape', label: 'Close shape', what: 'Close the shape being drawn, which fills it; Escape leaves it a line.', scope: 'preview', defaults: ['Enter'] },
   { id: 'animateDrag', label: 'Shift while dragging', what: 'Makes the drag an animation from the playhead; with an animation selected, previews and sets its other end; with a shape point, a morph.', scope: 'preview', defaults: ['Shift'], fixed: true },

@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useReducer, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { ColorPicker } from '../components/ColorPicker'
 import { beginGesture, endGesture } from '../code/editor'
 import { showMenu } from '../components/ContextMenu'
 import { FontField } from '../components/FontField'
@@ -15,7 +16,7 @@ import { convertTextToShape } from '../project/textToShape'
 import { parseColor, textPadding, textStyleAt, valueAt, worldPose } from '../model/sample'
 import { layoutOf, type TextStyle } from '../model/text'
 import { DEFAULT_EASE_FRACTION, easingFor, unease } from '../model/easing'
-import { addMorph, addObject, addPath, beginFill, beginOutline, canEdit, paintFill, paintStroke, sketchLine, sketchPath, setObjectProp, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, pathDragTarget, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestClasses, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, settleMorph, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphRunning, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
+import { addMorph, addObject, addPath, beginFill, beginOutline, canEdit, paintFill, paintStroke, sketchLine, sketchPath, writeOnLine, setObjectProp, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, pathDragTarget, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestClasses, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, settleMorph, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphRunning, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
 import { addUserObject, requestSavePreset } from '../project/userPresets'
 import { makeMover, outlineOf, resetMover, walk, type Mover, type Polygon, type Pushing } from '../preview/collide'
 import { SceneRenderer, type ControlHandle, type Frame, type GuideLine, type Handle } from '../preview/SceneRenderer'
@@ -24,76 +25,6 @@ import { dropTargets } from '../state/dropTargets'
 import { matchHotkey } from '../state/hotkeys'
 import { OBJECT_KINDS, TRANSFORM_MODES, useStore, type ActionRef, type Pick, type TransformMode } from '../state/store'
 import { formatTime } from '../state/time'
-
-/** The Paint tool's color and the colors used lately (D293), kept in the browser's storage like the app's other small preferences. */
-interface PaintState {
-  color: string
-  recent: string[]
-  /** The outline's color and width, for Paint's stroke mode and the pencil (D299). */
-  stroke: string
-  width: number
-  mode: 'fill' | 'stroke'
-}
-const PAINT_KEY = 'quick-animator.paint'
-function loadPaint(): PaintState {
-  try {
-    const raw = localStorage.getItem(PAINT_KEY)
-    const saved = raw ? (JSON.parse(raw) as Partial<PaintState>) : null
-    const recent = Array.isArray(saved?.recent) ? saved.recent.filter((c): c is string => typeof c === 'string').slice(0, 8) : []
-    return {
-      color: typeof saved?.color === 'string' ? saved.color : '#4f8cff',
-      recent,
-      stroke: typeof saved?.stroke === 'string' ? saved.stroke : '#ffffff',
-      width: typeof saved?.width === 'number' && saved.width > 0 ? saved.width : 3,
-      mode: saved?.mode === 'stroke' ? 'stroke' : 'fill',
-    }
-  } catch {
-    return { color: '#4f8cff', recent: [], stroke: '#ffffff', width: 3, mode: 'fill' }
-  }
-}
-function savePaint(paint: PaintState): void {
-  try {
-    localStorage.setItem(PAINT_KEY, JSON.stringify(paint))
-  } catch {
-    // Nothing kept between runs; the tool still works.
-  }
-}
-
-/** The samples of a sketch at an even rate (D297): the point at each tick, between the recorded ones, so a timed path's points are evenly spaced in time. */
-function resample(samples: { t: number; x: number; y: number }[], rate: number): Point[] {
-  const last = samples[samples.length - 1]!
-  const n = Math.max(2, Math.round(last.t * rate) + 1)
-  const out: Point[] = []
-  let j = 0
-  for (let k = 0; k < n; k++) {
-    const t = (k / (n - 1)) * last.t
-    while (j + 1 < samples.length && samples[j + 1]!.t <= t) j++
-    const a = samples[j]!
-    const b = samples[Math.min(j + 1, samples.length - 1)]!
-    const span = b.t - a.t
-    const w = span > 1e-9 ? Math.max(0, Math.min(1, (t - a.t) / span)) : 0
-    out.push({ x: a.x + (b.x - a.x) * w, y: a.y + (b.y - a.y) * w })
-  }
-  return out
-}
-
-/** The colors a scene writes, the fills and strokes of its objects and their changes, each once, in the order written (D294). */
-function colorsOf(model: SceneModel | null): string[] {
-  const out: string[] = []
-  const add = (v: unknown): void => {
-    if (typeof v === 'string' && parseColor(v) && !out.includes(v)) out.push(v)
-  }
-  for (const obj of model?.objects ?? []) {
-    add(obj.attrs['fill'])
-    add(obj.attrs['stroke'])
-    for (const a of obj.actions) {
-      add(a.changes['fill'])
-      add(a.from['fill'])
-      add(a.changes['stroke'])
-    }
-  }
-  return out
-}
 
 const MODE_LABEL: Record<TransformMode, string> = { all: 'Transform', move: 'Move', rotate: 'Rotate', resize: 'Resize' }
 const MODE_TIP: Record<TransformMode, string> = {
@@ -408,36 +339,28 @@ export function PreviewPane() {
   // The Texts among the selection, for the text bar (D270), and a Text being edited in place.
   const fonts = useStore((s) => s.fonts)
   const systemFonts = useStore((s) => s.systemFonts)
-  /** The Paint tool's color and recent colors (D293). */
-  const [brush, setBrush] = useState<PaintState>(loadPaint)
-  const brushRef = useRef(brush)
-  brushRef.current = brush
-  const setBrushColor = (color: string) => setBrush((p) => (p.mode === 'stroke' ? { ...p, stroke: color } : { ...p, color }))
-  const rememberBrush = (color: string) =>
-    setBrush((p) => {
-      const next = { ...(p.mode === 'stroke' ? { ...p, stroke: color } : { ...p, color }), recent: [color, ...p.recent.filter((c) => c !== color)].slice(0, 8) }
-      savePaint(next)
-      return next
-    })
-  const setBrushPart = (part: Partial<PaintState>) =>
-    setBrush((p) => {
-      const next = { ...p, ...part }
-      savePaint(next)
-      return next
-    })
+  /** Paint's side (D299): the fill or the outline; the colors and the width are the shared style (D303, D304). */
+  const [paintMode, setPaintMode] = useState<'fill' | 'stroke'>('fill')
+  const paintModeRef = useRef(paintMode)
+  paintModeRef.current = paintMode
+  const style = useStore((s) => s.shapeStyle)
+  const styleRef = useRef(style)
+  styleRef.current = style
+  const setShapeStyle = useStore((s) => s.setShapeStyle)
+  const rememberColor = useStore((s) => s.rememberColor)
   /** The dropper (D294): the next click takes an object's fill as the color. */
   const [dropping, setDropping] = useState(false)
   const droppingRef = useRef(dropping)
   droppingRef.current = dropping
-  /** The colors the project writes, for the bar (D294). */
-  const scene = useStore((s) => s.model)
-  const projectColors = useMemo(() => colorsOf(scene), [scene])
   const pickColor = (name: string, time: number) => {
     const s = useStore.getState()
     const obj = s.model?.objects.find((o) => o.name === name)
-    const fill = obj && s.model ? valueAt(s.model, obj, brushRef.current.mode === 'stroke' ? 'stroke' : 'fill', time) : undefined
-    if (typeof fill === 'string' && parseColor(fill)) rememberBrush(fill)
-    else s.setNotice('Nothing here has a color to take')
+    const outline = paintModeRef.current === 'stroke'
+    const fill = obj && s.model ? valueAt(s.model, obj, outline ? 'stroke' : 'fill', time) : undefined
+    if (typeof fill === 'string' && parseColor(fill)) {
+      setShapeStyle(outline ? { stroke: fill } : { fill })
+      rememberColor(fill)
+    } else s.setNotice('Nothing here has a color to take')
     setDropping(false)
   }
   const [textEdit, setTextEdit] = useState<{ name: string; original: string; value: string; left: number; top: number; width: number; height: number; style: TextStyle; zoom: number; padding: number; paddingTop: number; lineHeight: number; color: string } | null>(null)
@@ -1299,26 +1222,26 @@ export function PreviewPane() {
         pickColor(located.hit, store.time)
         return
       }
-      const b = brushRef.current
-      const outline = b.mode === 'stroke'
-      const color = outline ? b.stroke : b.color
+      const st = styleRef.current
+      const outline = paintModeRef.current === 'stroke'
+      const color = outline ? st.stroke : st.fill
       if (e.shiftKey) {
         // A color change made as any Shift-made animation is (D103, D127): from where the playhead was before Shift looked ahead, for the proposed length, pinned as the pin says, the next one following in Chain mode.
         const gesture = gestureRef.current
         const pinNow = gesture?.editing ? 'start' : store.pin
         const from = gesture?.from ?? store.time
         const length = gesture?.duration ?? 1
-        const end = outline ? beginOutline(located.hit, color, b.width, pinNow, from, length) : beginFill(located.hit, color, pinNow, from, length)
+        const end = outline ? beginOutline(located.hit, color, st.strokeWidth, pinNow, from, length) : beginFill(located.hit, color, pinNow, from, length)
         if (end !== null) {
           if (gesture && !gesture.editing && pinNow === 'start' && store.chain) gesture.from = end
           if (pinNow === 'start') useStore.getState().setTime(end)
         }
-      } else if (outline) paintStroke(located.hit, color, b.width, store.time)
+      } else if (outline) paintStroke(located.hit, color, st.strokeWidth, store.time)
       else paintFill(located.hit, color, store.time)
-      rememberBrush(color)
+      rememberColor(color)
       return
     }
-    // The Pencil (D297): on an object, its motion sketched as the playhead runs; on empty space, a line drawn, with Shift written on over its own time (D298).
+    // The Pencil (D297, D305): on an object, a path along the stroke; on empty space, a line; Shift makes the animation as any Shift-drag does.
     if (store.tool === 'pencil') {
       if (canEdit()) beginSketch(host, e, located.hit, located.world, located.paneX, located.paneY)
       return
@@ -2041,38 +1964,18 @@ export function PreviewPane() {
   }
 
   /**
-   * A sketch with the pencil (D297): the playhead runs from where it was while the pointer is
-   * down, and each frame's point is kept. On an object, the object is held under the pointer,
-   * keeping the pointer's offset from its center, and the motion is written as a timed path when
-   * the pointer is let go; on empty space, the trail becomes a line, with Shift written on over
-   * the sketch's own length (D298). The playhead goes back to where it was.
+   * A sketch with the pencil (D297, D305): the trail is kept while the pointer is down, and the
+   * playhead stays where it is. On an object the trail becomes a path along it, from the
+   * playhead, or as any Shift-made animation when Shift is held (D103); on empty space it becomes
+   * a line, written on with Shift the same way (D298).
    */
   const beginSketch = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, target: string | null, world0: Point, paneX: number, paneY: number) => {
     const viewport = viewportRef.current
-    const renderer = rendererRef.current
-    if (!viewport || !renderer) return
-    const start = useStore.getState().time
-    const t0 = performance.now()
-    const samples: { t: number; x: number; y: number }[] = []
+    if (!viewport) return
     const trailWorld: Point[] = [world0]
     const trail: Point[] = [{ x: paneX, y: paneY }]
-    let latest = world0
-    const frame = target ? renderer.frameOf(target) : null
-    const delta = frame ? { x: world0.x - frame.x, y: world0.y - frame.y } : { x: 0, y: 0 }
-    const where = (): Point => ({ x: latest.x - delta.x, y: latest.y - delta.y })
-    const writeOn = e.shiftKey
-    samples.push({ t: 0, ...where() })
-    if (target) renderer.setFollow(target, where())
+    const withShift = e.shiftKey
     setSketch([...trail])
-    let handle = 0
-    const tick = () => {
-      const elapsed = (performance.now() - t0) / 1000
-      samples.push({ t: elapsed, ...where() })
-      useStore.getState().setTime(start + elapsed)
-      if (target) renderer.setFollow(target, where())
-      handle = requestAnimationFrame(tick)
-    }
-    handle = requestAnimationFrame(tick)
     capture(
       host,
       e.pointerId,
@@ -2080,26 +1983,53 @@ export function PreviewPane() {
         const bounds = host.getBoundingClientRect()
         const px = ev.clientX - bounds.left
         const py = ev.clientY - bounds.top
-        latest = viewport.toWorld(px, py)
-        trailWorld.push(latest)
+        trailWorld.push(viewport.toWorld(px, py))
         trail.push({ x: px, y: py })
         setSketch([...trail])
       },
       () => {
-        cancelAnimationFrame(handle)
-        const duration = (performance.now() - t0) / 1000
-        samples.push({ t: duration, ...where() })
-        renderer.setFollow(null, null)
         setSketch(null)
-        useStore.getState().setTime(start)
-        if (target) sketchPath(target, resample(samples, 30), start, duration)
-        else sketchLine(trailWorld, brushRef.current.stroke, brushRef.current.width, start, duration, writeOn)
+        const s = useStore.getState()
+        const gesture = gestureRef.current
+        const pinNow = gesture?.editing ? 'start' : s.pin
+        const from = gesture?.from ?? s.time
+        const length = gesture?.duration ?? 1
+        let end: number | null = null
+        if (target) end = sketchPath(target, trailWorld, pinNow, from, length)
+        else {
+          const st = styleRef.current
+          const name = sketchLine(trailWorld, st.stroke, st.strokeWidth, st.strokeOpacity, s.time)
+          if (name && withShift) end = writeOnLine(name, pinNow, from, length)
+        }
+        if (end !== null && gesture && !gesture.editing && pinNow === 'start' && s.chain) gesture.from = end
+        if (end !== null && gesture && pinNow === 'start') useStore.getState().setTime(end)
         paintRef.current()
       },
     )
   }
 
-  /** The Texts among the selection, with their looks at the playhead, for the text bar (D270). */
+  /** The Shape tool's style, or the selected Shape's own in Edit (D304): what the bar shows and writes. */
+  const editedShape = tool === 'shape' && shapeMode === 'edit' && selection.length === 1 ? model?.objects.find((o) => o.name === selection[0] && o.className === SHAPE && o.decl) : undefined
+  const shapeShown = editedShape && model ? { fill: String(valueAt(model, editedShape, 'fill', time)), filled: String(valueAt(model, editedShape, 'fill', time)) !== 'none', stroke: String(valueAt(model, editedShape, 'stroke', time)), strokeWidth: Number(valueAt(model, editedShape, 'strokeWidth', time)) || 0, fillOpacity: Number(valueAt(model, editedShape, 'fillOpacity', time)), strokeOpacity: Number(valueAt(model, editedShape, 'strokeOpacity', time)) } : style
+  const writeShapeStyle = (part: Partial<typeof style>) => {
+    if (!editedShape) {
+      setShapeStyle(part)
+      return
+    }
+    beginGesture()
+    try {
+      if (part.filled !== undefined) setObjectProp(editedShape.name, 'fill', part.filled ? style.fill : 'none')
+      if (part.fill !== undefined) setObjectProp(editedShape.name, 'fill', part.fill)
+      if (part.stroke !== undefined) setObjectProp(editedShape.name, 'stroke', part.stroke)
+      if (part.strokeWidth !== undefined) setObjectProp(editedShape.name, 'strokeWidth', part.strokeWidth > 0 ? part.strokeWidth : null)
+      if (part.fillOpacity !== undefined) setObjectProp(editedShape.name, 'fillOpacity', part.fillOpacity < 1 ? part.fillOpacity : null)
+      if (part.strokeOpacity !== undefined) setObjectProp(editedShape.name, 'strokeOpacity', part.strokeOpacity < 1 ? part.strokeOpacity : null)
+    } finally {
+      endGesture()
+    }
+  }
+
+  /** The Texts among the selection, with their looks at the playhead, for the text bar (D270). */  /** The Texts among the selection, with their looks at the playhead, for the text bar (D270). */
   const selectedTexts = useMemo(() => {
     if (!model || tool !== 'select') return []
     return model.objects.filter((o) => o.className === 'Text' && o.decl && selection.includes(o.name)).map((o) => ({ name: o.name, style: textStyleAt(model, o, time) }))
@@ -2186,7 +2116,11 @@ export function PreviewPane() {
         const picked = pathPoints.includes(point) && pathPoints.length > 1 ? pathPoints : [point]
         // Smooth, Corner, or Straighten the point (D252), on curves and on points alike.
         const kindItems = pointItems(shapeAnchorKind(shape.name, point), shapeAnchorCurved(shape.name, point), (kind) => setShapeAnchorKind(shape.name, picked, kind))
-        showMenu(e, [...kindItems, { label: picked.length > 1 ? `Delete ${picked.length} points` : 'Delete point', run: () => removeShapePoints(shape.name, picked), danger: true }])
+        // A line closes or opens from a point too (D306); one being drawn closes as the first point would.
+        const drafting = shapeDraftRef.current === shape.name
+        const closedNow = isShapeClosed(shape.name)
+        const lineItems = drafting ? [{ label: 'Close shape', run: () => endShapeDraft(true) }] : st.model?.objects.find((o) => o.name === shape.name)?.attrs['fill'] === 'none' ? [{ label: closedNow ? 'Open line' : 'Close line', run: () => setShapeClosed(shape.name, !closedNow) }] : []
+        showMenu(e, [...kindItems, ...lineItems, { label: picked.length > 1 ? `Delete ${picked.length} points` : 'Delete point', run: () => removeShapePoints(shape.name, picked), danger: true }])
         return
       }
       const insert = insertionAt(shape, world, 6 * pixel)
@@ -2415,6 +2349,18 @@ export function PreviewPane() {
             </button>
           </div>
         )}
+        {tool === 'shape' && (shapeMode === 'create' || editedShape) && (
+          <div className="paint-bar" role="group" aria-label="Shape style">
+            <button className={`preview-toggle${shapeShown.filled ? ' on' : ''}`} onClick={() => writeShapeStyle({ filled: !shapeShown.filled })} title="Fill, or a line" aria-pressed={shapeShown.filled}>
+              Fill
+            </button>
+            {shapeShown.filled && <ColorPicker value={shapeShown.fill} onChange={(fill) => writeShapeStyle({ fill })} title="Fill" />}
+            {shapeShown.filled && <NumberField label="Fill opacity" value={shapeShown.fillOpacity} unit="" min={0} step={0.05} onChange={(fillOpacity) => writeShapeStyle({ fillOpacity: Math.min(1, fillOpacity) })} />}
+            <ColorPicker value={shapeShown.stroke} onChange={(stroke) => writeShapeStyle({ stroke })} title="Outline" />
+            <NumberField label="Width" value={shapeShown.strokeWidth} unit="px" min={0} onChange={(strokeWidth) => writeShapeStyle({ strokeWidth })} />
+            <NumberField label="Outline opacity" value={shapeShown.strokeOpacity} unit="" min={0} step={0.05} onChange={(strokeOpacity) => writeShapeStyle({ strokeOpacity: Math.min(1, strokeOpacity) })} />
+          </div>
+        )}
         {tool === 'path' && (
           <div className="preview-modes" role="group" aria-label="Path tool mode">
             <button className={pathMode === 'edit' ? 'active' : ''} onClick={() => setPathMode('edit')} title="Edit the points" aria-pressed={pathMode === 'edit'}>
@@ -2428,35 +2374,21 @@ export function PreviewPane() {
         {tool === 'paint' && (
           <div className="paint-bar" role="group" aria-label="Paint">
             <div className="preview-modes" role="group" aria-label="Fill or outline">
-              <button className={brush.mode === 'fill' ? 'active' : ''} onClick={() => setBrushPart({ mode: 'fill' })} title="Paint the fill" aria-pressed={brush.mode === 'fill'}>
+              <button className={paintMode === 'fill' ? 'active' : ''} onClick={() => setPaintMode('fill')} title="Paint the fill" aria-pressed={paintMode === 'fill'}>
                 Fill
               </button>
-              <button className={brush.mode === 'stroke' ? 'active' : ''} onClick={() => setBrushPart({ mode: 'stroke' })} title="Paint the outline" aria-pressed={brush.mode === 'stroke'}>
+              <button className={paintMode === 'stroke' ? 'active' : ''} onClick={() => setPaintMode('stroke')} title="Paint the outline" aria-pressed={paintMode === 'stroke'}>
                 Stroke
               </button>
             </div>
-            <input type="color" value={brush.mode === 'stroke' ? brush.stroke : brush.color} onChange={(e) => setBrushColor(e.target.value)} title="Color" aria-label="Color" />
-            {brush.mode === 'stroke' && <NumberField label="Width" value={brush.width} unit="px" onChange={(width) => setBrushPart({ width })} />}
-            <button className={`dropper${dropping ? ' active' : ''}`} onClick={() => setDropping(!dropping)} title="Take a color from an object (Alt-click)" aria-pressed={dropping} aria-label="Dropper">
-              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-                <path d="M4 20l1-4 9-9 3 3-9 9z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-                <path d="M13 6l2-2a2.1 2.1 0 0 1 3 3l-2 2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-              </svg>
-            </button>
-            {brush.recent.length > 0 && <span className="paint-sep" aria-hidden="true" />}
-            {brush.recent.map((c) => (
-              <button key={c} className={`swatch${c === brush.color ? ' active' : ''}`} style={{ background: c }} onClick={() => setBrushColor(c)} title={c} aria-label={c} />
-            ))}
-            {projectColors.length > 0 && <span className="paint-sep" aria-hidden="true" />}
-            {projectColors.map((c) => (
-              <button key={`p${c}`} className={`swatch${c === brush.color ? ' active' : ''}`} style={{ background: c }} onClick={() => setBrushColor(c)} title={`${c}, in the project`} aria-label={`${c}, in the project`} />
-            ))}
+            <ColorPicker value={paintMode === 'stroke' ? style.stroke : style.fill} onChange={(c) => setShapeStyle(paintMode === 'stroke' ? { stroke: c } : { fill: c })} onDrop={() => setDropping(true)} title="Color" />
+            {paintMode === 'stroke' && <NumberField label="Width" value={style.strokeWidth} unit="px" onChange={(strokeWidth) => setShapeStyle({ strokeWidth })} />}
           </div>
         )}
         {tool === 'pencil' && (
           <div className="paint-bar" role="group" aria-label="Pencil">
-            <input type="color" value={brush.stroke} onChange={(e) => setBrushPart({ stroke: e.target.value })} title="Line color" aria-label="Line color" />
-            <NumberField label="Width" value={brush.width} unit="px" onChange={(width) => setBrushPart({ width })} />
+            <ColorPicker value={style.stroke} onChange={(stroke) => setShapeStyle({ stroke })} title="Line color" />
+            <NumberField label="Width" value={style.strokeWidth} unit="px" onChange={(strokeWidth) => setShapeStyle({ strokeWidth })} />
           </div>
         )}
         {tool === 'select' && selection.length > 0 && (
@@ -2541,7 +2473,7 @@ export function PreviewPane() {
         </span>
         {tool === 'object' && <span className="hint">Click to place</span>}
         {tool === 'paint' && <span className="hint">{dropping ? 'Click an object to take its color' : 'Click to paint; Shift-click for a color change; Alt-click takes a color'}</span>}
-        {tool === 'pencil' && <span className="hint">Drag an object to record its motion; drag on empty space for a line, with Shift written on</span>}
+        {tool === 'pencil' && <span className="hint">Drag an object for a path along the stroke; drag on empty space for a line; Shift animates</span>}
         {tool === 'shape' && shapeMode === 'create' && <span className="hint">{drafting ? 'Click for corners, drag to draw; the first point closes and fills, Escape leaves a line' : 'Click to start a shape'}</span>}
         {tool === 'shape' && shapeMode === 'edit' && <span className="hint">{shapeRef.current?.editable ? 'Drag a point, or a box around several; right-click a point or the line for curves and corners' : 'Click a shape, or drag a box around one'}</span>}
         {tool === 'path' && pathMode === 'move' && <span className="hint">Drag any point or line of a path to move the whole path</span>}

@@ -37,6 +37,7 @@ import {
   ownAction,
   removeFromClass,
   requestClasses,
+  requestMarkerLabel,
   requestRename,
   retimeActions,
   roundSeconds,
@@ -912,8 +913,18 @@ export function TimelinePane() {
     setSnapLine(null)
   }
 
+  /** A marker's number on the ruler (D302): its place in time, first to last. */
+  const markerNumber = (index: number): number => {
+    const all = model?.markers ?? []
+    const m = all[index]!
+    return all.filter((o, i) => o.time < m.time || (o.time === m.time && i < index)).length + 1
+  }
+
+  /** What the ruler says of a marker (D302): its number, then its text, or its name in the code. */
+  const markerText = (m: Marker, index: number): string => `${markerNumber(index)}${m.label ? ` ${m.label}` : m.name ? ` ${m.name}` : ''}`
+
   /** Drag a marker along the ruler (D296), snapping as a clip does; a click puts the playhead on it. */
-  const beginMarkerDrag = (m: Marker) => (e: ReactPointerEvent<HTMLDivElement>) => {
+  const beginMarkerDrag = (index: number, m: Marker) => (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
     e.stopPropagation()
     const origin = { x: e.clientX, time: m.time, pps: viewRef.current.pps }
@@ -933,7 +944,7 @@ export function TimelinePane() {
         }
         const snapped = snapTimeInfo(origin.time + (ev.clientX - origin.x) / origin.pps, useStore.getState().model, null, origin.pps, snapOn)
         setSnapLine(snapped.hit)
-        setMarkerTime(m.name, snapped.time)
+        setMarkerTime(index, snapped.time)
       },
       () => {
         setSnapLine(null)
@@ -943,22 +954,24 @@ export function TimelinePane() {
     )
   }
 
-  const markerMenu = (m: Marker) => (e: ReactMouseEvent) => {
+  const markerMenu = (index: number, m: Marker) => (e: ReactMouseEvent) => {
     e.stopPropagation()
     e.preventDefault()
     showMenu(e, [
       { label: 'Go to', keyword: timecode(m.time, fps), run: () => useStore.getState().setTime(m.time) },
-      { label: 'Rename', run: () => requestRename({ marker: m.name }) },
-      ...(canEdit() ? [{ label: 'Delete', run: () => deleteMarker(m.name), danger: true }] : []),
+      ...(canEdit() ? [{ label: m.label ? 'Rename' : 'Name', run: () => requestMarkerLabel(index) }, { label: 'Delete', run: () => deleteMarker(index), danger: true }] : []),
     ])
   }
 
-  /** Right-click on the ruler: a marker there (D296). */
+  /** Right-click on the ruler: a marker there, numbered, or one named at once (D296, D302). */
   const rulerMenu = (e: ReactMouseEvent) => {
     if (!canEdit()) return
     e.preventDefault()
     const t = snappedAt(e.clientX)
-    showMenu(e, [{ label: 'Marker', keyword: timecode(t, fps), run: () => addMarker(t) }])
+    showMenu(e, [
+      { label: 'Marker', keyword: timecode(t, fps), run: () => addMarker(t) },
+      { label: 'Named marker', keyword: timecode(t, fps), run: () => addMarker(t, true) },
+    ])
   }
 
   /** The razor on a class animation's clip (D290). */
@@ -1733,20 +1746,20 @@ export function TimelinePane() {
             </div>
           ))}
           {contentEnd !== null && <div className="end-marker" style={{ left: xAt(contentEnd) }} title="End of the content" />}
-          {model?.markers.map((m) => (
+          {model?.markers.map((m, i) => (
             <div
-              key={m.name}
+              key={i}
               className="marker"
               style={{ left: xAt(m.time) }}
-              title={`${m.name}  ${timecode(m.time, fps)}`}
-              onPointerDown={beginMarkerDrag(m)}
+              title={`${markerText(m, i)}  ${timecode(m.time, fps)}`}
+              onPointerDown={beginMarkerDrag(i, m)}
               onDoubleClick={(e) => {
                 e.stopPropagation()
-                requestRename({ marker: m.name })
+                if (canEdit()) requestMarkerLabel(i)
               }}
-              onContextMenu={markerMenu(m)}
+              onContextMenu={markerMenu(i, m)}
             >
-              <span>{m.name}</span>
+              <span>{markerText(m, i)}</span>
             </div>
           ))}
           <Playhead kind="head" scrollTime={view.scrollTime} pps={view.pps} width={width} />
@@ -1756,8 +1769,8 @@ export function TimelinePane() {
             {model && model.objects.length === 0 && <div className="empty">No objects yet.</div>}
             {renderObjectsView()}
             <div className="tl-playhead-layer" aria-hidden="true">
-              {model?.markers.map((m) => (
-                <div key={m.name} className="tl-marker-line" style={{ left: xAt(m.time) }} />
+              {model?.markers.map((m, i) => (
+                <div key={i} className="tl-marker-line" style={{ left: xAt(m.time) }} />
               ))}
               {snapLine !== null && <div className="tl-snap-line" style={{ left: xAt(snapLine) }} />}
               <Playhead kind="line" scrollTime={view.scrollTime} pps={view.pps} width={width} />

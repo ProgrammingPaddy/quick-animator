@@ -370,7 +370,7 @@ export function beginTimed(name: string, attrs: string[], pin: Pin = 'start', wh
 }
 
 /** Where an action pinned to a time sits (D103): with `start` it starts here and lasts `length` seconds, a second unless the gesture chose otherwise; with `end` it ends here, starting that long earlier or at zero. */
-function pinnedSpan(pin: Pin, when: number, length = 1): { at: number; duration: number } {
+export function pinnedSpan(pin: Pin, when: number, length = 1): { at: number; duration: number } {
   const now = roundSeconds(when)
   const wanted = Math.max(frameSeconds(state().fps), roundSeconds(length))
   const endHere = pin === 'end' && now >= frameSeconds(state().fps)
@@ -1515,7 +1515,10 @@ export function beginShape(x: number, y: number): string | null {
   if (!model) return null
   const name = uniqueName('shape')
   // Drawn as curves, the one form the GUI writes (D249): a move to the first corner, lines to the rest, smoothed where a line was drawn.
-  const attrs: Record<string, AttrValue> = { x: Math.round(x), y: Math.round(y), curves: 'M 0 0', fill: 'none', stroke: '#ffffff', strokeWidth: 3 }
+  // In the Shape tool's own style (D304): the outline while it is drawn; its fill comes with the close.
+  const style = useStore.getState().shapeStyle
+  const attrs: Record<string, AttrValue> = { x: Math.round(x), y: Math.round(y), curves: 'M 0 0', fill: 'none', stroke: style.stroke, strokeWidth: Math.max(0, style.strokeWidth) }
+  if (style.strokeOpacity < 1) attrs['strokeOpacity'] = style.strokeOpacity
   if (time > 0) attrs['at'] = roundSeconds(time)
   const length = useStore.getState().prefs.objectLength
   if (length !== null) attrs['until'] = roundSeconds(time + length)
@@ -1600,14 +1603,18 @@ export function finishShape(name: string, close: boolean): void {
       const segs = close ? closePath(cur.written) : cur.written
       writeShapeCurves(cur, translatePathData(segs, -cur.center.x, -cur.center.y))
       if (close) {
-        // Closed, it is a polygon (D253): filled, its drawing stroke gone.
+        // Closed, it is a polygon (D253): filled in the tool's style (D304), its outline kept when the style has one.
         const fresh = findObject(name)
         if (!fresh?.decl) return
         const { source } = state()
-        const edits: TextEdit[] = [setProp(source, fresh.decl, 'fill', '#4f8cff')]
-        for (const key of ['stroke', 'strokeWidth']) {
-          const edit = removeProp(source, fresh.decl, key)
-          if (edit) edits.push(edit)
+        const style = useStore.getState().shapeStyle
+        const edits: TextEdit[] = [setProp(source, fresh.decl, 'fill', style.fill)]
+        if (style.fillOpacity < 1) edits.push(setProp(source, fresh.decl, 'fillOpacity', style.fillOpacity))
+        if (style.strokeWidth <= 0) {
+          for (const key of ['stroke', 'strokeWidth', 'strokeOpacity']) {
+            const edit = removeProp(source, fresh.decl, key)
+            if (edit) edits.push(edit)
+          }
         }
         applyEdits(edits, objectsSelected([name]))
       }
@@ -3090,19 +3097,18 @@ export function beginFill(name: string, color: string, pin: Pin, when: number, l
   return appendTimed(name, 'to', { fill: color }, pin, when, length)
 }
 
-/** A marker at a time (D296): `mark1 = marker(2.5)` at the end of the file, a plain number named for the timeline and the code. Returns its name. */
-export function addMarker(time: number): string | null {
+/** A marker at a time (D296, D302): `marker(2.5)` at the end of the file; named, its text is asked for at once. */
+export function addMarker(time: number, named = false): void {
   const { source, model } = state()
-  if (!model) return null
-  const name = uniqueName('mark')
-  applyEdits([appendStatement(source, `${name} = marker(${formatNumber(Math.max(0, roundSeconds(time)))})`)])
-  return name
+  if (!model) return
+  applyEdits([appendStatement(source, `marker(${formatNumber(Math.max(0, roundSeconds(time)))})`)])
+  if (named) requestMarkerLabel((state().model?.markers.length ?? 1) - 1)
 }
 
 /** A marker moved to a time: its seconds rewritten, as frames when written as frames (D276). */
-export function setMarkerTime(name: string, time: number): void {
+export function setMarkerTime(index: number, time: number): void {
   const { source, model, fps } = state()
-  const marker = model?.markers.find((m) => m.name === name)
+  const marker = model?.markers[index]
   if (!marker) return
   const current = source.slice(marker.stmt.arg.from, marker.stmt.arg.to)
   const t = Math.max(0, roundSeconds(time))
@@ -3110,10 +3116,32 @@ export function setMarkerTime(name: string, time: number): void {
   applyEdits([{ from: marker.stmt.arg.from, to: marker.stmt.arg.to, insert: text }])
 }
 
+/** A marker's text (D302): written as the call's second argument, or taken out when empty. */
+export function setMarkerLabel(index: number, label: string): void {
+  const { model } = state()
+  const marker = model?.markers[index]
+  if (!marker) return
+  const text = label.trim()
+  if (marker.stmt.label) applyEdits([text ? { from: marker.stmt.label.from, to: marker.stmt.label.to, insert: formatValue(text) } : { from: marker.stmt.arg.to, to: marker.stmt.label.to, insert: '' }])
+  else if (text) applyEdits([{ from: marker.stmt.arg.to, to: marker.stmt.arg.to, insert: `, ${formatValue(text)}` }])
+}
+
+/** Ask for a marker's text (D302), as Reaper does. */
+export function requestMarkerLabel(index: number): void {
+  const marker = state().model?.markers[index]
+  if (!marker) return
+  useStore.getState().openDialog({
+    title: marker.label ? 'Rename marker' : 'Name marker',
+    input: { label: 'Text', value: marker.label ?? '' },
+    confirmLabel: marker.label ? 'Rename' : 'Name',
+    onConfirm: (value) => setMarkerLabel(index, value),
+  })
+}
+
 /** A marker's statement taken out of the file (D296). */
-export function deleteMarker(name: string): void {
+export function deleteMarker(index: number): void {
   const { source, model } = state()
-  const marker = model?.markers.find((m) => m.name === name)
+  const marker = model?.markers[index]
   if (!marker) return
   applyEdits(removeStatements(source, [marker.stmt.range]))
 }
@@ -3160,34 +3188,33 @@ export function beginOutline(name: string, color: string, width: number, pin: Pi
 }
 
 /**
- * The motion sketched for an object (D297): a path of one point where the object is, as the Draw
- * tool begins one (D194), then the points as recorded, in the object's own space, evenly spaced
- * in time, from `at` for `duration` seconds, straight through time. Returns the action's index.
+ * A path sketched for an object (D297, D305): the stroke, simplified and smoothed, as the path's
+ * line, traveled by distance as any path is, pinned at `when` for `length` seconds as any
+ * animation made with Shift (D103). Returns the path's end.
  */
-export function sketchPath(name: string, worlds: Point[], at: number, duration: number): number | null {
-  const { model, fps } = state()
+export function sketchPath(name: string, worlds: Point[], pin: Pin, when: number, length = 1): number | null {
+  const { model } = state()
   const obj = model?.objects.find((o) => o.name === name)
-  if (!model || !obj?.decl || worlds.length < 2) return null
-  const start = roundSeconds(at)
-  const length = Math.max(frameSeconds(fps), roundSeconds(duration))
+  const points = simplifyPoints(worlds, 2)
+  if (!model || !obj?.decl || points.length < 2) return null
+  const { at, duration } = pinnedSpan(pin, when, length)
   beginGesture()
   try {
-    const index = addPath(name, start)
+    const index = addPath(name, at)
     if (index === null) return null
     const ref = { object: name, index }
-    insertPathPoints(ref, 1, worlds.slice(1))
-    setActionProp(ref, 'duration', length)
-    setActionProp(ref, 'timed', true)
-    setActionProp(ref, 'ease', 'linear')
-    return index
+    insertPathPoints(ref, 1, points.slice(1))
+    setActionProp(ref, 'duration', duration)
+    setActionProp(ref, 'smooth', true)
+    return at + duration
   } finally {
     endGesture()
   }
 }
 
-/** A line sketched with the pencil (D297): a Shape through the points, simplified and smoothed, in the bar's stroke; with `writeOn`, drawn on from `at` over `duration` seconds (D298). Returns its name. */
-export function sketchLine(worlds: Point[], stroke: string, width: number, at: number, duration: number, writeOn: boolean): string | null {
-  const { model, fps } = state()
+/** A line sketched with the pencil (D297): a Shape through the points, simplified and smoothed, in the given outline, no fill, from `at`. Returns its name. */
+export function sketchLine(worlds: Point[], stroke: string, width: number, strokeOpacity: number, at: number): string | null {
+  const { model } = state()
   if (!model || worlds.length < 2) return null
   const simplified = simplifyPoints(worlds, 2)
   if (simplified.length < 2) return null
@@ -3205,21 +3232,24 @@ export function sketchLine(worlds: Point[], stroke: string, width: number, at: n
   const cy = Math.round((bottom + top) / 2)
   const name = uniqueName('line')
   const start = roundSeconds(at)
-  const span = Math.max(frameSeconds(fps), roundSeconds(duration))
   const attrs: Record<string, AttrValue> = { x: cx, y: cy, points: simplified.map((p) => [Math.round(p.x - cx), Math.round(p.y - cy)]), closed: false, smooth: true, fill: 'none', stroke, strokeWidth: Math.max(1, Math.round(width)) }
+  if (strokeOpacity < 1) attrs['strokeOpacity'] = strokeOpacity
   if (start > 0) attrs['at'] = start
   const life = useStore.getState().prefs.objectLength
-  if (life !== null) attrs['until'] = roundSeconds(start + Math.max(life, writeOn ? span : 0))
-  beginGesture()
-  try {
-    applyEdits([insertDeclaration(model.lastDeclEnd, blockText(`${name} = Shape`, attrs))], objectsSelected([name]))
-    // Written on: the line's drawn share from nothing to all over the sketch's own length (D298).
-    if (writeOn) applyEdits([appendStatement(state().source, `${name}.to({\n  drawn: [0, 1],\n  at: ${formatNumber(start)},\n  duration: ${formatNumber(span)},\n  ease: 'linear',\n})`)])
-  } finally {
-    endGesture()
-  }
+  if (life !== null) attrs['until'] = roundSeconds(start + life)
+  applyEdits([insertDeclaration(model.lastDeclEnd, blockText(`${name} = Shape`, attrs))], objectsSelected([name]))
   foldShapes()
   return name
+}
+
+/** A line written on (D298, D305): its drawn share from nothing to all, pinned at `when` for `length` seconds as any animation made with Shift (D103). Returns the end. */
+export function writeOnLine(name: string, pin: Pin, when: number, length = 1): number | null {
+  const { source, model } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl) return null
+  const { at, duration } = pinnedSpan(pin, when, length)
+  applyEdits([appendStatement(source, `${name}.to({\n  drawn: [0, 1],\n  at: ${formatNumber(at)},\n  duration: ${formatNumber(duration)},\n  ease: 'linear',\n})`), ...coverEdits(source, obj, at, at + duration)], actionSelected(name, obj.actions.length))
+  return at + duration
 }
 
 /** Fewer points for the same line (D297): those a stroke's path would miss by more than the tolerance are kept, the rest dropped. */

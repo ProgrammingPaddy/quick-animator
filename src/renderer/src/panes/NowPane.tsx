@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { beginGesture, endGesture } from '../code/editor'
 import { BakeIcon } from '../components/BakeIcon'
+import { ColorPicker } from '../components/ColorPicker'
 import { FontField } from '../components/FontField'
 import { LinkIcon } from '../components/LinkIcon'
 import { actionLinks, objectLinks } from '../model/links'
@@ -170,10 +171,10 @@ function Slider({ value, min, max, step, disabled, onChange }: { value: number; 
   )
 }
 
-/** A color well whose picking is one undo step. */
+/** A color well, the picker every color has (D303); its picking is one undo step. */
 function ColorWell({ value, disabled, onChange }: { value: string; disabled?: boolean; onChange: (value: string) => void }) {
   const hex = /^#[0-9a-f]{6}$/i.test(value) ? value : '#ffffff'
-  return <input className="now-color" type="color" value={hex} disabled={disabled} onFocus={() => beginGesture()} onBlur={() => endGesture()} onChange={(e) => onChange(e.target.value)} />
+  return <ColorPicker value={hex} disabled={disabled} onChange={onChange} onOpen={beginGesture} onClose={endGesture} />
 }
 
 /** One row of the pane: a name, the control, the link button, and a word about where the value comes from. */

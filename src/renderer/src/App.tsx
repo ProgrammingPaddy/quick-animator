@@ -219,6 +219,10 @@ export function App() {
           e.preventDefault()
           addMarker(store.time)
           return
+        case 'markerNamed':
+          e.preventDefault()
+          addMarker(store.time, true)
+          return
         case 'escape':
           if (tool !== 'select') setTool('select')
           else if (store.timelineTool !== 'select') store.setTimelineTool('select')

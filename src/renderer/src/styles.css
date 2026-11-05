@@ -491,31 +491,106 @@ button.icon:hover {
   padding-right: 4px;
 }
 
-.paint-bar input[type='color'] {
-  width: 30px;
-  height: 22px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: none;
-  cursor: pointer;
+.paint-bar .num-field {
+  margin: 0 2px;
 }
 
-.paint-bar .dropper {
+/* A color picked the same way everywhere (D303): the swatch, and the picker it opens, with the colors used lately and the project's own inside. */
+.color-swatch {
   width: 24px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  flex: none;
+}
+
+.color-picker {
+  position: fixed;
+  z-index: 60;
+  width: 220px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.color-square {
+  position: relative;
+  height: 130px;
+  border-radius: 4px;
+  background-image: linear-gradient(to top, #000000, transparent), linear-gradient(to right, #ffffff, transparent);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.color-hue {
+  position: relative;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.color-dot {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+.color-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.color-hex {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-pane);
+  color: var(--fg);
+  font-size: 11px;
+}
+
+.color-picker .dropper {
+  width: 24px;
+  height: 22px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  border-radius: 4px;
+  background: rgba(32, 32, 32, 0.85);
+  color: var(--fg-dim);
 }
 
-.paint-bar .paint-sep {
-  width: 1px;
-  height: 14px;
-  background: var(--border);
+.color-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-.paint-bar .swatch {
+.color-list.project {
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.color-list .swatch {
   width: 16px;
   height: 16px;
   padding: 0;
@@ -524,7 +599,7 @@ button.icon:hover {
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
 }
 
-.paint-bar .swatch.active {
+.color-list .swatch.active {
   border-color: #ffffff;
   box-shadow:
     inset 0 0 0 2px #ffffff,

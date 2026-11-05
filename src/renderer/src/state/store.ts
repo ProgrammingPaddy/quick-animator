@@ -150,6 +150,49 @@ export interface Prefs {
 
 export const DEFAULT_PREFS: Prefs = { objectLength: 2, timeHints: true, clipOpacity: true }
 
+/** The Shape tool's and the pencil's style, and Paint's colors (D304): the fill and whether there is one, the outline and its width, and each one's own opacity. */
+export interface ShapeStyle {
+  fill: string
+  filled: boolean
+  stroke: string
+  strokeWidth: number
+  fillOpacity: number
+  strokeOpacity: number
+}
+
+const COLORS_KEY = 'quick-animator.colors'
+const SHAPE_STYLE_KEY = 'quick-animator.shapeStyle'
+const DEFAULT_SHAPE_STYLE: ShapeStyle = { fill: '#4f8cff', filled: true, stroke: '#ffffff', strokeWidth: 3, fillOpacity: 1, strokeOpacity: 1 }
+
+/** The colors used lately, kept in the browser's storage (D303). */
+function loadColors(): string[] {
+  try {
+    const raw = localStorage.getItem(COLORS_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    return Array.isArray(parsed) ? parsed.filter((c): c is string => typeof c === 'string').slice(0, 8) : []
+  } catch {
+    return []
+  }
+}
+
+function loadShapeStyle(): ShapeStyle {
+  try {
+    const raw = localStorage.getItem(SHAPE_STYLE_KEY) ?? localStorage.getItem('quick-animator.paint')
+    const saved = raw ? (JSON.parse(raw) as Partial<ShapeStyle> & { color?: string; width?: number }) : null
+    const num = (v: unknown, fallback: number, lo = 0, hi = Infinity): number => (typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : fallback)
+    return {
+      fill: typeof saved?.fill === 'string' ? saved.fill : typeof saved?.color === 'string' ? saved.color : DEFAULT_SHAPE_STYLE.fill,
+      filled: saved?.filled !== false,
+      stroke: typeof saved?.stroke === 'string' ? saved.stroke : DEFAULT_SHAPE_STYLE.stroke,
+      strokeWidth: num(saved?.strokeWidth ?? saved?.width, DEFAULT_SHAPE_STYLE.strokeWidth),
+      fillOpacity: num(saved?.fillOpacity, 1, 0, 1),
+      strokeOpacity: num(saved?.strokeOpacity, 1, 0, 1),
+    }
+  } catch {
+    return DEFAULT_SHAPE_STYLE
+  }
+}
+
 function loadPrefs(): Prefs {
   try {
     const raw = localStorage.getItem(PREFS_KEY)
@@ -412,6 +455,12 @@ interface State {
   showPaths: boolean
   /** Paths hidden for now, while the Path tool is on, as object:index (D209). */
   hiddenPaths: string[]
+  /** The colors used lately, newest first, for every color picker (D303). */
+  recentColors: string[]
+  rememberColor: (color: string) => void
+  /** The Shape tool's and the pencil's style, and Paint's colors (D304). */
+  shapeStyle: ShapeStyle
+  setShapeStyle: (style: Partial<ShapeStyle>) => void
   /** The kind of object the Add tool places (D163). */
   addKind: ObjectKind
   /** The object preset the Object tool places, by id, instead of a kind (D300). */
@@ -554,6 +603,8 @@ function createAppStore() {
       notice: null,
       showPaths: loadChoice<'on' | 'off'>(SHOW_PATHS_KEY, ['on', 'off'], 'on') === 'on',
       hiddenPaths: [],
+      recentColors: loadColors(),
+      shapeStyle: loadShapeStyle(),
       addKind: 'Rect',
       addPreset: null,
       pathPoints: [],
@@ -703,6 +754,26 @@ function createAppStore() {
       setPathPoints: (pathPoints) => set({ pathPoints }),
       setAddKind: (addKind) => set({ addKind, addPreset: null }),
       setAddPreset: (addPreset) => set({ addPreset }),
+      rememberColor: (color) =>
+        set((s) => {
+          const recentColors = [color, ...s.recentColors.filter((c) => c !== color)].slice(0, 8)
+          try {
+            localStorage.setItem(COLORS_KEY, JSON.stringify(recentColors))
+          } catch {
+            // Nothing kept between runs; the list still works.
+          }
+          return { recentColors }
+        }),
+      setShapeStyle: (style) =>
+        set((s) => {
+          const shapeStyle = { ...s.shapeStyle, ...style }
+          try {
+            localStorage.setItem(SHAPE_STYLE_KEY, JSON.stringify(shapeStyle))
+          } catch {
+            // Nothing kept between runs; the style still works.
+          }
+          return { shapeStyle }
+        }),
       openMenu: (contextMenu) => set({ contextMenu }),
       closeMenu: () => set((s) => (s.contextMenu ? { contextMenu: null } : s)),
       openDialog: (dialog) => set({ dialog, contextMenu: null }),

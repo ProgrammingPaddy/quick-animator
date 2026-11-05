@@ -256,6 +256,11 @@ function dashes(points: { x: number; y: number }[], on: number, off: number): [{
 }
 
 /** A Shape's stroke as triangles: a quad along each piece of each line and a small fan at each point, so the joins are round (D232). */
+/** A share, 0 to 1, from a value that may be anything; 1 when it is not a number. */
+function unitOpacity(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1
+}
+
 /** The first share of a line, by length across its pieces (D298): what is drawn of it so far. */
 function drawnCurves(curves: { x: number; y: number }[][], fraction: number): { x: number; y: number }[][] {
   let total = 0
@@ -984,7 +989,8 @@ export class SceneRenderer {
     const fill = String(valueAt(model, obj, 'fill', time))
     item.mesh.visible = fill !== 'none' && item.mesh.geometry.getAttribute('position') !== undefined
     if (item.mesh.visible) setColor(material, fill)
-    material.opacity = opacity
+    // The fill's and the outline's own opacities on top of the object's (D304).
+    material.opacity = opacity * unitOpacity(valueAt(model, obj, 'fillOpacity', time))
     item.mesh.scale.set(pose.scale, pose.scale, 1)
     if (item.stroke) {
       const stroke = item.stroke
@@ -995,7 +1001,7 @@ export class SceneRenderer {
       stroke.scale.set(pose.scale, pose.scale, 1)
       const strokeMaterial = stroke.material as THREE.MeshBasicMaterial
       setColor(strokeMaterial, String(valueAt(model, obj, 'stroke', time)))
-      strokeMaterial.opacity = opacity
+      strokeMaterial.opacity = opacity * unitOpacity(valueAt(model, obj, 'strokeOpacity', time))
     }
   }
 

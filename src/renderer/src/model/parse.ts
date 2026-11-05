@@ -202,7 +202,9 @@ export function parseScene(source: string, classNames: ReadonlySet<string>, verb
       // name = marker(seconds): a named moment (D296).
       if (className === 'marker') {
         const arg = call.arguments[0]
-        if (name !== null && arg) markers.push({ name, range: { from: stmt.start, to: stmt.end }, arg: { from: arg.start, to: arg.end } })
+        const second = call.arguments[1]
+        const label = second && second.type === 'Literal' && typeof (second as Literal).value === 'string' ? { from: second.start, to: second.end } : null
+        if (arg) markers.push({ name, label, range: { from: stmt.start, to: stmt.end }, arg: { from: arg.start, to: arg.end } })
         return
       }
       if (!classNames.has(className) || !block || name === null) return

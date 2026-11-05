@@ -178,9 +178,13 @@ in the Shape tool, or with the resize handles in Select, writes a morph whose ta
 outline as dragged. A target written as a word or as points becomes curves when a point of it
 is dragged.
 
-A marker names a moment: `intro = marker(2)` is the number 2, so `at: intro` reads it, and the
-timeline shows it on the ruler, where it is dragged, renamed, and snapped to. M writes one at
-the playhead.
+A marker is a moment on the ruler: `marker(2)`, numbered by its place in time, or `marker(2,
+'Intro')` with its text; assigned, `intro = marker(2, 'Intro')` is the number 2, so `at: intro`
+reads it. M writes one at the playhead, Shift+M one with text; a marker is dragged, named, and
+snapped to on the ruler.
+
+A Shape's `fillOpacity` and `strokeOpacity` are the fill's and the outline's own opacities, 0 to
+1 on top of `opacity`, as SVG's fill-opacity and stroke-opacity, which an import keeps.
 
 A Shape's `drawn` is how much of its line is drawn from its start, 0 to 1, 1 unless written;
 the stroke stops there and the fill is whole. `drawn: [0, 1]` writes a line on.

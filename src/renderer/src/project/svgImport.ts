@@ -215,9 +215,11 @@ export function readSvg(text: string, fileName: string, taken: ReadonlySet<strin
       const hasFill = fill.color !== null
       const hasStroke = stroke.color !== null && strokeWidth > 0
       const own = opacity * (hasFill ? (Number(cs.fillOpacity) || 1) * fill.alpha : (Number(cs.strokeOpacity) || 1) * stroke.alpha)
-      const common = (): Record<string, AttrValue> => {
+      const common = (shape = false): Record<string, AttrValue> => {
         const attrs: Record<string, AttrValue> = {}
-        if (Math.abs(own - 1) > 0.005) attrs['opacity'] = round2(Math.max(0, Math.min(1, own)))
+        // A Shape keeps the fill's and the stroke's own opacities apart (D304); anything else folds them into its own.
+        const total = shape ? opacity : own
+        if (Math.abs(total - 1) > 0.005) attrs['opacity'] = round2(Math.max(0, Math.min(1, total)))
         if (rotation !== 0) attrs['rotation'] = rotation
         return attrs
       }
@@ -286,7 +288,11 @@ export function readSvg(text: string, fileName: string, taken: ReadonlySet<strin
       } else attrs['curves'] = serializePathData(ownSegs)
       attrs['fill'] = hasFill ? fill.color! : 'none'
       if (hasStroke) Object.assign(attrs, { stroke: stroke.color!, strokeWidth: round2(strokeWidth) })
-      Object.assign(attrs, common())
+      const fillOwn = (Number(cs.fillOpacity) || 1) * (fill.alpha ?? 1)
+      const strokeOwn = (Number(cs.strokeOpacity) || 1) * (stroke.alpha ?? 1)
+      if (hasFill && Math.abs(fillOwn - 1) > 0.005) attrs['fillOpacity'] = round2(Math.max(0, Math.min(1, fillOwn)))
+      if (hasStroke && Math.abs(strokeOwn - 1) > 0.005) attrs['strokeOpacity'] = round2(Math.max(0, Math.min(1, strokeOwn)))
+      Object.assign(attrs, common(true))
       return { kind: 'object', name: name(el.getAttribute('id'), `${prefix}Shape`), className: 'Shape', attrs }
     }
 

@@ -382,12 +382,12 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
 
   // Frames as seconds (D276): `at: frames(15)` or `duration: frames(5)`, a count of frames at the project's rate, anywhere a time goes.
   api['frames'] = (count: unknown = 0) => (Number(count) || 0) / fps
-  // A marker is its seconds, a plain number (D296); the timeline learns of it from the statement.
-  const markerTimes: number[] = []
-  api['marker'] = (seconds: unknown = 0) => {
+  // A marker is its seconds, a plain number (D296), with its text when given (D302); the timeline learns of it from the statement.
+  const markerCalls: { time: number; label: string | null }[] = []
+  api['marker'] = (seconds: unknown = 0, label: unknown = null) => {
     const t = Number(seconds)
     const time = Number.isFinite(t) ? Math.max(0, t) : 0
-    markerTimes.push(time)
+    markerCalls.push({ time, label: typeof label === 'string' && label.trim() !== '' ? label : null })
     return time
   }
 
@@ -781,9 +781,9 @@ export function evaluateScene(source: string, fps = 60): EvaluateResult {
     return result
   }
 
-  // The markers as written, each with the seconds its call gave (D296); a call without a name has no place on the timeline.
-  model.markers = parsed.markers.map((info, i) => ({ name: info.name, time: markerTimes[i] ?? 0, stmt: info }))
-  if (markerTimes.length !== parsed.markers.length) warn('marker() needs a name of its own, as in intro = marker(2)')
+  // The markers as written, each with the seconds and the text its call gave (D296, D302).
+  model.markers = parsed.markers.map((info, i) => ({ name: info.name, label: markerCalls[i]?.label ?? null, time: markerCalls[i]?.time ?? 0, stmt: info }))
+  if (markerCalls.length !== parsed.markers.length) warn("marker() is a statement of its own: marker(2), or intro = marker(2, 'Intro')")
   try {
     for (const action of actions) resolveAction(action)
     for (const obj of objects) resolveLifetime(obj)

@@ -162,16 +162,18 @@ export interface SceneError {
   line?: number
 }
 
-/** `name = marker(seconds)` as parsed (D296): the statement, and where its seconds are written. */
+/** `marker(seconds, 'text')` as parsed (D296, D302): the statement, where its seconds are written, where its text is when it has one, and its name when assigned. */
 export interface MarkerInfo {
-  name: string
+  name: string | null
+  label: Range | null
   range: Range
   arg: Range
 }
 
-/** A named moment on the timeline (D296): a plain number in the code, so `at: intro` reads it. */
+/** A moment on the timeline (D296, D302): numbered by its place in time on the ruler, with its text when given; a plain number in the code, so `at: intro` reads one that is assigned. */
 export interface Marker {
-  name: string
+  name: string | null
+  label: string | null
   time: number
   stmt: MarkerInfo
 }
