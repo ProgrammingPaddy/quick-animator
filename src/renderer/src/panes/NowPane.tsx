@@ -643,7 +643,7 @@ function ActionView({ model, obj, action, index, fps, editable, openLinks }: { m
           {easeMode === RAMPS && timingNumber('easeIn', action.timing.easeIn, easeIn, action.timing.easeIn === undefined ? 'default' : '', (v) => setActionProp(ref, 'easeIn', v === null ? null : Math.max(0, v)), { min: 0, max: span, step: 0.01, slider: true, title: 'Seconds to get up to speed' })}
           {easeMode === RAMPS && timingNumber('easeOut', action.timing.easeOut, easeOut, action.timing.easeOut === undefined ? 'default' : '', (v) => setActionProp(ref, 'easeOut', v === null ? null : Math.max(0, v)), { min: 0, max: span, step: 0.01, slider: true, title: 'Seconds to slow down at the end' })}
           <Row name="relative" status={action.timing.relative ? '' : 'default'}>
-            <input type="checkbox" checked={!!action.timing.relative} disabled={locked} onChange={(e) => setActionProp(ref, 'relative', e.target.checked ? true : null)} title="Changes from where it starts" />
+            <input type="checkbox" checked={!!action.timing.relative} disabled={locked} onChange={(e) => setActionProp(ref, 'relative', e.target.checked ? true : null)} title="Adds its values on top of everything else" />
           </Row>
           {obj.className === 'Text' && action.timing.units && (
             <Row name="by" status="by handle">

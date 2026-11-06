@@ -1061,6 +1061,15 @@ button.icon:hover {
   line-height: 12px;
 }
 
+/* The box dragged over the rows to select object clips (D315), placed in the window's own space. */
+.tl-marquee {
+  position: fixed;
+  z-index: 20;
+  border: 1px solid var(--accent);
+  background: rgba(59, 130, 246, 0.12);
+  pointer-events: none;
+}
+
 .tl-marker-line {
   position: absolute;
   top: 0;

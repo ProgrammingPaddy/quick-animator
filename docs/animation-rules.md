@@ -253,7 +253,7 @@ Timing keys, allowed in every action block:
 - `return`: seconds over which the animation goes back to what it found, after its journey and its hold; written, the change does not last, and `0` snaps back. See below.
 - `easeIn`, `easeOut`: seconds of easing at each end. Omitted: 30% of the duration each.
 - `ease`: `'linear'`, `'bounce'` (bounces at the end), `'back'` (overshoots at the end), `'elastic'` (springs at the end), or `'snap'` (fast start, settles); or a function of the progress, `(p) => p * p`, giving the eased progress, 0 to 1; or one of the `Ease` curves: `Ease.ramps(easeIn, easeOut, duration)`, the ramps as a curve; `Ease.part(ease, from, to)`, the part of a curve between two points of its progress, stretched to a whole curve; `Ease.share(ease, from, to)`, the share of the change the curve covers there, which stops part of the way; `Ease.along(ease, from, to)`, the stretch of the curve as it is there, which a piece of a cut path runs on; `ease` a name, a function, or another `Ease` curve. These are what a sliced animation runs on, and go beyond 0 and 1 where `'bounce'` or `'back'` does; a function of your own is kept within 0 and 1. Replaces `easeIn` and `easeOut`.
-- `relative`: `true` makes the values changes from where the object is when the action starts. Omitted: `false`.
+- `relative`: `true` makes the values amounts added on top of everything else, where otherwise they are values to go to. Omitted: `false`. See Relative and overlapping actions.
 - `overrides`: the name of a class action this action replaces for its object. See Classes.
 
 An action never dictates its start. It begins from the state the object is in when its first
@@ -485,21 +485,50 @@ title.to({
 
 ## Relative and overlapping actions
 
+An action's values are values to go to, unless it is written with `relative: true`: then they
+are amounts to add.
+
+An absolute action sets. `x: 100` ends with the object at x 100, wherever it was. Of the
+absolute actions on one attribute, one has the say at a time, as below.
+
+A relative action adds. `x: 100` with `relative: true` ends with the object 100 pixels to the
+right of where everything else puts it. It takes nothing over: what the absolute actions give
+is worked out first, and every relative change is added on top, each by how far along it is, in
+any order. So a relative action runs over a move, a path, or another relative action, and the
+object goes on following those while it does. When it ends its amount stays added for the rest
+of the object's life; with a `return` the amount comes off again. A range adds its first number
+until the action begins; a function adds what it gives; a path's points are amounts from where
+the object is. Only numbers add: a color or a word is set, relative or not.
+
+Write relative for a motion that should work wherever the object is and whatever else it is
+doing: a nudge, a shake or a pulse over a move, an arrival from off the frame, a preset, a
+class's action that takes every member from its own place. Write absolute to put something at
+a place or a value you know.
+
 ```js
 box.move({
-  x: 100,
+  x: 400,
+  at: 1,
+  duration: 2,
+})
+
+box.move({
+  y: 60,
   relative: true,
-  duration: 0.5,
+  at: 1.5,
+  duration: 0.3,
+  return: 0.3,
 })
 ```
 
-moves 100 pixels to the right of wherever the box is at that moment. Actions on one attribute
-stack in the order they are written: a later one is on top. Of the absolute actions running at a
-moment, the top one has the say; when it ends, the ones below show through again, as if it had
-never run; with none running, the one that ended last holds the value it reached. An absolute
-action starts from where the actions below it leave the object as it begins. A relative action
-adds its change on top of all that, whichever started first. In the timeline, overlapping
-animations stack the same way, the top one highest; drag one up or down to change the order.
+The box goes to x 400, and on its way hops 60 pixels up and comes back, whatever its y is.
+
+Actions on one attribute stack in the order they are written: a later one is on top. Of the
+absolute actions running at a moment, the top one has the say; when it ends, the ones below
+show through again, as if it had never run; with none running, the one that ended last holds
+the value it reached. An absolute action starts from where the actions below it leave the
+object as it begins. In the timeline, overlapping animations stack the same way, the top one
+highest; drag one up or down to change the order.
 
 ## Time references
 
@@ -662,7 +691,8 @@ saved by right-click, is an animation's block without its place in time, an obje
 and animations without its place and its life, a group with everything it carries, or a class's
 statements, written back as they were and named after the preset. A drag of an object puts it where the pointer is whatever is placed on it: a move's
 end, a path's point, the start an action was given, or the declaration, whichever has the say at
-that moment. In the middle of an action, more than half a frame from either end, a drag, a
+that moment; the playhead stays where it is, and with an animation selected and the playhead
+at its end, the drag sets that animation's end. In the middle of an action, more than half a frame from either end, a drag, a
 nudge, or a value typed in the Selected pane first writes an action of its own from that action's
 start to the playhead, with the values as they are, and then edits that one, so it meets the new
 state; the playhead stays; the original is untouched and runs on from the state at its own

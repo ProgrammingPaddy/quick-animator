@@ -255,7 +255,6 @@ function dashes(points: { x: number; y: number }[], on: number, off: number): [{
   return out
 }
 
-/** A Shape's stroke as triangles: a quad along each piece of each line and a small fan at each point, so the joins are round (D232). */
 /** A share, 0 to 1, from a value that may be anything; 1 when it is not a number. */
 function unitOpacity(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1
@@ -291,33 +290,82 @@ function drawnCurves(curves: { x: number; y: number }[][], fraction: number): { 
   return out
 }
 
+/**
+ * A Shape's stroke as triangles (D232, D317): a band along the line with nothing covered twice,
+ * so a see-through line is even and its edge has no notch. At a turn the inner edges meet in one
+ * point and the outer edge goes round the line's own point; an open line ends in half circles; a
+ * line of no length is a dot (D311). A turn too sharp for its pieces to meet within them keeps
+ * square ends and a round over the gap.
+ */
 function strokeGeometry(curves: { x: number; y: number }[][], width: number): THREE.BufferGeometry {
+  type P = { x: number; y: number }
   const positions: number[] = []
   const half = width / 2
-  const tri = (a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }) => positions.push(a.x, a.y, 0, b.x, b.y, 0, c.x, c.y, 0)
+  const tri = (a: P, b: P, c: P) => positions.push(a.x, a.y, 0, b.x, b.y, 0, c.x, c.y, 0)
+  const on = (p: P, angle: number, r = half): P => ({ x: p.x + r * Math.cos(angle), y: p.y + r * Math.sin(angle) })
+  /** A fan from `hub` over the arc around `p`, from an angle through a sweep, in steps fine enough to look round. */
+  const fan = (hub: P, p: P, from: number, sweep: number) => {
+    const steps = Math.max(1, Math.ceil(Math.abs(sweep) / (Math.PI / 18)))
+    for (let k = 0; k < steps; k++) tri(hub, on(p, from + (sweep * k) / steps), on(p, from + (sweep * (k + 1)) / steps))
+  }
   for (const curve of curves) {
     if (curve.length < 2) continue
-    for (let i = 0; i + 1 < curve.length; i++) {
-      const a = curve[i]!
-      const b = curve[i + 1]!
-      const dx = b.x - a.x
-      const dy = b.y - a.y
-      const length = Math.hypot(dx, dy)
-      if (length < 1e-9) continue
-      const nx = (-dy / length) * half
-      const ny = (dx / length) * half
-      tri({ x: a.x + nx, y: a.y + ny }, { x: b.x + nx, y: b.y + ny }, { x: b.x - nx, y: b.y - ny })
-      tri({ x: a.x + nx, y: a.y + ny }, { x: b.x - nx, y: b.y - ny }, { x: a.x - nx, y: a.y - ny })
+    // A point that repeats the one before adds nothing to the line.
+    const pts = curve.filter((p, i) => i === 0 || Math.hypot(p.x - curve[i - 1]!.x, p.y - curve[i - 1]!.y) > 1e-9)
+    if (pts.length < 2) {
+      fan(pts[0]!, pts[0]!, 0, 2 * Math.PI)
+      continue
     }
-    for (let j = 0; j < curve.length; j++) {
-      const p = curve[j]!
-      // The ends are the line's round caps, and all there is of a dot (D311): finer than the joins, which the pieces mostly cover.
-      const steps = j === 0 || j === curve.length - 1 ? 24 : 8
-      for (let k = 0; k < steps; k++) {
-        const a0 = (k / steps) * 2 * Math.PI
-        const a1 = ((k + 1) / steps) * 2 * Math.PI
-        tri(p, { x: p.x + half * Math.cos(a0), y: p.y + half * Math.sin(a0) }, { x: p.x + half * Math.cos(a1), y: p.y + half * Math.sin(a1) })
+    const closed = pts.length > 3 && Math.hypot(pts[0]!.x - pts[pts.length - 1]!.x, pts[0]!.y - pts[pts.length - 1]!.y) <= 1e-9
+    const ring = closed ? pts.slice(0, -1) : pts
+    const n = ring.length
+    const count = closed ? n : n - 1
+    const angle: number[] = []
+    const length: number[] = []
+    for (let s = 0; s < count; s++) {
+      const a = ring[s]!
+      const b = ring[(s + 1) % n]!
+      angle.push(Math.atan2(b.y - a.y, b.x - a.x))
+      length.push(Math.hypot(b.x - a.x, b.y - a.y))
+    }
+    // The band's two edges at each point: where the piece arriving ends, and where the piece leaving begins.
+    const ends: { lin: P; rin: P; lout: P; rout: P }[] = []
+    for (let i = 0; i < n; i++) {
+      const p = ring[i]!
+      const sIn = closed ? (i - 1 + n) % n : i - 1
+      const sOut = closed || i < count ? i : -1
+      const aIn = angle[sIn >= 0 ? sIn : sOut]!
+      const aOut = sOut >= 0 ? angle[sOut]! : aIn
+      const square = { lin: on(p, aIn + Math.PI / 2), rin: on(p, aIn - Math.PI / 2), lout: on(p, aOut + Math.PI / 2), rout: on(p, aOut - Math.PI / 2) }
+      ends.push(square)
+      // An open line's ends: a half circle behind the first piece and one ahead of the last.
+      if (sIn < 0) {
+        fan(p, p, aOut + Math.PI / 2, Math.PI)
+        continue
       }
+      if (sOut < 0) {
+        fan(p, p, aIn - Math.PI / 2, Math.PI)
+        continue
+      }
+      let turn = aOut - aIn
+      while (turn > Math.PI) turn -= 2 * Math.PI
+      while (turn <= -Math.PI) turn += 2 * Math.PI
+      if (Math.abs(turn) < 1e-9) continue
+      // A left turn opens on the line's right and closes on its left; a right turn the other way.
+      const outer = turn > 0 ? -Math.PI / 2 : Math.PI / 2
+      if (half * Math.tan(Math.abs(turn) / 2) > Math.min(length[sIn]!, length[sOut]!) / 2) {
+        fan(p, p, aIn + outer, turn)
+        continue
+      }
+      const inner = on(p, aIn - outer + turn / 2, half / Math.cos(turn / 2))
+      fan(inner, p, aIn + outer, turn)
+      ends[i] = turn > 0 ? { lin: inner, lout: inner, rin: square.rin, rout: square.rout } : { rin: inner, rout: inner, lin: square.lin, lout: square.lout }
+    }
+    for (let s = 0; s < count; s++) {
+      const a = ends[s]!
+      const b = ends[(s + 1) % n]!
+      tri(a.lout, a.rout, b.rin)
+      tri(a.lout, b.rin, b.lin)
     }
   }
   const geometry = new THREE.BufferGeometry()

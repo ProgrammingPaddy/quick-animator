@@ -25,7 +25,7 @@ const TIMING_DOCS: Record<string, string> = {
   easeIn: 'Seconds of easing at the start. Omitted: 30% of the duration.',
   easeOut: 'Seconds of easing at the end. Omitted: 30% of the duration.',
   ease: "A named curve: 'linear', 'bounce', 'back', 'elastic', or 'snap'. Replaces easeIn and easeOut.",
-  relative: 'true: the values are changes from where the object is when the action starts, and add on top of other actions.',
+  relative: 'true: the values are amounts added on top of everything else, where otherwise they are values to go to; the amount stays added unless the action has a return.',
   by: "On a Text: 'char', 'word', or 'line'. The action runs on each unit in turn from its own place: x, y, and rotation as offsets, scale and opacity as factors, fill as its color.",
   stagger: 'With by: seconds between one unit and the next. Omitted: 0.05.',
   overrides: "The class action this replaces for this object, by name: rise = all('bars').move(...) then box.move({ ..., overrides: rise }). The class action is switched off for the object.",

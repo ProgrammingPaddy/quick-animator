@@ -190,26 +190,32 @@ function midAnimationStart(name: string, attrs: string[], time: number): number 
 }
 
 /**
- * An edit at a time one of the object's own animations ends at, a piece of D263 say, while a
- * path still carries the other axis in the middle of its run (D313): the animation that ends
- * here and the axes it takes on, at the values shown, so what is written next shows at this
- * time, where the path's own end would not (D224). Null when there is nothing to take on.
+ * An edit at a time one of the object's own animations ends at, a piece of D263 say, while
+ * another of the edit's values is still in the middle of something: a path that carries the
+ * other axis, whose own end would not show at this time (D313, D224), or the animation the piece
+ * was cut from, which would otherwise get a second piece (D318). The animation that ends here
+ * takes those values on, as they show, so what is written next goes to it. Null when there is
+ * nothing to take on.
  */
 function axesToJoin(name: string, attrs: string[], time: number): { ref: ActionRef; values: Record<string, number> } | null {
   const { model, fps } = state()
   const obj = model?.objects.find((o) => o.name === name)
   if (!model || !obj?.decl) return null
   const slack = frameSeconds(fps) / 2
+  const inside = (a: Action): boolean => time > a.start + slack && time < a.end - slack
+  const piece = attrs.map((attr) => definingAction(obj, attr, time)).find((a) => !!a?.stmt && !a.classAction && a.verb !== 'path' && !a.timing.relative && Math.abs(a.end - time) <= slack)
+  if (!piece) return null
   const values: Record<string, number> = {}
   for (const attr of attrs) {
-    if (attr !== 'x' && attr !== 'y') continue
-    const path = pathHolds(obj, attr, time)
+    if (attr in piece.changes) continue
     const value = valueAt(model, obj, attr, time)
-    if (path && time > path.start + slack && time < path.end - slack && typeof value === 'number') values[attr] = roundAttr(attr, value)
+    if (typeof value !== 'number' || verbFor([...Object.keys(piece.changes), attr]) !== piece.verb) continue
+    const path = attr === 'x' || attr === 'y' ? pathHolds(obj, attr, time) : null
+    const definer = definingAction(obj, attr, time)
+    const sameCut = !!definer?.stmt && !definer.classAction && definer.verb !== 'path' && inside(definer) && Math.abs(definer.start - piece.start) <= slack
+    if ((path && inside(path)) || sameCut) values[attr] = roundAttr(attr, value)
   }
-  if (Object.keys(values).length === 0) return null
-  const piece = attrs.map((attr) => definingAction(obj, attr, time)).find((a) => !!a?.stmt && !a.classAction && a.verb !== 'path' && !a.timing.relative && Math.abs(a.end - time) <= slack)
-  return piece ? { ref: { object: name, index: obj.actions.indexOf(piece) }, values } : null
+  return Object.keys(values).length > 0 ? { ref: { object: name, index: obj.actions.indexOf(piece) }, values } : null
 }
 
 /**
@@ -233,8 +239,9 @@ export function setAttrsAtMany(entries: { name: string; attrs: Record<string, nu
       overrideClassAction(name, obj.actions.indexOf(action))
     }
   }
-  const pieces = entries.map(({ name, attrs }) => ({ name, attrs: Object.keys(attrs), from: midAnimationStart(name, Object.keys(attrs), time) })).filter((p) => p.from !== null)
   const joins = entries.map(({ name, attrs }) => axesToJoin(name, Object.keys(attrs), time)).filter((j) => j !== null)
+  const joined = (name: string, attr: string): boolean => joins.some((j) => j.ref.object === name && attr in j.values)
+  const pieces = entries.map(({ name, attrs }) => ({ name, attrs: Object.keys(attrs), from: midAnimationStart(name, Object.keys(attrs).filter((attr) => !joined(name, attr)), time) })).filter((p) => p.from !== null)
   const own = (pieces.length > 0 || joins.length > 0) && !gestureOpen()
   if (own) beginGesture()
   for (const join of joins) for (const [attr, value] of Object.entries(join.values)) setActionProp(join.ref, attr, value)

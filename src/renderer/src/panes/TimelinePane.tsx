@@ -7,7 +7,7 @@ import { beginGesture, endGesture } from '../code/editor'
 import { actionIdents, activeMembers, classActionIdents, classKey, classSpan, classStandIn, classTree, groupMembers, overrideOf, type ClassNode } from '../model/groups'
 import { attrSchema, GROUP, labelOn, PIVOT_PARAMS, VERB_ATTRS, VERB_COLORS, VERBS } from '../model/registry'
 import { actionLinks, classActionLinks, dependentsByTarget, objectLinks, targetKey, type LinkInfo } from '../model/links'
-import { containers, opacityAt, tailOf, unitShareAt, unitSpans, valueAt, visibleShareAt, writtenSpan } from '../model/sample'
+import { containers, opacityAt, tailOf, TIME_TOLERANCE, unitShareAt, unitSpans, valueAt, visibleShareAt, writtenSpan } from '../model/sample'
 import type { Action, ClassAction, Marker, SceneModel, SceneObject } from '../model/types'
 import {
   addAction,
@@ -129,7 +129,9 @@ function clipLabel(action: Action): string {
  * Overlapping animations stack the way clips do (D152, D210): in file order, each goes one level
  * above the highest of the earlier ones it overlaps in time, level 0 at the bottom; the lane
  * returned counts from the top, so the highest level is drawn highest, and that one has the say
- * while it runs. Animations that never share a moment are not stacked.
+ * while it runs. Animations that never share a moment are not stacked, and one that ends where
+ * the next begins shares none with it: an end is a start plus a duration, a sum that can come
+ * out a hair past the number written (D316).
  */
 function assignLanes<T extends { id: number; start: number; end: number }>(items: T[]): { lanes: Map<number, number>; count: number } {
   const sorted = [...items].sort((a, b) => a.id - b.id)
@@ -139,7 +141,7 @@ function assignLanes<T extends { id: number; start: number; end: number }>(items
     let level = 0
     for (const other of sorted) {
       if (other === item) break
-      if (other.end > item.start && other.start < item.end) level = Math.max(level, (levels.get(other.id) ?? 0) + 1)
+      if (other.end > item.start + TIME_TOLERANCE && other.start < item.end - TIME_TOLERANCE) level = Math.max(level, (levels.get(other.id) ?? 0) + 1)
     }
     levels.set(item.id, level)
     highest = Math.max(highest, level)
@@ -339,6 +341,8 @@ export function TimelinePane() {
   const setHoverTimeline = useStore((s) => s.setHoverTimeline)
   /** The time a drag has snapped to, drawn as a guide line across the lanes while it lasts (D179). */
   const [snapLine, setSnapLine] = useState<number | null>(null)
+  /** The box being dragged over the rows, in the window's own space (D315). */
+  const [marquee, setMarquee] = useState<{ left: number; right: number; top: number; bottom: number } | null>(null)
   const markerEdit = useStore((s) => s.markerEdit)
   const frameSnap = useStore((s) => s.frameSnap)
   const wheelStep = useStore((s) => s.wheelStep)
@@ -519,8 +523,7 @@ export function TimelinePane() {
   /** Only the ruler moves the playhead (D92), snapping to seconds, action edges, and fifth frames when snapping is on (D128). */
   const beginScrub = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
-    // The ruler is about time alone: a click on it lets go of whatever was selected (D207).
-    select([])
+    // The ruler is about time alone, and leaves what is selected as it is (D315, revising D207).
     const scrub = (clientX: number) => {
       const s = useStore.getState()
       setTime(snapPlayhead(rawTimeAt(clientX), s.model, viewRef.current.pps, s.snap))
@@ -529,11 +532,43 @@ export function TimelinePane() {
     capture(e.currentTarget, e.pointerId, (ev) => scrub(ev.clientX))
   }
 
-  /** Clicking empty track space selects nothing, so the arrows go back to scrubbing (D92). */
-  const clearSelection = (e: ReactPointerEvent) => {
-    if (e.button !== 0 || e.ctrlKey || e.metaKey) return
-    if (e.target instanceof Element && e.target.closest('.clip, .opacity-handle')) return
-    select([])
+  /**
+   * A press on empty space in the rows (D92, D315): let go of where it began, it selects nothing,
+   * so the arrows go back to scrubbing; dragged, it draws a box, and the object clips the box
+   * touches are selected, added to what was selected when Ctrl is held. The razor draws no box.
+   */
+  const beginMarquee = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    if (e.target instanceof Element && e.target.closest('.clip, .oclip, .opacity-handle, .tl-row-header, button, input')) return
+    const extend = e.ctrlKey || e.metaKey
+    const before = extend ? useStore.getState().selection : []
+    const origin = { x: e.clientX, y: e.clientY }
+    const rows = e.currentTarget
+    const boxing = useStore.getState().timelineTool !== 'razor'
+    let moved = false
+    capture(
+      rows,
+      e.pointerId,
+      (ev) => {
+        if (!boxing || (!moved && Math.hypot(ev.clientX - origin.x, ev.clientY - origin.y) < 3)) return
+        moved = true
+        const box = { left: Math.min(origin.x, ev.clientX), right: Math.max(origin.x, ev.clientX), top: Math.min(origin.y, ev.clientY), bottom: Math.max(origin.y, ev.clientY) }
+        setMarquee(box)
+        const touched = [...rows.querySelectorAll<HTMLElement>('.oclip[data-object]')]
+          .filter((el) => {
+            const r = el.getBoundingClientRect()
+            return r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top
+          })
+          .map((el) => el.dataset['object']!)
+        const next = [...before, ...touched.filter((name) => !before.includes(name))]
+        const now = useStore.getState().selection
+        if (next.length !== now.length || next.some((name, i) => name !== now[i])) select(next)
+      },
+      () => {
+        setMarquee(null)
+        if (!moved && !extend) select([])
+      },
+    )
   }
 
   /** Whether a block's start and end may be dragged: a written time reference is left alone. */
@@ -1596,7 +1631,7 @@ export function TimelinePane() {
         let l = 0
         for (const other of items) {
           if (other === item) break
-          if (other.end > item.start && other.start < item.end) l = Math.max(l, (level.get(other.key) ?? 0) + 1)
+          if (other.end > item.start + TIME_TOLERANCE && other.start < item.end - TIME_TOLERANCE) l = Math.max(l, (level.get(other.key) ?? 0) + 1)
         }
         level.set(item.key, l)
       }
@@ -1628,7 +1663,7 @@ export function TimelinePane() {
               </button>
             )}
           </div>
-          <div className="tl-track" onPointerDown={clearSelection} onContextMenu={laneMenu}>
+          <div className="tl-track" onContextMenu={laneMenu}>
             {ticks.map((t) => (
               <div key={t} className="grid-line" style={{ left: xAt(t) }} />
             ))}
@@ -1812,7 +1847,7 @@ export function TimelinePane() {
           <Playhead kind="head" scrollTime={view.scrollTime} pps={view.pps} width={width} />
         </div>
         <div className="tl-body" ref={bodyRef}>
-          <div className={`tl-rows${razor ? ' razor' : ''}`} ref={rowsRef} onContextMenu={blankMenu} onPointerMove={razor ? (e) => setSnapLine(snappedAt(e.clientX)) : undefined} onPointerLeave={razor ? () => setSnapLine(null) : undefined}>
+          <div className={`tl-rows${razor ? ' razor' : ''}`} ref={rowsRef} onPointerDown={beginMarquee} onContextMenu={blankMenu} onPointerMove={razor ? (e) => setSnapLine(snappedAt(e.clientX)) : undefined} onPointerLeave={razor ? () => setSnapLine(null) : undefined}>
             {model && model.objects.length === 0 && <div className="empty">No objects yet.</div>}
             {renderObjectsView()}
             <div className="tl-playhead-layer" aria-hidden="true">
@@ -1820,6 +1855,7 @@ export function TimelinePane() {
                 <div key={i} className="tl-marker-line" style={{ left: xAt(m.time) }} />
               ))}
               {snapLine !== null && <div className="tl-snap-line" style={{ left: xAt(snapLine) }} />}
+              {marquee && <div className="tl-marquee" style={{ left: marquee.left, top: marquee.top, width: marquee.right - marquee.left, height: marquee.bottom - marquee.top }} />}
               <Playhead kind="line" scrollTime={view.scrollTime} pps={view.pps} width={width} />
             </div>
           </div>

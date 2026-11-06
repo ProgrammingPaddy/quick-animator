@@ -1516,14 +1516,12 @@ export function PreviewPane() {
       actionIndex = selected!.index
       derived = !!selectedAction!.classAction
       editAt = selectedAction!.end
-    } else if (matches && !e.shiftKey) {
-      // The animation selected: a plain drag sets the state at the end the pin names (D157, D187).
-      if (store.pin === 'end') {
-        kind = 'destination'
-        actionIndex = selected!.index
-        derived = !!selectedAction!.classAction
-        editAt = selectedAction!.end
-      } else editAt = selectedAction!.start
+    } else if (matches && !e.shiftKey && Math.abs(selectedAction!.end - store.time) < 0.5 / store.settings.fps) {
+      // The animation selected and the playhead at its end: a plain drag sets its end state. Anywhere else a plain drag edits what shows at the playhead, so the playhead never leaves the moment the pointer is in (D314, revising D157 and D187).
+      kind = 'destination'
+      actionIndex = selected!.index
+      derived = !!selectedAction!.classAction
+      editAt = selectedAction!.end
     }
     // A plain drag in the middle of an animation writes an animation from the animation's start to the playhead, which the drag then edits (D263): the playhead stays.
     if (editAt !== null) showTime = editAt
