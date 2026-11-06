@@ -2254,9 +2254,18 @@ export interface LifetimeOrigin {
  * where it is: the start edge is dragged and the actions keep their place against it.
  */
 export function placeObject(name: string, at: number, from?: LifetimeOrigin): void {
+  applyEdits(placeEdits(name, at, from))
+}
+
+/** Several objects moved in time in one step (D319), each as `placeObject` moves one. */
+export function placeObjects(entries: { name: string; at: number; from?: LifetimeOrigin }[]): void {
+  applyEdits(entries.flatMap((entry) => placeEdits(entry.name, entry.at, entry.from)))
+}
+
+function placeEdits(name: string, at: number, from?: LifetimeOrigin): TextEdit[] {
   const { source, model } = state()
   const obj = model?.objects.find((o) => o.name === name)
-  if (!model || !obj?.decl || obj.className === GROUP) return
+  if (!model || !obj?.decl || obj.className === GROUP) return []
   const origin: LifetimeOrigin = from ?? { at: obj.at, until: obj.until, actions: {} }
   const target = Math.max(0, roundSeconds(at))
   const shift = target - origin.at
@@ -2271,7 +2280,7 @@ export function placeObject(name: string, at: number, from?: LifetimeOrigin): vo
     const start = origin.actions[`${name}:${index}`]?.start ?? action.start
     edits.push(timeProp(source, stmt, 'at', roundSeconds(Math.max(0, start + shift - (action.timing.delay ?? 0)))))
   })
-  applyEdits(edits.filter((e): e is TextEdit => !!e))
+  return edits.filter((e): e is TextEdit => !!e)
 }
 
 /** What a link can point at (D170): an action, a class action, or when an object begins or is removed. */
@@ -3202,31 +3211,6 @@ export function beginOutline(name: string, color: string, width: number, pin: Pi
   try {
     if (typeof current !== 'number' || current <= 0) setObjectProp(name, 'strokeWidth', Math.max(1, Math.round(width)))
     return appendTimed(name, 'to', { stroke: color }, pin, when, length)
-  } finally {
-    endGesture()
-  }
-}
-
-/**
- * A path sketched for an object (D297, D305): the stroke, simplified and smoothed, as the path's
- * line, traveled by distance as any path is, pinned at `when` for `length` seconds as any
- * animation made with Shift (D103). Returns the path's end.
- */
-export function sketchPath(name: string, worlds: Point[], pin: Pin, when: number, length = 1): number | null {
-  const { model } = state()
-  const obj = model?.objects.find((o) => o.name === name)
-  const points = simplifyPoints(worlds, 2)
-  if (!model || !obj?.decl || points.length < 2) return null
-  const { at, duration } = pinnedSpan(pin, when, length)
-  beginGesture()
-  try {
-    const index = addPath(name, at)
-    if (index === null) return null
-    const ref = { object: name, index }
-    insertPathPoints(ref, 1, points.slice(1))
-    setActionProp(ref, 'duration', duration)
-    setActionProp(ref, 'smooth', true)
-    return at + duration
   } finally {
     endGesture()
   }

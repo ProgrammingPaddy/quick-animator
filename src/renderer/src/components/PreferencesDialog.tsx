@@ -164,6 +164,10 @@ function HotkeysTab() {
                     <button className="hotkey-chip recording" autoFocus onKeyDown={(e) => record(e, h)} onBlur={() => setRecording(null)}>
                       Press a key
                     </button>
+                  ) : bindings.length === 0 && !h.fixed ? (
+                    <button className="hotkey-chip unset" title="Click, then press a key" onClick={() => setRecording(h.id)}>
+                      None
+                    </button>
                   ) : (
                     bindings.map((b) => (
                       <button key={b} className="hotkey-chip" disabled={h.fixed} title={h.fixed ? 'Fixed' : 'Click, then press the new key'} onClick={() => setRecording(h.id)}>

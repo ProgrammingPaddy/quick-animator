@@ -611,7 +611,9 @@ button.icon:hover {
 .color-label {
   color: var(--fg-dim);
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .color-well .swatch {
@@ -2579,6 +2581,10 @@ button.chevron:hover {
 .hotkey-chip.recording {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.hotkey-chip.unset {
+  color: var(--fg-dim);
 }
 
 .hotkey-chip:disabled {

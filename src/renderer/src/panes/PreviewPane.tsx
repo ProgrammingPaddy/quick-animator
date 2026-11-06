@@ -16,7 +16,7 @@ import { convertTextToShape } from '../project/textToShape'
 import { journeyOf, parseColor, textPadding, textStyleAt, valueAt, worldPose } from '../model/sample'
 import { layoutOf, type TextStyle } from '../model/text'
 import { DEFAULT_EASE_FRACTION, easingFor, unease } from '../model/easing'
-import { addMorph, addObject, addPath, beginFill, beginOutline, canEdit, paintFill, paintStroke, sketchLine, sketchPath, writeOnLine, setObjectProp, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, pathDragTarget, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestClasses, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, settleMorph, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphRunning, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
+import { addMorph, addObject, addPath, beginFill, beginOutline, canEdit, paintFill, paintStroke, sketchLine, writeOnLine, setObjectProp, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, pathDragTarget, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestClasses, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, settleMorph, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphRunning, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
 import { addUserObject, requestSavePreset } from '../project/userPresets'
 import { makeMover, outlineOf, resetMover, walk, type Mover, type Polygon, type Pushing } from '../preview/collide'
 import { SceneRenderer, type ControlHandle, type Frame, type GuideLine, type Handle } from '../preview/SceneRenderer'
@@ -1252,9 +1252,9 @@ export function PreviewPane() {
       rememberColor(color)
       return
     }
-    // The Pencil (D297, D305): on an object, a path along the stroke; on empty space, a line; Shift makes the animation as any Shift-drag does.
+    // The Pencil (D297, D320): a line wherever it is drawn, over an object as over empty space; Shift writes it on as any Shift-made animation.
     if (store.tool === 'pencil') {
-      if (canEdit()) beginSketch(host, e, located.hit, located.world, located.paneX, located.paneY)
+      if (canEdit()) beginSketch(host, e, located.world, located.paneX, located.paneY)
       return
     }
     // The Shape tool (D236): Create draws a shape point by point; Edit works on the selected shape's points, a press on a Shape picks it, and empty space lets the points go.
@@ -1985,20 +1985,20 @@ export function PreviewPane() {
   }
 
   /**
-   * A sketch with the pencil (D297, D305): the trail is kept while the pointer is down, and the
-   * playhead stays where it is. On an object the trail becomes a path along it, from the
-   * playhead, or as any Shift-made animation when Shift is held (D103); on empty space it becomes
-   * a line, written on with Shift the same way (D298). A press let go of where it began is a
-   * dot, wherever it is (D311).
+   * A sketch with the pencil (D297, D305, D320): the trail is kept while the pointer is down,
+   * and the playhead stays where it is. The trail becomes a line, over an object as over empty
+   * space, written on as any Shift-made animation when Shift is held (D103, D298). A press let go
+   * of where it began is a dot (D311). The pencil never draws an object's path: that is the Path
+   * tool's.
    */
-  const beginSketch = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, target: string | null, world0: Point, paneX: number, paneY: number) => {
+  const beginSketch = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, world0: Point, paneX: number, paneY: number) => {
     const viewport = viewportRef.current
     if (!viewport) return
     const trailWorld: Point[] = [world0]
     const trail: Point[] = [{ x: paneX, y: paneY }]
     const withShift = e.shiftKey
     setSketch([...trail])
-    setSketchInk(!target)
+    setSketchInk(true)
     capture(
       host,
       e.pointerId,
@@ -2019,13 +2019,9 @@ export function PreviewPane() {
         const from = gesture?.from ?? s.time
         const length = gesture?.duration ?? 1
         const moved = trail.some((p) => Math.hypot(p.x - trail[0]!.x, p.y - trail[0]!.y) >= 3)
-        let end: number | null = null
-        if (target && moved) end = sketchPath(target, trailWorld, pinNow, from, length)
-        else {
-          const st = styleRef.current
-          const name = sketchLine(moved ? trailWorld : [world0], st.stroke, st.strokeWidth, st.strokeOpacity, s.time)
-          if (name && withShift) end = writeOnLine(name, pinNow, from, length)
-        }
+        const st = styleRef.current
+        const name = sketchLine(moved ? trailWorld : [world0], st.stroke, st.strokeWidth, st.strokeOpacity, s.time)
+        const end = name && withShift ? writeOnLine(name, pinNow, from, length) : null
         if (end !== null) madeWithShift(end, pinNow)
         paintRef.current()
       },
@@ -2502,7 +2498,7 @@ export function PreviewPane() {
         </span>
         {tool === 'object' && <span className="hint">Click to place</span>}
         {tool === 'paint' && <span className="hint">{dropping ? 'Click an object to take its color' : 'Click to paint; Shift-click for a color change; Alt-click takes a color'}</span>}
-        {tool === 'pencil' && <span className="hint">Click for a dot, drag for a line, drag an object for its path; Shift animates</span>}
+        {tool === 'pencil' && <span className="hint">Click for a dot, drag for a line; Shift animates</span>}
         {tool === 'shape' && shapeMode === 'create' && <span className="hint">{drafting ? 'Click for corners, drag to draw; the first point closes and fills, Escape leaves a line' : 'Click to start a shape'}</span>}
         {tool === 'shape' && shapeMode === 'edit' && <span className="hint">{shapeRef.current?.editable ? 'Drag a point, or a box around several; right-click a point or the line for curves and corners' : 'Click a shape, or drag a box around one'}</span>}
         {tool === 'path' && pathMode === 'move' && <span className="hint">Drag any point or line of a path to move the whole path</span>}

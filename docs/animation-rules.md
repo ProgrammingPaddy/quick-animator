@@ -180,8 +180,8 @@ is dragged.
 
 A marker is a moment on the ruler: `marker(2)`, numbered by its place in time, or `marker(2,
 'Intro')` with its text; assigned, `intro = marker(2, 'Intro')` is the number 2, so `at: intro`
-reads it. M writes one at the playhead, Shift+M one with its text typed at once; a marker is dragged,
-snapped to, and named on the ruler, its text typed where it shows.
+reads it. M writes one at the playhead; a marker is dragged, snapped to, and named on the ruler, its
+text typed where it shows.
 
 A Shape's `fillOpacity` and `strokeOpacity` are the fill's and the outline's own opacities, 0 to
 1 on top of `opacity`, as SVG's fill-opacity and stroke-opacity, which an import keeps.
@@ -452,7 +452,7 @@ last unit is done, `duration + the gaps`, which is its `end`; the text's own att
 untouched. A `morph` has no `by`, nor has any object but a Text.
 
 `timed: true` on a path makes its points evenly spaced in time rather than traveled by
-distance, as the pencil records a motion, so it plays as it was drawn.
+distance.
 
 One unit, or a few, by a handle: `title.char(3)`, `title.word(1)`, and `title.line(0)` take
 the verbs, `title.char(0, 2).to({ fill: '#ff0000', at: 1, duration: 0.5 })`, an action by that
@@ -678,7 +678,9 @@ in the file; pushing moves only what a drag actually touches. An animation writt
 playhead and lasts as long as the app's preferences say. Deleting an object's last fade from the
 GUI also removes the `opacity` written in its declaration, so it is back at 1. The Object tool
 and the Add menus write a declaration with the kind's starting attributes, at the playhead; the
-Path tool writes a path, one point per line, and moves its points as the drags say. A preset
+Path tool writes a path, one point per line, and moves its points as the drags say; the pencil
+writes a line, an open Shape in the tool's outline, wherever it is drawn, over an object too,
+and never a path. A preset
 writes one named animation at the end of the file, an arrival as a relative move written as a
 range and a fade in as an opacity range, and touches nothing else; a morph preset writes a
 morph to a word, `Shape.circle(r)`, `Shape.rect(2r, 2r)`, `Shape.polygon(sides, r)`,

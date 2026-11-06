@@ -55,7 +55,7 @@ import {
   ungroup,
   setAttrsAt,
   setAttrsAtMany,
-  placeObject,
+  placeObjects,
   setLifetime,
   type LifetimeOrigin,
 } from '../project/operations'
@@ -158,8 +158,12 @@ function assignLanes<T extends { id: number; start: number; end: number }>(items
  * reach; `hit` is the target it landed on, for the guide line. Otherwise the time lands on a
  * frame when frame snapping is on (D119), else stays exact to the millisecond.
  */
-function snapTimeInfo(raw: number, model: SceneModel | null, exclude: Action | ClassAction | SceneObject | null, pps: number, snap: boolean): { time: number; hit: number | null } {
+type SnapExclude = Action | ClassAction | SceneObject | SceneObject[] | null
+
+function snapTimeInfo(raw: number, model: SceneModel | null, exclude: SnapExclude, pps: number, snap: boolean): { time: number; hit: number | null } {
   const { frameSnap, settings } = useStore.getState()
+  /** Whether a thing is what is being dragged, or one of the several that are (D319). */
+  const moving = (thing: unknown): boolean => (Array.isArray(exclude) ? exclude.includes(thing as SceneObject) : thing === exclude)
   const toFrames = (t: number) => (frameSnap ? Math.round(t * settings.fps) / settings.fps : t)
   if (!snap) return { time: Math.max(0, roundSeconds(toFrames(raw))), hit: null }
   const threshold = SNAP_PX / pps
@@ -167,9 +171,9 @@ function snapTimeInfo(raw: number, model: SceneModel | null, exclude: Action | C
   const candidates = [0, Math.floor(raw), Math.ceil(raw)]
   if (model) {
     // An object being dragged in time does not snap to its own animations or its own ends, which move with it (D152).
-    for (const action of model.actions) if (!action.overridden && action !== exclude && action.classAction !== exclude && action.object !== exclude) candidates.push(action.start, action.end)
+    for (const action of model.actions) if (!action.overridden && !moving(action) && !moving(action.classAction) && !moving(action.object)) candidates.push(action.start, action.end)
     for (const obj of model.objects) {
-      if (obj === exclude || obj.className === GROUP) continue
+      if (moving(obj) || obj.className === GROUP) continue
       candidates.push(obj.at)
       if (obj.until !== null) candidates.push(obj.until)
     }
@@ -191,7 +195,7 @@ function snapTimeInfo(raw: number, model: SceneModel | null, exclude: Action | C
   return { time: Math.max(0, roundSeconds(Math.round(raw / grid) * grid)), hit: null }
 }
 
-function snapTime(raw: number, model: SceneModel | null, exclude: Action | ClassAction | SceneObject | null, pps: number, snap: boolean): number {
+function snapTime(raw: number, model: SceneModel | null, exclude: SnapExclude, pps: number, snap: boolean): number {
   return snapTimeInfo(raw, model, exclude, pps, snap).time
 }
 
@@ -199,7 +203,7 @@ function snapTime(raw: number, model: SceneModel | null, exclude: Action | Class
  * Snap a span by whichever of its ends comes nearer a target (D179): the start it gets, and the
  * target hit, if any, for the guide line.
  */
-function snapSpan(rawStart: number, duration: number, model: SceneModel | null, exclude: Action | ClassAction | SceneObject | null, pps: number, snap: boolean): { start: number; hit: number | null } {
+function snapSpan(rawStart: number, duration: number, model: SceneModel | null, exclude: SnapExclude, pps: number, snap: boolean): { start: number; hit: number | null } {
   const a = snapTimeInfo(rawStart, model, exclude, pps, snap)
   const b = snapTimeInfo(rawStart + duration, model, exclude, pps, snap)
   if (b.hit !== null && (a.hit === null || Math.abs(b.time - (rawStart + duration)) < Math.abs(a.time - rawStart))) return { start: Math.max(0, roundSeconds(b.time - duration)), hit: b.hit }
@@ -809,7 +813,9 @@ export function TimelinePane() {
    * follows the pointer, and the moment its middle passes another clip's the object goes above
    * or below it, which is the drawing order (D160, D165). The edges trim when the object begins
    * or is removed, the animations staying where they are (D279). A group has no life to move, so
-   * its clip only goes up or down. One drag is one undo step, the level changes included.
+   * its clip only goes up or down. One drag is one undo step, the level changes included. With
+   * several objects selected, a drag of one of them moves them all by the same time, none to
+   * before the start of time, and a click on one without a drag selects it alone (D319).
    */
   const beginLifetimeDrag = (obj: SceneObject, mode: 'move' | 'start' | 'end') => (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
@@ -820,10 +826,21 @@ export function TimelinePane() {
       toggleSelected(obj.name)
       return
     }
+    const several = mode === 'move' && s.selection.includes(obj.name) && s.selection.length > 1
     if (!s.selection.includes(obj.name)) select([obj.name])
     if (!obj.decl || obj.codeDriven || !canEdit()) return
     const isGroup = obj.className === GROUP
     if (isGroup && mode !== 'move') return
+    // The other selected objects that have a life to move, each with where it was when the drag began (D319).
+    const followers = several
+      ? s.selection
+          .filter((name) => name !== obj.name)
+          .map((name) => s.model?.objects.find((o) => o.name === name))
+          .filter((o): o is SceneObject => !!o && !!o.decl && !o.codeDriven && o.className !== GROUP)
+          .map((o) => ({ object: o, origin: { at: o.at, until: o.until, actions: snapshotOf(o.actions.map((_, index) => ({ object: o.name, index }))) } as LifetimeOrigin }))
+      : []
+    const moving = [obj, ...followers.map((f) => f.object)]
+    const earliest = Math.min(obj.at, ...followers.map((f) => f.origin.at))
     const end = obj.until ?? s.contentEnd ?? s.playbackEnd ?? obj.at
     const origin: LifetimeOrigin & { x: number; y: number; end: number; pps: number } = { x: e.clientX, y: e.clientY, at: obj.at, until: obj.until, end, pps: viewRef.current.pps, actions: snapshotOf(obj.actions.map((_, index) => ({ object: obj.name, index }))) }
     const minimum = frameSeconds(fps)
@@ -866,14 +883,12 @@ export function TimelinePane() {
         const snapped = snapTimeInfo(origin.end + dt, currentModel, obj, origin.pps, snapOn)
         setSnapLine(snapped.hit)
         setLifetime(obj.name, { until: Math.max(origin.at + minimum, snapped.time) })
-      } else if (mode === 'move' && origin.until !== null) {
-        const snapped = snapSpan(origin.at + dt, origin.until - origin.at, currentModel, obj, origin.pps, snapOn)
-        setSnapLine(snapped.hit)
-        placeObject(obj.name, snapped.start, origin)
       } else if (mode === 'move') {
-        const snapped = snapTimeInfo(origin.at + dt, currentModel, obj, origin.pps, snapOn)
+        const snapped = origin.until !== null ? snapSpan(origin.at + dt, origin.until - origin.at, currentModel, moving, origin.pps, snapOn) : snapTimeInfo(origin.at + dt, currentModel, moving, origin.pps, snapOn)
         setSnapLine(snapped.hit)
-        placeObject(obj.name, snapped.time, origin)
+        // Every object moves by the same time, and the earliest of them stops at the start of time.
+        const shift = Math.max(('start' in snapped ? snapped.start : snapped.time) - origin.at, -earliest)
+        placeObjects([{ name: obj.name, at: origin.at + shift, from: origin }, ...followers.map((f) => ({ name: f.object.name, at: f.origin.at + shift, from: f.origin }))])
       } else {
         // The start edge trims: when the object begins changes, its animations stay where they are (D279).
         const snapped = snapTimeInfo(origin.at + dt, currentModel, obj, origin.pps, snapOn)
@@ -885,6 +900,8 @@ export function TimelinePane() {
       setSnapLine(null)
       setClipDrag(null)
       if (gesture) endGesture()
+      // A click, not a drag, on one of several selected: that one alone (D319).
+      if (several && !inTime && !inLevels) select([obj.name])
     }
     // The title drag listens on the window: moving the object in the cast moves its clip in the DOM, which would drop a capture held on it.
     if (mode === 'move') captureWindow(e.pointerId, onMove, onEnd)
