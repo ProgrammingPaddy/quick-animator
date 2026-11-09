@@ -2178,6 +2178,69 @@ button.chevron:hover {
   color: #93c5fd;
 }
 
+/* The key controls beside the link button (D323, D324): the key before, the diamond, the key after */
+.now-values td.l {
+  width: auto;
+  white-space: nowrap;
+}
+
+.key-controls {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin-right: 2px;
+}
+
+.now-values .key-button {
+  padding: 0 3px;
+  min-width: 16px;
+  color: var(--fg-dim);
+}
+
+.now-values .key-button.step {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.now-values .key-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.now-values .key-button.diamond:hover:not(:disabled) .key-icon {
+  stroke: var(--fg);
+}
+
+.key-icon {
+  display: block;
+  fill: none;
+  stroke: var(--fg-dim);
+  stroke-width: 1.2;
+}
+
+.key-icon.none {
+  stroke: rgba(255, 255, 255, 0.25);
+}
+
+.key-icon.keyed {
+  stroke: var(--accent);
+}
+
+.key-icon.here {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+/* A group not yet made, from the selection (D326) */
+.object-list li.prospective .object-row {
+  background: var(--accent-soft);
+}
+
+.object-list li.prospective .name {
+  font-style: italic;
+  color: var(--fg-dim);
+}
+
 .now-linked .now-input {
   width: 150px;
   color: #93c5fd;

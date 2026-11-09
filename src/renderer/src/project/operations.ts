@@ -4,7 +4,7 @@ import { appendStatement, blockText, formatNumber, formatValue, insertDeclaratio
 import { DEFAULT_EASE_FRACTION, namedEasings } from '../model/easing'
 import { isMember } from '../model/evaluate'
 import { activeMembers, groupMembers, memberRef, normalizeSelection } from '../model/groups'
-import { attrSchema, classes, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
+import { attrSchema, classes, EASE_NAMES, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
 import { absoluteAt, actionCourse, anchorTime, memberBox, pathCutAt, pathFrame, pathHolds, pathShift, pointsCenter, positionAt, progressAt, rawFromWorld, morphInForce, morphRunning, morphTargetSegs, shapeCurves, shapeOwnFromWorld, shapeOwnPoints, shapeSegsAt, travelFrame, type Point, type ShapePiece } from '../model/sample'
 import { anchorCurved, anchorKind, closePath, cornerAnchors, curveSegment, dragAnchorHandle, ellipsePathData, flattenPathData, formatCurves, hasPathData, moveAnchor, openPath, parsePathData, pathAnchors, pathDataBounds, polygonPathData, removeAnchor, scalePathData, segmentKind, serializePathData, smoothAnchors, smoothPathData, splitSegment, straightenAll, straightenAnchors, straightenSegment, translatePathData, type Anchor, type AnchorKind, type Seg } from '../model/pathData'
 import { insertPointsEdit, pointText, removePointEdit, setPointEdit, shapeLiteral, stringLiteral, type ShapeLiteral } from '../model/pathEdits'
@@ -13,7 +13,7 @@ import { identifierEdits, nameProblem, renameMembers, replaceIdentifiers } from 
 import { currentWritten, definingAction, shownValue, valueAt, withWritten, writesFrom, writtenValues } from '../model/sample'
 import { begun, journeyOf, unitTurns, writtenSpan } from '../model/sample'
 import type { Action, ActionInfo, BlockInfo, ClassAction, PropInfo, Range, SceneModel, SceneObject } from '../model/types'
-import { useStore, type ActionRef, type Clip, type ClipAction, type ClipObject, type Pin, type SelectionState, type ObjectKind } from '../state/store'
+import { useStore, type ActionRef, type Clip, type ClipAction, type ClipObject, type MenuItem, type Pin, type SelectionState, type ObjectKind } from '../state/store'
 
 /**
  * Every GUI gesture that changes the scene ends here as a minimal text edit (decision D24). The
@@ -560,6 +560,291 @@ export function jumpToEdge(direction: 1 | -1): number | null {
   s.setPlaying(false)
   s.setTime(target)
   return target
+}
+
+/** A Shape's outline, keyed as a morph (D323). */
+const OUTLINE_ATTRS = ['points', 'curves']
+
+/**
+ * Whether an animation has the say over an attribute while it runs (D323): it names it, a path
+ * for the position it carries, a morph for a Shape's outline. An overridden class animation has none.
+ */
+function actsOn(action: Action, attr: string): boolean {
+  if (action.overridden) return false
+  if (action.verb === 'path') return attr === 'x' || attr === 'y'
+  if (action.verb === 'morph') return OUTLINE_ATTRS.includes(attr)
+  return attr in action.changes
+}
+
+/**
+ * The keys of an attribute (D323). A keyframe is a state at a time, and every animation's end is
+ * one: the state it arrives at. The object's start is the first, where the declaration sets the
+ * state. In time order, each once.
+ */
+export function keyTimes(obj: SceneObject, attr: string): number[] {
+  const times = new Set<number>([roundSeconds(obj.at)])
+  for (const action of obj.actions) if (actsOn(action, attr)) times.add(roundSeconds(action.end))
+  return [...times].sort((a, b) => a - b)
+}
+
+export type KeyState = 'here' | 'keyed' | 'none'
+
+/** Whether a key of the attribute sits at the time, within half a frame; else whether the attribute has keys at all beyond the object's start. */
+export function keyState(obj: SceneObject, attr: string, time: number): KeyState {
+  const slack = frameSeconds(state().fps) / 2
+  if (keyTimes(obj, attr).some((t) => Math.abs(t - time) <= slack)) return 'here'
+  return obj.actions.some((a) => actsOn(a, attr)) ? 'keyed' : 'none'
+}
+
+/** The object's own animations that arrive at a key of the attribute at the time, in file order; empty when the key is the declaration's or a class's. */
+export function keyActionsAt(obj: SceneObject, attr: string, time: number): number[] {
+  const slack = frameSeconds(state().fps) / 2
+  return obj.actions.flatMap((a, i) => (actsOn(a, attr) && !a.classAction && !!a.stmt && Math.abs(a.end - time) <= slack ? [i] : []))
+}
+
+/** The attribute's key before or after the playhead, or null when there is none that way (D324). */
+export function keyBeside(obj: SceneObject, attr: string, time: number, direction: 1 | -1): number | null {
+  const slack = frameSeconds(state().fps) / 2
+  const keys = keyTimes(obj, attr)
+  const target = direction > 0 ? keys.find((t) => t > time + slack) : [...keys].reverse().find((t) => t < time - slack)
+  return target ?? null
+}
+
+/** The playhead to the attribute's next key, or the one before (D324); playback stops, as at an edge (D259). Returns the time, or null. */
+export function jumpToKey(name: string, attr: string, direction: 1 | -1): number | null {
+  const s = useStore.getState()
+  const obj = s.model?.objects.find((o) => o.name === name)
+  if (!obj) return null
+  const target = keyBeside(obj, attr, s.time, direction)
+  if (target === null) return null
+  s.setPlaying(false)
+  s.setTime(target)
+  return target
+}
+
+/**
+ * The diamond pressed (D323). On a key of the object's own, the key goes: the animations that
+ * arrive there are removed, and one on the attribute that began at the key begins where they did,
+ * so two transitions become one. Inside one of the object's own animations, that animation is cut
+ * there, as the razor cuts it, so the key can be shaped. Anywhere else an animation is written
+ * from the attribute's previous key, or the object's start, to the time, arriving at the value
+ * shown, so nothing changes until the key is edited; a Shape's outline is keyed as a morph. The
+ * object stays selected. Nothing happens at the object's start, which the declaration keys, on a
+ * class animation's key, or outside the object's life.
+ */
+export function toggleKey(name: string, attr: string, time = state().time): void {
+  const { model, fps } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl) return
+  const slack = frameSeconds(fps) / 2
+  if (time < obj.at - slack || (obj.until !== null && time > obj.until + slack) || Math.abs(time - obj.at) <= slack) return
+  const arriving = keyActionsAt(obj, attr, time)
+  if (arriving.length > 0) return removeKey(obj, attr, arriving, time)
+  if (keyState(obj, attr, time) === 'here') return
+  const inside = [...obj.actions.entries()].reverse().find(([, a]) => actsOn(a, attr) && !a.classAction && !!a.stmt && time > a.start + slack && time < a.end - slack)
+  if (inside) {
+    if (sliceAction(name, inside[0], time)) useStore.getState().select([name])
+    return
+  }
+  const at = roundSeconds(keyBeside(obj, attr, time, -1) ?? obj.at)
+  const duration = Math.max(frameSeconds(fps), roundSeconds(time - at))
+  if (OUTLINE_ATTRS.includes(attr)) {
+    if (writeMorph(name, at, duration, time) !== null) {
+      useStore.getState().select([name])
+      useStore.getState().setTime(time)
+    }
+    return
+  }
+  const value = valueAt(model, obj, attr, time)
+  const block: Record<string, AttrValue> = { [attr]: typeof value === 'number' ? roundAttr(attr, value) : value }
+  Object.assign(block, pivotFor(model, obj, block, at))
+  block['at'] = at
+  block['duration'] = duration
+  const { source } = state()
+  applyEdits([appendStatement(source, blockText(`${name}.${verbFor([attr])}`, block)), ...coverEdits(source, obj, at, at + duration)], objectsSelected([name]))
+}
+
+/**
+ * A key of the object's own removed (D323): the animations arriving there go, and an animation
+ * on the attribute that began at the key begins where the earliest of them did, its end kept.
+ * One step. Asks first when code refers to a removed name, as deleting does.
+ */
+function removeKey(obj: SceneObject, attr: string, arriving: number[], time: number): void {
+  const { model, fps } = state()
+  if (!model) return
+  const slack = frameSeconds(fps) / 2
+  const removed = arriving.map((i) => obj.actions[i]!)
+  const from = Math.min(...removed.map((a) => a.start))
+  const follower = obj.actions.findIndex((a) => actsOn(a, attr) && !a.classAction && !!a.stmt && !removed.includes(a) && Math.abs(a.start - time) <= slack)
+  const refs = arriving.map((index) => ({ object: obj.name, index }))
+  const names = removed.flatMap((a) => (a.name ? [a.name] : []))
+  const dependents = names.length > 0 ? findDependents(model, names, { objects: [], actions: refs }) : []
+  const run = () => {
+    beginGesture()
+    if (follower >= 0) retimeActions([{ object: obj.name, index: follower }], { trimStart: roundSeconds(from - obj.actions[follower]!.start) })
+    deleteActions(refs, true)
+    endGesture()
+  }
+  confirmRemoval(`Remove the key of ${attr}?`, dependents, run)
+}
+
+/** The ease of an animation, as the Selected pane names them (D325): the ramps, the named curves, or a function of its own. A check marks the one it runs on. */
+export function easeMenuItems(ref: ActionRef): MenuItem[] {
+  const action = findObject(ref.object)?.actions[ref.index]
+  if (!action?.stmt || action.classAction) return []
+  const ease = action.timing.ease
+  const current = ease === undefined ? 'ramps' : typeof ease === 'string' && (EASE_NAMES as readonly string[]).includes(ease) ? ease : 'custom'
+  const item = (label: string, run: () => void): MenuItem => ({ label, keyword: current === label ? '✓' : undefined, run })
+  return [
+    item('ramps', () => setActionProp(ref, 'ease', null)),
+    ...EASE_NAMES.map((name) => item(name, () => setActionProp(ref, 'ease', name))),
+    item('custom', () => setActionProp(ref, 'ease', '(p) => p * p', true)),
+  ]
+}
+
+/**
+ * The group several selected things would make (D326): two or more, as createGroup would list
+ * them, with the name it would get. Null for one thing, none, or a selected animation; a selection
+ * that is exactly a group's members is already that group (D124).
+ */
+export function prospectiveGroup(): { name: string; members: string[] } | null {
+  const { model } = state()
+  const s = useStore.getState()
+  if (!model || s.selectedActions.length > 0 || s.selection.length < 2) return null
+  const members = normalizeSelection(
+    model,
+    s.selection.filter((n) => model.objects.some((o) => o.name === n && o.decl)),
+  )
+  return members.length >= 2 ? { name: uniqueName('group'), members } : null
+}
+
+/** Nothing merged, and a word on why, shown where the app's notices show. */
+function unmerged(why: string): false {
+  useStore.getState().setNotice(why)
+  return false
+}
+
+/**
+ * Make several of an object's animations one (D327): the union of their changes, the one on top,
+ * later in the file, having the say where two name the same thing; relative amounts add when every
+ * one is relative, and a relative change merged with absolute ones becomes the value it reached;
+ * two morphs merge point by point, each point the top's where it moved it, else the one below's.
+ * The span runs from the earliest start to the latest end. The first in the file is kept and
+ * takes the rest on, its timing keys too, the top's where two have one; the others go, a name
+ * among them kept when the first has none, and what referred to a dropped name follows the kept
+ * one. Paths, class animations, animations by unit, and changes that are functions are not merged.
+ */
+export function mergeActions(name: string, indices: number[]): boolean {
+  const { source, model, fps } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj) return false
+  const actions = [...new Set(indices)].map((i) => obj.actions[i]).filter((a): a is Action => !!a)
+  if (actions.length < 2) return false
+  if (actions.some((a) => a.classAction)) return unmerged('A class animation is not merged')
+  if (actions.some((a) => !a.stmt || a.codeDriven)) return unmerged('An animation in code is merged in the code')
+  if (actions.some((a) => a.verb === 'path')) return unmerged('A path is not merged')
+  if (actions.some((a) => a.timing.by !== undefined)) return unmerged('An animation by character, word, or line is not merged')
+  if (actions.some((a) => Object.values(a.changes).some((v) => typeof v === 'function'))) return unmerged('A change that is a function is not merged')
+  const morphs = actions.filter((a) => a.verb === 'morph').length
+  if (morphs > 0 && morphs < actions.length) return unmerged('A morph merges with a morph')
+  // File order: the first written is kept; each later one is on top of those before it.
+  const ordered = [...actions].sort((a, b) => a.stmt!.range.from - b.stmt!.range.from)
+  const kept = ordered[0]!
+  const stmt = kept.stmt!
+  const start = roundSeconds(Math.min(...actions.map((a) => a.start)))
+  const end = roundSeconds(Math.max(...actions.map((a) => a.end)))
+  const allRelative = actions.every((a) => !!a.timing.relative)
+  /** The merged block's properties, in the order they are met: a change's text as written, or made. */
+  const props = new Map<string, string>()
+  const sums = new Map<string, number>()
+  if (morphs > 0) {
+    const target = mergedOutline(model, obj, ordered)
+    if (!target) return unmerged('These morphs draw nothing to merge')
+    props.set('to', formatCurves(serializePathData(target), '  '))
+  } else {
+    for (const a of ordered) {
+      for (const [attr, raw] of Object.entries(a.changes)) {
+        const prop = a.stmt!.props.find((p) => p.key === attr)
+        if (!prop) continue
+        if (allRelative && typeof raw === 'number') {
+          sums.set(attr, (sums.get(attr) ?? 0) + raw)
+          props.set(attr, formatValue(roundAttr(attr, sums.get(attr)!)))
+        } else if (!allRelative && a.timing.relative && typeof raw === 'number') {
+          const reached = valueAt(model, obj, attr, a.end)
+          props.set(attr, formatValue(roundAttr(attr, typeof reached === 'number' ? reached : raw)))
+        } else props.set(attr, prop.kind === 'range' && prop.parts ? source.slice(prop.parts[1].from, prop.parts[1].to) : prop.raw)
+      }
+    }
+  }
+  // Timing: the kept block's, each key the top's where two have one; the span is set below.
+  const timing = new Map<string, string>()
+  for (const a of ordered) for (const p of a.stmt!.props) if (TIMING_KEY_NAMES.has(p.key) && !['at', 'delay', 'duration', 'until'].includes(p.key)) timing.set(p.key, p.raw)
+  if (allRelative) timing.set('relative', 'true')
+  else timing.delete('relative')
+  const tail = (['hold', 'return'] as const).reduce((sum, key) => {
+    const raw = timing.get(key)
+    const seconds = raw === undefined ? 0 : Number(raw)
+    return sum + (Number.isFinite(seconds) ? seconds : 0)
+  }, 0)
+  const lines: string[] = []
+  for (const [key, text] of props) lines.push(`  ${key}: ${text},`)
+  lines.push(`  at: ${formatValue(start)},`)
+  if (stmt.props.some((p) => p.key === 'until')) lines.push(`  until: ${formatValue(end)},`)
+  else lines.push(`  duration: ${formatValue(Math.max(frameSeconds(fps), roundSeconds(end - start - tail)))},`)
+  for (const [key, text] of timing) lines.push(`  ${key}: ${text},`)
+  const verb = morphs > 0 ? 'morph' : verbFor([...props.keys()])
+  let head = source.slice(stmt.range.from, stmt.propsOpen).replace(/\.\w+\(\s*\{$/, `.${verb}({`)
+  const dropped = ordered.slice(1)
+  const droppedNames = dropped.flatMap((a) => (a.name ? [a.name] : []))
+  let keptName = kept.name
+  if (!keptName && droppedNames.length > 0) {
+    keptName = droppedNames[0]!
+    head = `${keptName} = ${head}`
+  }
+  const text = `${head}\n${lines.join('\n')}\n}${source.slice(stmt.propsClose + 1, stmt.range.to)}`
+  const removedRanges = dropped.map((a) => a.stmt!.range)
+  const edits: TextEdit[] = [{ from: stmt.range.from, to: stmt.range.to, insert: text }, ...removeStatements(source, removedRanges)]
+  // What referred to a dropped name follows the kept one, outside the statements that go.
+  const renames = Object.fromEntries(droppedNames.filter((n) => n !== keptName).map((n) => [n, keptName!]))
+  if (Object.keys(renames).length > 0) {
+    const gone = (pos: number): boolean => removedRanges.some((r) => pos >= r.from && pos < r.to) || (pos >= stmt.range.from && pos < stmt.range.to)
+    edits.push(...identifierEdits(source, renames).filter((e) => !gone(e.from)))
+  }
+  const index = obj.actions.indexOf(kept)
+  const before = dropped.filter((a) => obj.actions.indexOf(a) < index).length
+  applyEdits(edits, actionSelected(name, index - before))
+  return true
+}
+
+/**
+ * Two or more morphs as one outline (D327): each point the top morph's target where that morph
+ * moved it from the outline it began with, else the one below's, else the outline at the merged
+ * start. Null when the outlines have different numbers of points, or draw nothing.
+ */
+function mergedOutline(model: SceneModel, obj: SceneObject, ordered: Action[]): Seg[] | null {
+  const start = Math.min(...ordered.map((a) => a.start))
+  const base = shapeSegsAt(model, obj, start)
+  if (!base) return null
+  const result = [...base]
+  for (const morph of ordered) {
+    const from = shapeSegsAt(model, obj, morph.start)
+    const target = morphTargetSegs(model, morph, morph.end)
+    if (!from || !target) return null
+    if (from.length !== result.length || target.length !== result.length) return target.length === result.length ? target : null
+    for (let i = 0; i < result.length; i++) if (JSON.stringify(target[i]) !== JSON.stringify(from[i])) result[i] = target[i]!
+  }
+  return result
+}
+
+/** Whether the selected animations can be merged: two or more of one object's own, none a class's (D327). */
+export function mergeable(selectedActions: ActionRef[]): { object: string; indices: number[] } | null {
+  if (selectedActions.length < 2) return null
+  const object = selectedActions[0]!.object
+  if (selectedActions.some((r) => r.object !== object)) return null
+  const obj = findObject(object)
+  const indices = [...new Set(selectedActions.map((r) => r.index))]
+  if (!obj || indices.length < 2 || indices.some((i) => !obj.actions[i]?.stmt || obj.actions[i]!.classAction)) return null
+  return { object, indices }
 }
 
 /** Add a morph to a Shape (D257): its target the outline as it is then, the actual one at the playhead, written as curves, the morph selected and the playhead at its end, so the Shape tool's handles then shape the target. Returns the morph's index, or null. */

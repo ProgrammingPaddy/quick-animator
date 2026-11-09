@@ -6,7 +6,7 @@ import { actionIdents, classActionIdents, classGroups, classKey, classSpan, over
 import { GROUP, PIVOT_PARAMS, VERB_COLORS } from '../model/registry'
 import { isVisibleAt } from '../model/sample'
 import type { Action, SceneObject } from '../model/types'
-import { addObject, deleteAction, deleteClass, deleteClassAction, deleteObjects, duplicateObjects, jumpToAction, jumpToClass, jumpToObject, materializeClassAction, overrideClassAction, removeFromClass, requestClasses, requestRename, selectClass, selectClassAction, ungroup, setLifetime } from '../project/operations'
+import { addObject, createGroup, prospectiveGroup, deleteAction, deleteClass, deleteClassAction, deleteObjects, duplicateObjects, jumpToAction, jumpToClass, jumpToObject, materializeClassAction, overrideClassAction, removeFromClass, requestClasses, requestRename, selectClass, selectClassAction, ungroup, setLifetime } from '../project/operations'
 import { requestSavePreset } from '../project/userPresets'
 import { isActionSelected, OBJECT_KINDS, useStore } from '../state/store'
 import { timecode } from '../state/time'
@@ -80,6 +80,8 @@ export function ObjectPane() {
   const toggleCollapsed = useStore((s) => s.toggleCollapsed)
   const setAllCollapsed = useStore((s) => s.setAllCollapsed)
   const objects = model?.objects ?? []
+  // Two or more selected things show as the group they would make (D326); a change to a value, a key, or a Shift-drag makes it.
+  const prospective = selection.length > 1 && selectedActions.length === 0 && model ? prospectiveGroup() : null
   const groups = useMemo(() => (model ? classGroups(model) : []), [model])
   const types = useMemo(() => typeGroups(objects), [objects])
   /** Active at the playhead: within its life and visible; a group when any member is (D176). */
@@ -371,6 +373,24 @@ export function ObjectPane() {
             </div>
           </div>
           <ul className="object-list" onContextMenu={blankMenu}>
+            {prospective && (
+              <li className="object prospective" title="Selected together: a change to a value, a key, or a Shift-drag makes them a group">
+                <div
+                  className="object-row"
+                  onContextMenu={(e) => {
+                    e.stopPropagation()
+                    showMenu(e, [{ label: 'Group', run: () => createGroup(prospective.members) }])
+                  }}
+                >
+                  <span className="chevron none" />
+                  <span className="glyph">{GLYPHS[GROUP]}</span>
+                  <span className="name">{prospective.name}</span>
+                  <span className="dim">{GROUP}</span>
+                  <span className="dim members">{prospective.members.join(' · ')}</span>
+                  <span className="dim">not made yet</span>
+                </div>
+              </li>
+            )}
             {groups.filter((g) => g.members.some(shown)).map(renderClass)}
             {types
               .filter((group) => group.objects.some(shown))

@@ -57,6 +57,9 @@ import {
   setAttrsAtMany,
   placeObjects,
   setLifetime,
+  easeMenuItems,
+  mergeActions,
+  mergeable,
   type LifetimeOrigin,
 } from '../project/operations'
 import { requestSavePreset } from '../project/userPresets'
@@ -1103,11 +1106,17 @@ export function TimelinePane() {
       return
     }
     const atLink = action ? actionLinks(action).find((l) => l.key === 'at') : undefined
+    // Several of the object's own clips selected, this one among them: they can be merged into one (D327).
+    const merge = mergeable(useStore.getState().selectedActions)
+    const eases = action?.stmt && !action.codeDriven ? easeMenuItems({ object: obj.name, index }) : []
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToAction(obj.name, index) },
       // The playhead to either end of the animation (D259).
       ...(action ? [{ label: 'Go to start', keyword: timecode(action.start, fps), run: () => useStore.getState().setTime(action.start) }, { label: 'Go to end', keyword: timecode(action.end, fps), run: () => useStore.getState().setTime(action.end) }] : []),
       { label: action?.name ? 'Rename' : 'Name', run: () => requestRename({ object: obj.name, index }) },
+      // The ease, as the Selected pane names them (D325).
+      ...(eases.length > 0 ? [{ label: 'Ease', keyword: eases.find((i) => i.keyword)?.label, children: eases }] : []),
+      ...(merge && merge.object === obj.name && merge.indices.includes(index) ? [{ label: 'Merge', keyword: String(merge.indices.length), run: () => mergeActions(merge.object, merge.indices) }] : []),
       // Returned, or kept (D285): a return three tenths of the span long, or none.
       ...(action?.stmt
         ? [

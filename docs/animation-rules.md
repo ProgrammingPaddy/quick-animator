@@ -530,6 +530,28 @@ the value it reached. An absolute action starts from where the actions below it 
 object as it begins. In the timeline, overlapping animations stack the same way, the top one
 highest; drag one up or down to change the order.
 
+## Keyframes
+
+A keyframe is a state at a time, and every action's end is one: the state it arrives at. There
+is no keyframes function; a key is the action that arrives at it, `box.move({ x: 300, at: 1,
+duration: 2 })` the key x = 300 at 3 s, and an action never dictates its start, so the stretch
+between two keys is the action, from whatever the state is to the key. The object's declaration
+is the first key, the state at the object's start. A hold is the gap between two actions; a
+cut is an action one frame long. Keys on two attributes at one moment are two actions, each with
+its own timing and ease, stacked; a group's position, turn, and scale keys are its own actions,
+and a Shape's outline is keyed by a morph.
+
+In the Selected pane every value an action can arrive at has a diamond beside its link button,
+with the key before and the key after on either side: filled on a key, outlined when the
+attribute has keys elsewhere, faint when it has none. Pressed, it writes an action from the
+attribute's previous key, or the object's start, to the playhead, arriving at the value shown, so
+nothing changes until the key is edited, by typing in the row or dragging in the preview; pressed
+inside an action it cuts it there, the razor's cut; pressed on a key it removes it, and the action
+that began there begins where the removed one did. A right-click on the diamond sets the ease of
+the action that arrives at the key, in the words of the pane; the timeline's clip menu has the
+same under Ease. Two or more clips of one object, selected, merge from the clip's menu into one
+action holding both changes, the one on top having the say where they differ.
+
 ## Time references
 
 Assign an action to a name to refer to its timing: `slide.start`, `slide.end`,
@@ -652,7 +674,10 @@ turn and a move at the same time make one motion, the box moving while the membe
 its center. An object listed by several groups is carried by each in turn, in the order the
 groups are declared, and a group listed by another is carried by it. A group's `opacity`
 multiplies every member's, so `fade` on a group fades them as one; it has no fill or class of
-its own, and its members keep theirs.
+its own, and its members keep theirs. Two or more things selected together are a group not yet
+made: the Objects pane and the Selected pane show it with a group's values, and the first value
+changed or key pressed there writes the group, `group1 = Group({ members: 'a b' })`, and goes to
+it, as a Shift-drag on several objects does; selecting alone writes nothing.
 
 ## Links
 

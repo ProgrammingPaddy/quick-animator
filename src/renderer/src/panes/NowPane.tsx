@@ -1,17 +1,18 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { beginGesture, endGesture } from '../code/editor'
 import { BakeIcon } from '../components/BakeIcon'
 import { ColorPicker } from '../components/ColorPicker'
+import { showMenu } from '../components/ContextMenu'
 import { FontField } from '../components/FontField'
 import { LinkIcon } from '../components/LinkIcon'
 import { actionLinks, objectLinks } from '../model/links'
 import { hasPathData, parsePathData, pathAnchors } from '../model/pathData'
 import { EASE_NAMES, GROUP, PIVOT_PARAMS, schemaOf, type AttrSchema, type AttrType, type AttrValue } from '../model/registry'
-import { basePivot, definingAction, isVisibleAt, pathCurves, pathShape, valueAt } from '../model/sample'
+import { basePivot, definingAction, isVisibleAt, pathCurves, pathShape, shownValue, valueAt, withWritten, writesFrom } from '../model/sample'
 import { DEFAULT_STAGGER, UNIT_KINDS } from '../model/text'
 import type { Action, SceneModel, SceneObject } from '../model/types'
 import { askSystemFonts } from '../project/fonts'
-import { bakeActionProp, bakeObjectProp, canEdit, frameSeconds, roundSeconds, setActionFrom, setActionProp, setAttrsAt, setLifetime, setObjectProp } from '../project/operations'
+import { bakeActionProp, bakeObjectProp, canEdit, createGroup, easeMenuItems, frameSeconds, jumpToKey, keyActionsAt, keyBeside, keyState, prospectiveGroup, roundSeconds, setActionFrom, setActionProp, setAttrsAt, setLifetime, setObjectProp, toggleKey, type KeyState } from '../project/operations'
 import { useStore } from '../state/store'
 import { timecode } from '../state/time'
 
@@ -177,13 +178,57 @@ function ColorWell({ value, disabled, onChange }: { value: string; disabled?: bo
   return <ColorPicker value={hex} disabled={disabled} onChange={onChange} onOpen={beginGesture} onClose={endGesture} />
 }
 
-/** One row of the pane: a name, the control, the link button, and a word about where the value comes from. */
-function Row({ name, status, children, className, onLink, linkTitle }: { name: string; status?: ReactNode; children: ReactNode; className?: string; onLink?: () => void; linkTitle?: string }) {
+/** The key controls of a row (D323, D324): the key before, the diamond, the key after, and the diamond's right-click for the ease (D325). */
+interface KeyControls {
+  state: KeyState
+  /** Why the diamond does nothing, when it does nothing: at the object's start, on a class animation's key, outside the object's life. */
+  inert?: string
+  previous: boolean
+  next: boolean
+  onToggle: () => void
+  onJump: (direction: 1 | -1) => void
+  onMenu?: (e: ReactMouseEvent) => void
+}
+
+/** A diamond: filled on a key, outlined when the attribute has keys elsewhere, faint when it has none. */
+function KeyIcon({ state }: { state: KeyState }) {
+  return (
+    <svg className={`key-icon ${state}`} viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+      <path d="M6 1 L11 6 L6 11 L1 6 Z" />
+    </svg>
+  )
+}
+
+/** One row of the pane: a name, the control, the key controls and the link button, and a word about where the value comes from. */
+function Row({ name, status, children, className, onLink, linkTitle, keys }: { name: string; status?: ReactNode; children: ReactNode; className?: string; onLink?: () => void; linkTitle?: string; keys?: KeyControls }) {
   return (
     <tr className={className}>
       <td className="k">{name}</td>
       <td className="v">{children}</td>
       <td className="l">
+        {keys && (
+          <span className="key-controls">
+            <button className="small key-button step" disabled={!keys.previous} onClick={() => keys.onJump(-1)} title="Previous key">
+              ‹
+            </button>
+            <button
+              className={`small key-button diamond ${keys.state}`}
+              disabled={!!keys.inert}
+              onClick={keys.onToggle}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                keys.onMenu?.(e)
+              }}
+              title={keys.inert ?? (keys.state === 'here' ? 'Remove the key here. Right-click: its ease' : 'Key here: an animation from the key before to this value')}
+            >
+              <KeyIcon state={keys.state} />
+            </button>
+            <button className="small key-button step" disabled={!keys.next} onClick={() => keys.onJump(1)} title="Next key">
+              ›
+            </button>
+          </span>
+        )}
         {onLink && (
           <button className="small link-button" onClick={onLink} title={linkTitle ?? 'Link it to something else'}>
             <LinkIcon />
@@ -297,6 +342,13 @@ export function NowPane() {
   const action = actionObj && ref ? actionObj.actions[ref.index] : undefined
   if (model && actionObj && action && ref) return <ActionView model={model} obj={actionObj} action={action} index={ref.index} fps={fps} editable={editable} openLinks={(key) => openLinksDialog({ object: actionObj.name, index: ref.index, key })} />
 
+  // Two or more selected things are a group not yet made (D326): the pane shows the group's values, and a change or a key makes it.
+  const prospective = selection.length > 1 && selectedActions.length === 0 && model ? prospectiveGroup() : null
+  if (model && prospective) {
+    const group: SceneObject = { id: -1, name: prospective.name, className: GROUP, attrs: { members: prospective.members.join(' ') }, codeDriven: false, decl: null, actions: [], classes: [], groups: [], at: 0, until: null }
+    const attrs = schemaOf(GROUP)!.attrs.filter((a) => !a.hidden && a.animatable)
+    return <ObjectView model={model} obj={group} attrs={attrs} time={time} editable={editable} openLinks={() => {}} make={() => createGroup(prospective.members)} />
+  }
   const obj = model && selection[0] ? model.objects.find((o) => o.name === selection[0]) : undefined
   const schema = obj ? schemaOf(obj.className) : undefined
   if (!model || !obj || !schema) {
@@ -305,10 +357,18 @@ export function NowPane() {
   return <ObjectView model={model} obj={obj} attrs={schema.attrs.filter((a) => !a.hidden)} time={time} editable={editable} openLinks={(key) => openLinksDialog({ object: obj.name, key })} />
 }
 
-function ObjectView({ model, obj, attrs, time, editable, openLinks }: { model: SceneModel; obj: SceneObject; attrs: AttrSchema[]; time: number; editable: boolean; openLinks: (key: string) => void }) {
-  const visible = isVisibleAt(model, obj, time)
+/**
+ * An object's values at the playhead. With `make`, the object is a group not yet made (D326):
+ * the rows show a group's defaults, and the first change or key makes the group, through
+ * `make`, and goes to it.
+ */
+function ObjectView({ model, obj, attrs, time, editable, openLinks, make }: { model: SceneModel; obj: SceneObject; attrs: AttrSchema[]; time: number; editable: boolean; openLinks: (key: string) => void; make?: () => string | null }) {
+  const visible = make ? true : isVisibleAt(model, obj, time)
   const links = objectLinks(obj)
-  const locked = !editable || obj.codeDriven || !obj.decl
+  const locked = !editable || obj.codeDriven || (!obj.decl && !make)
+  const fps = useStore((s) => s.settings.fps)
+  /** The object a change goes to: the group once made, else the object itself; null when a group could not be made. */
+  const target = (): string | null => (make ? make() : obj.name)
   // The font field offers the project's fonts and the installed families (D267).
   const isText = obj.className === 'Text'
   const fonts = useStore((s) => s.fonts)
@@ -323,7 +383,7 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks }: { model: S
         <span className="name">{obj.name}</span>
         <span className="dim">{obj.className}</span>
         <span className={`dim ${visible ? '' : 'hidden-now'}`}>
-          {visible ? 'visible' : time < obj.at ? `does not exist until ${obj.at} s` : obj.until !== null && time >= obj.until ? `does not exist after ${obj.until} s` : 'not visible: opacity is 0'}
+          {make ? 'not made yet: a change or a key makes it' : visible ? 'visible' : time < obj.at ? `does not exist until ${obj.at} s` : obj.until !== null && time >= obj.until ? `does not exist after ${obj.until} s` : 'not visible: opacity is 0'}
         </span>
         {obj.codeDriven && <span className="badge">code</span>}
       </div>
@@ -349,14 +409,53 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks }: { model: S
                   ? ''
                   : 'default'
             const writeValue = (next: AttrValue | null) => {
+              const name = target()
+              if (name === null) return
               if (isLife) {
-                if (attr.name === 'at') setLifetime(obj.name, { at: typeof next === 'number' ? next : null })
-                else setLifetime(obj.name, { until: typeof next === 'number' ? next : null })
-              } else if (typeof next === 'number' && attr.animatable && attr.type === 'number') setAttrsAt(obj.name, { [attr.name]: next }, time)
-              else if (defining?.stmt && !defining.classAction && next !== null) setActionProp({ object: obj.name, index: obj.actions.indexOf(defining) }, attr.name, next)
-              else setObjectProp(obj.name, attr.name, next === '' && NAME_LISTS.has(attr.name) ? null : next)
+                if (attr.name === 'at') setLifetime(name, { at: typeof next === 'number' ? next : null })
+                else setLifetime(name, { until: typeof next === 'number' ? next : null })
+              } else if (typeof next === 'number' && attr.animatable && attr.type === 'number') {
+                // The row shows the attribute's own value, where the solver works in what shows through the object's groups (D124): the typed value is passed as what it would show, so what is written is what was typed.
+                const fresh = useStore.getState().model
+                const real = fresh?.objects.find((o) => o.name === name)
+                const definer = real ? definingAction(real, attr.name, time) : null
+                const shown = fresh && real ? shownValue(...withWritten(fresh, real, definer, attr.name, next, definer && writesFrom(definer, attr.name, time) ? 'from' : 'to'), attr.name, time) : next
+                setAttrsAt(name, { [attr.name]: typeof shown === 'number' ? shown : next }, time)
+              }
+              else if (defining?.stmt && !defining.classAction && next !== null) setActionProp({ object: name, index: obj.actions.indexOf(defining) }, attr.name, next)
+              else setObjectProp(name, attr.name, next === '' && NAME_LISTS.has(attr.name) ? null : next)
             }
-            const writeCode = (text: string) => setObjectProp(obj.name, attr.name, text, true)
+            const writeCode = (text: string) => {
+              const name = target()
+              if (name !== null) setObjectProp(name, attr.name, text, true)
+            }
+            // The key controls (D323): on every value an animation can arrive at; a Shape's outline on the row that holds it, keyed as a morph.
+            const outline = attr.type === 'points' ? !hasPathData(valueAt(model, obj, 'curves', time)) : attr.type === 'pathdata' ? hasPathData(value) : false
+            let keys: KeyControls | undefined
+            if (!isLife && !link && !NAME_LISTS.has(attr.name) && !locked && (attr.animatable || outline)) {
+              const slack = frameSeconds(fps) / 2
+              const keyNow = keyState(obj, attr.name, time)
+              const inert = Math.abs(time - obj.at) <= slack
+                  ? 'The start: the declaration is this key'
+                  : time < obj.at || (obj.until !== null && time > obj.until)
+                    ? 'Outside its life'
+                    : keyNow === 'here' && keyActionsAt(obj, attr.name, time).length === 0
+                      ? "A class animation's key: it is edited for every member"
+                      : undefined
+              const arriving = keyActionsAt(obj, attr.name, time)
+              keys = {
+                state: keyNow,
+                inert,
+                previous: !make && keyBeside(obj, attr.name, time, -1) !== null,
+                next: !make && keyBeside(obj, attr.name, time, 1) !== null,
+                onToggle: () => {
+                  const name = target()
+                  if (name !== null) toggleKey(name, attr.name, time)
+                },
+                onJump: (direction) => jumpToKey(obj.name, attr.name, direction),
+                onMenu: arriving.length > 0 ? (e) => showMenu(e, easeMenuItems({ object: obj.name, index: arriving[arriving.length - 1]! })) : undefined,
+              }
+            }
             let control: ReactNode
             if (link) {
               const shown = isLife ? (attr.name === 'at' ? formatValue(obj.at) : obj.until === null ? 'end' : formatValue(obj.until)) : formatValue(valueAt(model, obj, attr.name, time))
@@ -405,7 +504,7 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks }: { model: S
               control = <Field type={attr.type} name={attr.name} value={value} model={model} disabled={locked} doc={attr.doc} range={RANGES[attr.name]} step={stepFor(attr.name)} options={attr.options} families={isText && attr.name === 'font' ? families : undefined} multiline={isText && attr.name === 'text'} onValue={writeValue} onCode={writeCode} />
             }
             return (
-              <Row key={attr.name} name={attr.name} status={status} className={defining ? 'animated' : status === 'default' ? 'default' : ''} onLink={locked || NAME_LISTS.has(attr.name) ? undefined : () => openLinks(attr.name)} linkTitle={`Link ${attr.name} to something else`}>
+              <Row key={attr.name} name={attr.name} status={status} className={defining ? 'animated' : status === 'default' ? 'default' : ''} onLink={locked || make || NAME_LISTS.has(attr.name) ? undefined : () => openLinks(attr.name)} linkTitle={`Link ${attr.name} to something else`} keys={keys}>
                 {control}
               </Row>
             )
