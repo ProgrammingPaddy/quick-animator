@@ -193,7 +193,8 @@ function midAnimationStart(name: string, attrs: string[], time: number): number 
  * An edit at a time one of the object's own animations ends at, a piece of D263 say, while
  * another of the edit's values is still in the middle of something: a path that carries the
  * other axis, whose own end would not show at this time (D313, D224), or the animation the piece
- * was cut from, which would otherwise get a second piece (D318). The animation that ends here
+ * was cut from, which would otherwise get a second piece (D318), or a value no animation defines
+ * at all (D328). The animation that ends here
  * takes those values on, as they show, so what is written next goes to it. Null when there is
  * nothing to take on.
  */
@@ -213,7 +214,9 @@ function axesToJoin(name: string, attrs: string[], time: number): { ref: ActionR
     const path = attr === 'x' || attr === 'y' ? pathHolds(obj, attr, time) : null
     const definer = definingAction(obj, attr, time)
     const sameCut = !!definer?.stmt && !definer.classAction && definer.verb !== 'path' && inside(definer) && Math.abs(definer.start - piece.start) <= slack
-    if ((path && inside(path)) || sameCut) values[attr] = roundAttr(attr, value)
+    // A value no animation defines joins too (D328): a plain change at a key's time belongs to the key, not to the declaration.
+    const bare = !definer
+    if ((path && inside(path)) || sameCut || bare) values[attr] = roundAttr(attr, value)
   }
   return Object.keys(values).length > 0 ? { ref: { object: name, index: obj.actions.indexOf(piece) }, values } : null
 }
@@ -227,7 +230,8 @@ function axesToJoin(name: string, attrs: string[], time: number): { ref: ActionR
  * at its own first frame (D263). What gets written is whatever makes the shown values true, with
  * everything stacked on top left in place (D122).
  */
-export function setAttrsAtMany(entries: { name: string; attrs: Record<string, number> }[], time: number): boolean {
+export function setAttrsAtMany(entries: { name: string; attrs: Record<string, number> }[], time: number, options: { before?: boolean } = {}): boolean {
+  const slack = frameSeconds(state().fps) / 2
   const done = new Set<ClassAction>()
   for (const { name, attrs } of entries) {
     const obj = state().model?.objects.find((o) => o.name === name)
@@ -235,6 +239,8 @@ export function setAttrsAtMany(entries: { name: string; attrs: Record<string, nu
     for (const attr of Object.keys(attrs)) {
       const action = definingAction(obj, attr, time)
       if (!action?.classAction || !action.stmt || done.has(action.classAction)) continue
+      // A class animation that ended before this time is left as it is: the object gets an animation of its own from its end instead (D328).
+      if (!options.before && time > action.end + slack) continue
       done.add(action.classAction)
       overrideClassAction(name, obj.actions.indexOf(action))
     }
@@ -242,10 +248,26 @@ export function setAttrsAtMany(entries: { name: string; attrs: Record<string, nu
   const joins = entries.map(({ name, attrs }) => axesToJoin(name, Object.keys(attrs), time)).filter((j) => j !== null)
   const joined = (name: string, attr: string): boolean => joins.some((j) => j.ref.object === name && attr in j.values)
   const pieces = entries.map(({ name, attrs }) => ({ name, attrs: Object.keys(attrs), from: midAnimationStart(name, Object.keys(attrs).filter((attr) => !joined(name, attr)), time) })).filter((p) => p.from !== null)
-  const own = (pieces.length > 0 || joins.length > 0) && !gestureOpen()
+  // After an animation's end, a plain change is a new animation from that end to this time, as a key is (D328); only the playhead at the end edits the end itself. Not for the value before an animation, which its lane handle sets.
+  const gaps = options.before
+    ? []
+    : entries
+        .map(({ name, attrs }) => {
+          const open = Object.keys(attrs).filter((attr) => !joined(name, attr))
+          return { name, attrs: open, from: gapStart(name, open, time) }
+        })
+        .filter((g) => g.from !== null && !pieces.some((p) => p.name === g.name))
+  const own = (pieces.length > 0 || joins.length > 0 || gaps.length > 0) && !gestureOpen()
   if (own) beginGesture()
   for (const join of joins) for (const [attr, value] of Object.entries(join.values)) setActionProp(join.ref, attr, value)
   for (const piece of pieces) beginTimed(piece.name, piece.attrs, 'start', piece.from!, time - piece.from!)
+  if (gaps.length > 0) {
+    // The new animation is the change's own, not a thing to select: the selection stays, as after a key (D323).
+    const { selection, selectedActions, select, selectActions } = useStore.getState()
+    for (const gap of gaps) beginTimed(gap.name, gap.attrs, 'start', gap.from!, time - gap.from!)
+    if (selectedActions.length > 0) selectActions(selectedActions)
+    else select(selection)
+  }
   const changed = writeAttrsAtMany(entries, time)
   if (own) endGesture()
   return changed
@@ -317,8 +339,29 @@ function heldByPathEdits(model: SceneModel, obj: SceneObject, wanted: Record<str
   return edits
 }
 
-export function setAttrsAt(name: string, attrs: Record<string, number>, time: number): boolean {
-  return setAttrsAtMany([{ name, attrs }], time)
+export function setAttrsAt(name: string, attrs: Record<string, number>, time: number, options?: { before?: boolean }): boolean {
+  return setAttrsAtMany([{ name, attrs }], time, options)
+}
+
+/**
+ * Where a plain change made after an animation's end begins the animation it writes (D328): the
+ * latest end among the animations that last had the say over these attributes, each ended more
+ * than half a frame before the time; a path counts for the position it carried. Null when no
+ * attribute is defined by an animation, or when one is still running or ends here, which the
+ * edit of its end and the piece of D263 handle.
+ */
+function gapStart(name: string, attrs: string[], time: number): number | null {
+  const obj = findObject(name)
+  if (!obj?.decl) return null
+  const slack = frameSeconds(state().fps) / 2
+  let from: number | null = null
+  for (const attr of attrs) {
+    const action = definingAction(obj, attr, time) ?? (attr === 'x' || attr === 'y' ? pathHolds(obj, attr, time) : null)
+    if (!action) continue
+    if (time <= action.end + slack) return null
+    if (from === null || action.end > from) from = action.end
+  }
+  return from === null ? null : roundSeconds(from)
 }
 
 export function setPositionAt(name: string, x: number, y: number, time: number): boolean {
@@ -1237,7 +1280,8 @@ export function addClassPath(className: string, time: number): void {
  * Where a drag of an object that a path places goes (D197, D205), as a drag during a move goes to
  * the move's end: the path, selected or else the one that owns the position at the playhead, and
  * the anchor to move: the first at the path's start, the last anywhere after that, with the
- * playhead shown at the path's end while it is running. Null when no path has a say.
+ * playhead shown at the path's end while it is running. Null when no path has a say, or when the
+ * path has ended and is not selected: a plain drag then is a new move from its end (D328).
  */
 export function pathDragTarget(name: string, selectedIndex: number | null, time: number): { ref: ActionRef; index: number; showTime: number | null } | null {
   const { model } = state()
@@ -1245,6 +1289,8 @@ export function pathDragTarget(name: string, selectedIndex: number | null, time:
   if (!model || !obj) return null
   const action = selectedIndex !== null ? obj.actions[selectedIndex] : pathHolds(obj, 'x', time)
   if (!action || action.verb !== 'path' || action.classAction || !action.stmt || action.overridden || action.timing.relative) return null
+  // After the path has ended, with the path not selected, nothing: a drag there is a new move from the path's end (D328).
+  if (selectedIndex === null && time > action.end + frameSeconds(state().fps) / 2) return null
   const index = obj.actions.indexOf(action)
   const ref = { object: name, index }
   if (!pathEditable(ref)) return null

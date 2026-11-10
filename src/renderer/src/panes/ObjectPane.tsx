@@ -374,7 +374,7 @@ export function ObjectPane() {
           </div>
           <ul className="object-list" onContextMenu={blankMenu}>
             {prospective && (
-              <li className="object prospective" title="Selected together: a change to a value, a key, or a Shift-drag makes them a group">
+              <li className="object prospective" title="Not made yet: a value, a key, or a Shift-drag makes it">
                 <div
                   className="object-row"
                   onContextMenu={(e) => {
@@ -387,7 +387,6 @@ export function ObjectPane() {
                   <span className="name">{prospective.name}</span>
                   <span className="dim">{GROUP}</span>
                   <span className="dim members">{prospective.members.join(' · ')}</span>
-                  <span className="dim">not made yet</span>
                 </div>
               </li>
             )}

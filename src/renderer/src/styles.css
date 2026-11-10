@@ -2170,7 +2170,12 @@ button.chevron:hover {
 }
 
 .now-values .link-button {
-  padding: 1px 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  padding: 0 4px;
+  vertical-align: middle;
   color: var(--fg-dim);
 }
 
@@ -2182,16 +2187,21 @@ button.chevron:hover {
 .now-values td.l {
   width: auto;
   white-space: nowrap;
+  text-align: right;
 }
 
 .key-controls {
   display: inline-flex;
   align-items: center;
   vertical-align: middle;
-  margin-right: 2px;
+  margin-right: 8px;
 }
 
 .now-values .key-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
   padding: 0 3px;
   min-width: 16px;
   color: var(--fg-dim);

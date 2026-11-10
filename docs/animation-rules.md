@@ -547,7 +547,11 @@ attribute has keys elsewhere, faint when it has none. Pressed, it writes an acti
 attribute's previous key, or the object's start, to the playhead, arriving at the value shown, so
 nothing changes until the key is edited, by typing in the row or dragging in the preview; pressed
 inside an action it cuts it there, the razor's cut; pressed on a key it removes it, and the action
-that began there begins where the removed one did. A right-click on the diamond sets the ease of
+that began there begins where the removed one did. A plain change made after an action's end,
+a drag, a nudge, or a value typed, writes the same new action from that end to the playhead,
+carrying every attribute changed; only the playhead at the end edits the end itself, and before
+any action the declaration is what changes. A Shift-drag is the pinned action at the playhead,
+as always, and fills no gap. A right-click on the diamond sets the ease of
 the action that arrives at the key, in the words of the pane; the timeline's clip menu has the
 same under Ease. Two or more clips of one object, selected, merge from the clip's menu into one
 action holding both changes, the one on top having the say where they differ.
@@ -690,6 +694,9 @@ picking one writes a time reference or a value link, `() => box.x`, and names th
 no name. The Selected pane takes code in any field and shows what a link comes to. **Coming:** `link` actions with a start and an end.
 
 ## What the GUI can edit
+
+The Selected pane shows an object's values in sections: Life, Position, Size, Color, Classes,
+then what the class adds under its name.
 
 Literal numbers and strings in the cast and in action blocks, the two numbers of a range, the
 points of a path's shape, and the trailing number of a link.

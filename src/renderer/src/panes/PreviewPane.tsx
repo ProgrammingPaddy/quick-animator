@@ -628,7 +628,9 @@ export function PreviewPane() {
       const editing = picked ? s.model.objects.find((o) => o.name === picked.object)?.actions[picked.index] : undefined
       // In Chain mode, with the playhead resting at the selected animation's end, Shift goes on with the chain (D310): the next animation follows that one, as long as it was, and nothing is edited.
       const last = editing && hoverRef.current && s.chain && s.pin === 'start' && Math.abs(editing.end - s.time) < 0.5 / s.settings.fps ? editing : null
-      if (editing && !last) {
+      // Past the selected animation's end, Shift looks ahead from the playhead as with nothing selected, and what is made is new (D329).
+      const past = !!editing && s.time > editing.end + 0.5 / s.settings.fps
+      if (editing && !last && !past) {
         if (e.target instanceof Element && e.target.closest('.cm-editor')) (document.activeElement as HTMLElement | null)?.blur()
         // Shift previews the end the pin does not name: the end with Starts at playhead, the start with Ends at playhead (D187).
         const editEnd = s.pin === 'end' ? 'start' : 'end'
@@ -1510,8 +1512,8 @@ export function PreviewPane() {
         derived = !!selectedAction.classAction
         editAt = selectedAction.end
       }
-    } else if (matches && e.shiftKey && !gestureRef.current) {
-      // Shift given to the pointer alone, with a matching animation selected: its end state.
+    } else if (matches && e.shiftKey && !gestureRef.current && store.time <= selectedAction!.end + 0.5 / store.settings.fps) {
+      // Shift given to the pointer alone, with a matching animation selected and the playhead not past it: its end state (D329).
       kind = 'destination'
       actionIndex = selected!.index
       derived = !!selectedAction!.classAction

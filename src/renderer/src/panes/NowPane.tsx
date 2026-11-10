@@ -382,14 +382,18 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks, make }: { mo
       <div className="now-head">
         <span className="name">{obj.name}</span>
         <span className="dim">{obj.className}</span>
-        <span className={`dim ${visible ? '' : 'hidden-now'}`}>
-          {make ? 'not made yet: a change or a key makes it' : visible ? 'visible' : time < obj.at ? `does not exist until ${obj.at} s` : obj.until !== null && time >= obj.until ? `does not exist after ${obj.until} s` : 'not visible: opacity is 0'}
+        <span className={`dim ${visible ? '' : 'hidden-now'}`} title={make ? 'Not made yet: a value or a key makes it' : undefined}>
+          {make ? String(obj.attrs['members'] ?? '').split(/\s+/).filter(Boolean).join(' · ') : visible ? 'visible' : time < obj.at ? `does not exist until ${obj.at} s` : obj.until !== null && time >= obj.until ? `does not exist after ${obj.until} s` : 'not visible: opacity is 0'}
         </span>
         {obj.codeDriven && <span className="badge">code</span>}
       </div>
       <table>
         <tbody>
-          {attrs.map((attr) => {
+          {sectioned(attrs, obj.className).flatMap(({ label, attrs: group }) => [
+            <tr className="now-section" key={`section:${label}`}>
+              <td colSpan={4}>{label}</td>
+            </tr>,
+            ...group.map((attr) => {
             const link = links.find((l) => l.key === attr.name)
             const isLife = attr.name === 'at' || attr.name === 'until'
             // A group's unset pivot is the center of its members' box at time zero (D124); an object's lifetime shows as resolved (D138).
@@ -508,11 +512,34 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks, make }: { mo
                 {control}
               </Row>
             )
-          })}
+          }),
+          ])}
         </tbody>
       </table>
     </div>
   )
+}
+
+/** The pane's sections for an object's values (D330): when it exists, where it is, how big, its colors, its lists, then what its class adds. */
+const SECTIONS: [string, string[]][] = [
+  ['Life', ['at', 'until']],
+  ['Position', ['x', 'y', 'z', 'rotation', 'pivotX', 'pivotY']],
+  ['Size', ['width', 'height', 'radius', 'scale', 'fontSize']],
+  ['Color', ['fill', 'stroke', 'strokeWidth', 'fillOpacity', 'strokeOpacity', 'opacity']],
+  ['Classes', ['class', 'members']],
+]
+
+function sectioned(attrs: AttrSchema[], className: string): { label: string; attrs: AttrSchema[] }[] {
+  const placed = new Set<string>()
+  const out: { label: string; attrs: AttrSchema[] }[] = []
+  for (const [label, names] of SECTIONS) {
+    const group = names.map((n) => attrs.find((a) => a.name === n)).filter((a): a is AttrSchema => !!a)
+    for (const a of group) placed.add(a.name)
+    if (group.length > 0) out.push({ label, attrs: group })
+  }
+  const rest = attrs.filter((a) => !placed.has(a.name))
+  if (rest.length > 0) out.push({ label: className, attrs: rest })
+  return out
 }
 
 const RAMPS = 'ramps'

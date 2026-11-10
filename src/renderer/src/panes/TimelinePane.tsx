@@ -799,7 +799,7 @@ export function TimelinePane() {
         const now = useStore.getState().model?.objects.find((o) => o.name === obj.name)?.actions[target]
         // A fade by character, word, or line given a start of its own: the handle sets that start, which every unit holds until its turn (D269).
         if (now?.timing.by !== undefined && now.from['opacity'] !== undefined) setActionFrom({ object: obj.name, index: target }, 'opacity', before)
-        else if (now) setAttrsAt(obj.name, { opacity: before }, now.start)
+        else if (now) setAttrsAt(obj.name, { opacity: before }, now.start, { before: true })
       } else {
         const end = Math.max(origin.start, snapTime(origin.end + dt, currentModel, action, origin.pps, snapOn))
         const value = Math.max(0, Math.min(1, origin.value - (ev.clientY - origin.y) / OPACITY_GAIN))
@@ -973,7 +973,7 @@ export function TimelinePane() {
         // The class action as it is now, not as it was when the drag began: the opacity before it goes to whatever defines it there.
         const fresh = useStore.getState().model?.classActions[classAction.id] ?? classAction
         const start = classSpan(fresh)?.start ?? newStart
-        setAttrsAtMany(activeMembers(fresh).map((m) => ({ name: m.object.name, attrs: { opacity: before } })), start)
+        setAttrsAtMany(activeMembers(fresh).map((m) => ({ name: m.object.name, attrs: { opacity: before } })), start, { before: true })
       } else {
         const end = Math.max(origin.start, snapTime(origin.end + dt, currentModel, classAction, origin.pps, snapOn))
         const value = Math.max(0, Math.min(1, origin.value - (ev.clientY - origin.y) / OPACITY_GAIN))
