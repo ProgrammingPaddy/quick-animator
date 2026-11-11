@@ -3,7 +3,7 @@ import { findDependents, type Dependent } from '../model/dependents'
 import { appendStatement, blockText, formatNumber, formatValue, insertDeclaration, lineEdit, moveStatementEdits, removeProp, removeStatements, setProp, setPropFrom, setPropText, setTimeProp, type TextEdit } from '../model/edits'
 import { DEFAULT_EASE_FRACTION, namedEasings } from '../model/easing'
 import { isMember } from '../model/evaluate'
-import { activeMembers, groupMembers, memberRef, normalizeSelection } from '../model/groups'
+import { activeMembers, groupFor, groupMembers, memberRef, normalizeSelection, withCarried } from '../model/groups'
 import { isMaskList, MASK_BELOW, maskDrawnBy, maskFor, maskNamed, maskWord, scopeRenamed, scopeWith } from '../model/masks'
 import { attrSchema, classes, EASE_NAMES, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
 import { absoluteAt, actionCourse, anchorTime, memberBox, pathCutAt, pathFrame, pathHolds, pathShift, pointsCenter, positionAt, progressAt, rawFromWorld, morphInForce, morphRunning, morphTargetSegs, shapeCurves, shapeOwnFromWorld, shapeOwnPoints, shapeSegsAt, travelFrame, type Point, type ShapePiece } from '../model/sample'
@@ -750,11 +750,11 @@ export function easeMenuItems(ref: ActionRef): MenuItem[] {
 }
 
 /**
- * The group several selected things would make (D326): two or more, as createGroup would list
- * them, with the name it would get. Null for one thing, none, or a selected animation; a selection
- * that is exactly a group's members is already that group (D124).
+ * The group several selected things make (D326, D351): two or more, as createGroup would list
+ * them. When they already are a group, that group, `made`; else the group they would make, with
+ * the name it would get. Null for one thing, none, or a selected animation.
  */
-export function prospectiveGroup(): { name: string; members: string[] } | null {
+export function prospectiveGroup(): { name: string; members: string[]; made: boolean } | null {
   const { model } = state()
   const s = useStore.getState()
   if (!model || s.selectedActions.length > 0 || s.selection.length < 2) return null
@@ -762,7 +762,9 @@ export function prospectiveGroup(): { name: string; members: string[] } | null {
     model,
     s.selection.filter((n) => model.objects.some((o) => o.name === n && o.decl)),
   )
-  return members.length >= 2 ? { name: uniqueName('group'), members } : null
+  if (members.length < 2) return null
+  const existing = groupFor(model, members)
+  return existing ? { name: existing, members, made: true } : { name: uniqueName('group'), members, made: false }
 }
 
 /** Nothing merged, and a word on why, shown where the app's notices show. */
@@ -2566,12 +2568,20 @@ export function retimeActions(refs: ActionRef[], change: { shift?: number; grow?
 
 /** An object's lifetime as written, `at` and `until` on its declaration (D138): 0 or null means the line goes. */
 export function setLifetime(name: string, life: { at?: number | null; until?: number | null }): void {
+  setLifetimes([{ name, ...life }])
+}
+
+/** When several objects begin or are removed, in one step (D353): each as `setLifetime` sets one. */
+export function setLifetimes(lives: { name: string; at?: number | null; until?: number | null }[]): void {
   const { source, model } = state()
-  const obj = model?.objects.find((o) => o.name === name)
-  if (!model || !obj?.decl || obj.className === GROUP) return
+  if (!model) return
   const edits: (TextEdit | null)[] = []
-  if (life.at !== undefined) edits.push(life.at === null || life.at <= 0 ? removeProp(source, obj.decl, 'at') : timeProp(source, obj.decl, 'at', roundSeconds(life.at)))
-  if (life.until !== undefined) edits.push(life.until === null ? removeProp(source, obj.decl, 'until') : timeProp(source, obj.decl, 'until', roundSeconds(life.until)))
+  for (const life of lives) {
+    const obj = model.objects.find((o) => o.name === life.name)
+    if (!obj?.decl || obj.className === GROUP) continue
+    if (life.at !== undefined) edits.push(life.at === null || life.at <= 0 ? removeProp(source, obj.decl, 'at') : timeProp(source, obj.decl, 'at', roundSeconds(life.at)))
+    if (life.until !== undefined) edits.push(life.until === null ? removeProp(source, obj.decl, 'until') : timeProp(source, obj.decl, 'until', roundSeconds(life.until)))
+  }
   applyEdits(edits.filter((e): e is TextEdit => !!e))
 }
 
@@ -2597,16 +2607,31 @@ export function placeObjects(entries: { name: string; at: number; from?: Lifetim
   applyEdits(entries.flatMap((entry) => placeEdits(entry.name, entry.at, entry.from)))
 }
 
-function placeEdits(name: string, at: number, from?: LifetimeOrigin): TextEdit[] {
+/**
+ * Several lives moved in time by one amount, in one step (D319, D353): each object as
+ * `placeObject` moves one, and a group, which has no life of its own, by its own animations
+ * with a written `at`.
+ */
+export function shiftLives(entries: { name: string; from: LifetimeOrigin }[], shift: number): void {
+  applyEdits(entries.flatMap((entry) => placeEdits(entry.name, entry.from.at + shift, entry.from, shift)))
+}
+
+function placeEdits(name: string, at: number, from?: LifetimeOrigin, by?: number): TextEdit[] {
   const { source, model } = state()
   const obj = model?.objects.find((o) => o.name === name)
-  if (!model || !obj?.decl || obj.className === GROUP) return []
+  if (!model || !obj?.decl) return []
+  const isGroup = obj.className === GROUP
+  // A group moves by an amount, not to a time: it has none of its own (D353).
+  if (isGroup && by === undefined) return []
   const origin: LifetimeOrigin = from ?? { at: obj.at, until: obj.until, actions: {} }
   const target = Math.max(0, roundSeconds(at))
-  const shift = target - origin.at
+  const shift = isGroup ? roundSeconds(by!) : target - origin.at
   const until = origin.until === null ? null : origin.until + shift
-  const edits: (TextEdit | null)[] = [target <= 0 ? removeProp(source, obj.decl, 'at') : timeProp(source, obj.decl, 'at', target)]
-  if (until !== origin.until || from) edits.push(until === null ? removeProp(source, obj.decl, 'until') : timeProp(source, obj.decl, 'until', roundSeconds(until)))
+  const edits: (TextEdit | null)[] = []
+  if (!isGroup) {
+    edits.push(target <= 0 ? removeProp(source, obj.decl, 'at') : timeProp(source, obj.decl, 'at', target))
+    if (until !== origin.until || from) edits.push(until === null ? removeProp(source, obj.decl, 'until') : timeProp(source, obj.decl, 'until', roundSeconds(until)))
+  }
   obj.actions.forEach((action, index) => {
     const stmt = action.stmt
     if (!stmt || action.classAction || action.overridden || action.codeDriven) return
@@ -2796,11 +2821,21 @@ export function unlinkLifetime(objectName: string, key: 'at' | 'until'): void {
 export function nudgeObjectsInTime(names: string[], frames: number): void {
   const { model, fps } = state()
   if (!model) return
+  // A group stands for what it carries, and its own animations go with them (D353).
+  const moved = withCarried(model, names)
+    .map((name) => model.objects.find((o) => o.name === name))
+    .filter((o): o is SceneObject => !!o?.decl && !o.codeDriven)
+  if (moved.length === 0) return
+  const lives = moved.filter((o) => o.className !== GROUP)
+  // Together or not at all: the earliest of them stops at the start of time, and the rest with it.
+  const starts = lives.length > 0 ? lives.map((o) => o.at) : moved.flatMap((o) => o.actions.map((a) => a.start))
+  const shift = Math.max(frames / fps, -Math.min(...starts, Infinity))
+  if (!Number.isFinite(shift) || shift === 0) return
   beginGesture()
-  for (const name of names) {
-    const obj = model.objects.find((o) => o.name === name)
-    if (obj?.decl && obj.className !== GROUP) placeObject(name, obj.at + frames / fps)
-  }
+  shiftLives(
+    moved.map((o) => ({ name: o.name, from: { at: o.at, until: o.until, actions: Object.fromEntries(o.actions.map((a, index) => [o.name + ':' + index, { start: a.start, end: a.end }])) } })),
+    shift,
+  )
   endGesture()
 }
 
@@ -3104,6 +3139,12 @@ function numberedCopies(model: SceneModel, names: string[], from: number): Recor
   const taken = takenNames(model)
   const renames: Record<string, string> = {}
   for (const name of names) {
+    // A name that is free again, as after a cut, is kept: what was cut comes back as itself (D352).
+    if (!taken.has(name)) {
+      renames[name] = name
+      taken.add(name)
+      continue
+    }
     const base = name.replace(/\d+$/, '') || name
     let n = from
     while (taken.has(`${base}${n}`)) n++
@@ -3114,11 +3155,12 @@ function numberedCopies(model: SceneModel, names: string[], from: number): Recor
 }
 
 /** One object with its own actions, as source text. */
-function objectClip(name: string): ClipObject | null {
+function objectClip(name: string, carried = false): ClipObject | null {
   const { source, model } = state()
   const obj = model?.objects.find((o) => o.name === name)
   if (!model || !obj?.decl) return null
   return {
+    ...(carried ? { carried } : {}),
     name,
     className: obj.className,
     propsText: source.slice(obj.decl.propsOpen, obj.decl.propsClose),
@@ -3134,6 +3176,19 @@ function actionClip(ref: ActionRef): ClipAction | null {
   return { objectName: ref.object, verb: action.verb, name: action.classAction ? null : action.name, propsText: source.slice(action.stmt.propsOpen, action.stmt.propsClose) }
 }
 
+/**
+ * Objects as a clipboard takes them (D352): each named one, and with a group everything it
+ * carries, so a copy of a group is a copy of its objects and not a second group of the same
+ * ones. In the order of the cast, what was carried along marked so.
+ */
+function objectClips(names: readonly string[]): ClipObject[] {
+  const { model } = state()
+  if (!model) return []
+  return withCarried(model, names)
+    .map((name) => objectClip(name, !names.includes(name)))
+    .filter((c): c is ClipObject => !!c)
+}
+
 /** Ctrl+C: the selected actions, or else the selected objects with their actions (D81). */
 export function copySelection(): boolean {
   const { selection, selectedActions, setClipboard } = useStore.getState()
@@ -3142,7 +3197,7 @@ export function copySelection(): boolean {
     const items = selectedActions.map(actionClip).filter((c): c is ClipAction => !!c)
     if (items.length > 0) clip = { kind: 'actions', items }
   } else {
-    const items = selection.map(objectClip).filter((c): c is ClipObject => !!c)
+    const items = objectClips(selection)
     if (items.length > 0) clip = { kind: 'objects', items }
   }
   if (!clip) return false
@@ -3155,12 +3210,12 @@ export function copySelection(): boolean {
   return true
 }
 
-/** Ctrl+X: copy the selected actions, or else the selected objects, then delete them (D115). */
+/** Ctrl+X: copy the selected actions, or else the selected objects, then delete them (D115). What a cut group carries goes with it, as it was copied with it (D352); the group itself goes when its last member does. */
 export function cutSelection(): boolean {
   if (!copySelection()) return false
-  const { selection, selectedActions } = useStore.getState()
+  const { selection, selectedActions, model } = useStore.getState()
   if (selectedActions.length > 0) deleteActions(selectedActions)
-  else deleteObjects(selection)
+  else deleteObjects(model ? withCarried(model, selection).filter((n) => !model.groups.has(n) || maskNamed(model, n)) : selection)
   return true
 }
 
@@ -3195,15 +3250,16 @@ export function pasteClipboard(): boolean {
 function insertCopies(model: SceneModel, source: string, items: ClipObject[], afterDecl: Range | null): string[] {
   if (items.length === 0) return []
   const renames = numberedCopies(model, [...items.map((i) => i.name), ...items.flatMap((i) => i.actions.map((a) => a.name).filter((n): n is string => !!n))], 2)
-  // A copied group lists the copies of its members (D124).
-  const declTexts = items.map((i) => renameMembers(replaceIdentifiers(`${renames[i.name]} = ${i.className}({${i.propsText}})`, renames), renames))
+  // A copied group lists the copies of its members (D124). Only what the block says is renamed: the copy's own new name may be the old name of another of the copies.
+  const declTexts = items.map((i) => `${renames[i.name]} = ${i.className}({${renameMembers(replaceIdentifiers(i.propsText, renames), renames)}})`)
   const edits: TextEdit[] = [afterDecl ? { from: afterDecl.to, to: afterDecl.to, insert: `\n\n${declTexts.join('\n\n')}` } : insertDeclaration(model.lastDeclEnd, declTexts.join('\n\n'))]
   const actionTexts = items.flatMap((i) => i.actions.map((a) => replaceIdentifiers(a.text, renames)))
   if (actionTexts.length > 0) {
     const trimmed = source.replace(/\s+$/, '')
     edits.push({ from: trimmed.length, to: source.length, insert: `\n\n${actionTexts.join('\n\n')}\n` })
   }
-  const newNames = items.map((i) => renames[i.name]!)
+  // What was picked is selected in its copy; what a group carried along is the group's (D352).
+  const newNames = items.filter((i) => !i.carried).map((i) => renames[i.name]!)
   applyEdits(edits, objectsSelected(newNames))
   return newNames
 }
@@ -3212,8 +3268,8 @@ function insertCopies(model: SceneModel, source: string, items: ClipObject[], af
 export function duplicateObjects(names: string[]): string[] {
   const { source, model } = state()
   if (!model) return []
-  const items = names.map(objectClip).filter((c): c is ClipObject => !!c)
-  const last = [...model.objects].reverse().find((o) => names.includes(o.name) && o.decl)
+  const items = objectClips(names)
+  const last = [...model.objects].reverse().find((o) => items.some((i) => i.name === o.name) && o.decl)
   return insertCopies(model, source, items, last?.decl?.range ?? null)
 }
 
@@ -3350,6 +3406,12 @@ export function createGroup(names: string[]): string | null {
     return only.name
   }
   if (members.length === 0) return null
+  // Things that already are a group are that group: no second one is made of them (D124). Selecting them did not select it (D351); making it does.
+  const existing = groupFor(model, members)
+  if (existing) {
+    useStore.getState().select([existing])
+    return existing
+  }
   const name = uniqueName('group')
   applyEdits([insertDeclaration(model.lastDeclEnd, blockText(`${name} = Group`, { members: members.join(' ') }))], objectsSelected([name]))
   return name
@@ -3478,7 +3540,10 @@ export function addMaskFor(names: string[], listed?: string[]): string | null {
 export function useAsMask(names: string[]): string | null {
   const { source, model } = state()
   if (!model) return null
-  const things = normalizeSelection(model, names.filter((n) => model.objects.some((o) => o.name === n && o.decl)))
+  const picked = normalizeSelection(model, names.filter((n) => model.objects.some((o) => o.name === n && o.decl)))
+  // Things that already are a group are that group (D124): it is the mask, and no second group is made of them.
+  const whole = picked.length > 1 ? groupFor(model, picked) : null
+  const things = whole ? [whole] : picked
   const objects = things.map((n) => model.objects.find((o) => o.name === n)!).filter((o) => o.decl)
   if (objects.length === 0) return null
   if (objects.length === 1) {

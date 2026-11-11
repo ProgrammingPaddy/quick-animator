@@ -343,14 +343,16 @@ export function NowPane() {
   const action = actionObj && ref ? actionObj.actions[ref.index] : undefined
   if (model && actionObj && action && ref) return <ActionView model={model} obj={actionObj} action={action} index={ref.index} fps={fps} editable={editable} openLinks={(key) => openLinksDialog({ object: actionObj.name, index: ref.index, key })} />
 
-  // Two or more selected things are a group not yet made (D326): the pane shows the group's values, and a change or a key makes it.
-  const prospective = selection.length > 1 && selectedActions.length === 0 && model ? prospectiveGroup() : null
+  // Two or more selected things are a group not yet made (D326): the pane shows the group's values, and a change or a key makes it. When they already are a group, the pane shows that group, though it is they that are selected (D351).
+  const several = selection.length > 1 && selectedActions.length === 0 && model ? prospectiveGroup() : null
+  const prospective = several && !several.made ? several : null
   if (model && prospective) {
     const group: SceneObject = { id: -1, name: prospective.name, className: GROUP, attrs: { members: prospective.members.join(' ') }, codeDriven: false, decl: null, actions: [], classes: [], groups: [], at: 0, until: null }
     const attrs = schemaOf(GROUP)!.attrs.filter((a) => !a.hidden && a.animatable)
     return <ObjectView model={model} obj={group} attrs={attrs} time={time} editable={editable} openLinks={() => {}} make={() => createGroup(prospective.members)} />
   }
-  const obj = model && selection[0] ? model.objects.find((o) => o.name === selection[0]) : undefined
+  const shown = several?.made ? several.name : selection[0]
+  const obj = model && shown ? model.objects.find((o) => o.name === shown) : undefined
   const schema = obj ? schemaOf(obj.className) : undefined
   if (!model || !obj || !schema) {
     return <div className="empty">{selection.length === 0 ? 'Nothing selected.' : 'Nothing to show.'}</div>

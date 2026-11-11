@@ -129,6 +129,8 @@ export interface ClipObject {
   className: string
   propsText: string
   actions: { text: string; name: string | null }[]
+  /** Taken along by a copied group that carries it, not picked itself (D352): pasted with it, and not selected after. */
+  carried?: boolean
 }
 
 /** One action in the clipboard, as source text. */

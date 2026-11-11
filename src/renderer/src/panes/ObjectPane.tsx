@@ -3,7 +3,7 @@ import { showMenu } from '../components/ContextMenu'
 import { Eye, KindIcon } from '../components/KindIcon'
 import { LinkIcon } from '../components/LinkIcon'
 import { actionLinks, dependentsByTarget, objectLinks, targetKey } from '../model/links'
-import { actionIdents, classActionIdents, classGroups, classKey, classSpan, groupMembers, overrideOf, typeGroups, type ClassGroup } from '../model/groups'
+import { actionIdents, carriedBy, classActionIdents, classGroups, classKey, classSpan, groupMembers, overrideOf, typeGroups, type ClassGroup } from '../model/groups'
 import { maskDrawnBy, maskFor, maskNamed, masksOn } from '../model/masks'
 import { GROUP, PIVOT_PARAMS, VERB_COLORS } from '../model/registry'
 import { containers, isVisibleAt } from '../model/sample'
@@ -93,9 +93,12 @@ export function ObjectPane() {
   const toggleCollapsed = useStore((s) => s.toggleCollapsed)
   const setAllCollapsed = useStore((s) => s.setAllCollapsed)
   const objects = model?.objects ?? []
-  // Two or more selected things show as the group they would make (D326); a change to a value, a key, or a Shift-drag makes it.
-  const prospective = selection.length > 1 && selectedActions.length === 0 && model ? prospectiveGroup() : null
+  // Two or more selected things show as the group they would make (D326); a change to a value, a key, or a Shift-drag makes it. When they already are a group, it has its own row, and stays unselected (D351).
+  const made = selection.length > 1 && selectedActions.length === 0 && model ? prospectiveGroup() : null
+  const prospective = made && !made.made ? made : null
   const classes = useMemo(() => (model ? classGroups(model) : []), [model])
+  /** What the selected groups carry: it shows as selected with them, as the preview outlines it (D351). */
+  const carried = useMemo(() => (model ? carriedBy(model, selection) : new Set<string>()), [model, selection])
   /** A mask's row stands for the mask: the object, or the group whose members are its picture, which sit under it (D336). */
   const maskOwners = useMemo(() => (model ? objects.filter((o) => !!maskNamed(model, o.name)) : []), [model, objects])
   /** The layers, top first (D338): every object but a plain group, which draws nothing of its own, and but the objects of a mask made of several, which sit under it. */
@@ -336,7 +339,7 @@ export function ObjectPane() {
   /** One object's row with its animations beneath. `layer` rows are the Layers view's own: they show what masks them and drag to reorder. */
   const renderObject = (obj: SceneObject, where: { member?: boolean; layer?: boolean } = {}) => {
     if (!shown(obj)) return null
-    const selected = selection.includes(obj.name) && selectedActions.length === 0
+    const selected = (selection.includes(obj.name) || carried.has(obj.name)) && selectedActions.length === 0
     const folded = !!collapsed[obj.name]
     const active = isActive(obj)
     const mask = model ? maskNamed(model, obj.name) : null

@@ -194,9 +194,9 @@ export function groupCarries(model: SceneModel, name: string, seen = new Set<str
 }
 
 /**
- * What a list of names selects (D124): a name carried by a selected group drops out, since the
- * group already stands for it, and exactly a group's members become that group, so one set of
- * objects is one selection wherever it was picked.
+ * What a list of names selects (D124, D351): each name once, and a name carried by a selected
+ * group drops out, since the group already stands for it. The members of a group, all selected,
+ * stay themselves: selecting things never selects their group in their place.
  */
 export function normalizeSelection(model: SceneModel, names: string[]): string[] {
   const unique = names.filter((n, i) => names.indexOf(n) === i)
@@ -205,8 +205,19 @@ export function normalizeSelection(model: SceneModel, names: string[]): string[]
     const obj = model.objects.find((o) => o.name === name)
     if (obj?.className === GROUP) for (const inner of groupCarries(model, name)) covered.add(inner)
   }
-  const kept = unique.filter((n) => !covered.has(n))
-  if (kept.length < 2) return kept
-  const group = groupFor(model, kept)
-  return group ? [group] : kept
+  return unique.filter((n) => !covered.has(n))
+}
+
+/** What the selected groups carry, objects and groups alike: it shows as selected with them (D351). */
+export function carriedBy(model: SceneModel, names: readonly string[]): Set<string> {
+  const out = new Set<string>()
+  for (const name of names) if (model.groups.has(name)) for (const inner of groupCarries(model, name)) out.add(inner)
+  return out
+}
+
+/** The names with what their groups carry, each once, in the order of the cast: what a copy takes, and what a move in time moves (D352, D353). */
+export function withCarried(model: SceneModel, names: readonly string[]): string[] {
+  const wanted = new Set<string>(names)
+  for (const name of carriedBy(model, names)) wanted.add(name)
+  return model.objects.filter((o) => wanted.has(o.name)).map((o) => o.name)
 }

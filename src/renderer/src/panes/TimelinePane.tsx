@@ -5,7 +5,7 @@ import { LinkIcon } from '../components/LinkIcon'
 import { NumberField } from '../components/NumberField'
 import { ScrollBar } from '../components/ScrollBar'
 import { beginGesture, endGesture } from '../code/editor'
-import { actionIdents, activeMembers, classActionIdents, classKey, classSpan, classStandIn, classTree, groupMembers, overrideOf, type ClassNode } from '../model/groups'
+import { actionIdents, activeMembers, carriedBy, classActionIdents, classKey, classSpan, classStandIn, classTree, groupMembers, overrideOf, withCarried, type ClassNode } from '../model/groups'
 import { maskFor } from '../model/masks'
 import { attrSchema, GROUP, labelOn, PIVOT_PARAMS, VERB_ATTRS, VERB_COLORS, VERBS } from '../model/registry'
 import { actionLinks, classActionLinks, dependentsByTarget, objectLinks, targetKey, type LinkInfo } from '../model/links'
@@ -57,14 +57,14 @@ import {
   ungroup,
   setAttrsAt,
   setAttrsAtMany,
-  placeObjects,
   setLifetime,
+  setLifetimes,
+  shiftLives,
   easeMenuItems,
   hiddenInView,
   hideMenuItems,
   mergeActions,
   mergeable,
-  type LifetimeOrigin,
 } from '../project/operations'
 import { requestSavePreset } from '../project/userPresets'
 import { dropTargets } from '../state/dropTargets'
@@ -816,15 +816,19 @@ export function TimelinePane() {
   }
 
   /**
-   * Drag an object in time (D139, D140, D152): its clip in the objects view, grabbed anywhere on
-   * it but its animations and handles (D283), or the edge of an absent stretch in the list. The
-   * clip moves the whole object in time, actions included, and up or down at the same time: it
-   * follows the pointer, and the moment its middle passes another clip's the object goes above
-   * or below it, which is the drawing order (D160, D165). The edges trim when the object begins
-   * or is removed, the animations staying where they are (D279). A group has no life to move, so
-   * its clip only goes up or down. One drag is one undo step, the level changes included. With
-   * several objects selected, a drag of one of them moves them all by the same time, none to
-   * before the start of time, and a click on one without a drag selects it alone (D319).
+   * Drag lives in time (D139, D140, D152, D353): an object's clip in the objects view, grabbed
+   * anywhere on it but its animations and handles (D283), or the edge of an absent stretch in
+   * the list; a group's clip; or, through `beginClassLifeDrag`, a class's. The clip moves the
+   * whole object in time, actions included, and up or down at the same time: it follows the
+   * pointer, and the moment its middle passes another clip's the object goes above or below it,
+   * which is the drawing order (D160, D165). The edges trim when the object begins or is removed,
+   * the animations staying where they are (D279). One drag is one undo step, the level changes
+   * included. A clip that shows as selected, itself or through a selected group that carries it,
+   * takes everything selected with it: a move shifts them all by the same time, none to before
+   * the start of time, an edge moves that edge of each by the same time, each stopping where
+   * its own would, and a click on one without a drag selects it alone (D319). A group has no
+   * life of its own: its clip moves and trims everything it carries, its own animations moving
+   * with them.
    */
   const beginLifetimeDrag = (obj: SceneObject, mode: 'move' | 'start' | 'end') => (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
@@ -835,27 +839,62 @@ export function TimelinePane() {
       toggleSelected(obj.name)
       return
     }
-    const several = mode === 'move' && s.selection.includes(obj.name) && s.selection.length > 1
-    if (!s.selection.includes(obj.name)) select([obj.name])
+    // What shows as selected: the selection, and what its groups carry (D351).
+    const among = s.selection.includes(obj.name) || (!!s.model && carriedBy(s.model, s.selection).has(obj.name))
+    const alone = s.selection.length === 1 && s.selection[0] === obj.name
+    if (!among) select([obj.name])
     if (!obj.decl || obj.codeDriven || !canEdit()) return
-    const isGroup = obj.className === GROUP
-    if (isGroup && mode !== 'move') return
-    // The other selected objects that have a life to move, each with where it was when the drag began (D319).
-    const followers = several
-      ? s.selection
-          .filter((name) => name !== obj.name)
-          .map((name) => s.model?.objects.find((o) => o.name === name))
-          .filter((o): o is SceneObject => !!o && !!o.decl && !o.codeDriven && o.className !== GROUP)
-          .map((o) => ({ object: o, origin: { at: o.at, until: o.until, actions: snapshotOf(o.actions.map((_, index) => ({ object: o.name, index }))) } as LifetimeOrigin }))
-      : []
-    const moving = [obj, ...followers.map((f) => f.object)]
-    const earliest = Math.min(obj.at, ...followers.map((f) => f.origin.at))
-    const end = obj.until ?? s.contentEnd ?? s.playbackEnd ?? obj.at
-    const origin: LifetimeOrigin & { x: number; y: number; end: number; pps: number } = { x: e.clientX, y: e.clientY, at: obj.at, until: obj.until, end, pps: viewRef.current.pps, actions: snapshotOf(obj.actions.map((_, index) => ({ object: obj.name, index }))) }
+    dragLives(e, { names: among ? s.selection : [obj.name], lead: obj, mode, onClick: mode === 'move' && among && !alone ? () => select([obj.name]) : undefined })
+  }
+
+  /** A class's clip drags the lives of its members, and moved, the class's own animations go with them (D353). */
+  const beginClassLifeDrag = (node: ClassNode, mode: 'move' | 'start' | 'end') => (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    if (mode === 'move' && ownHandlers(e.target)) return
+    e.stopPropagation()
+    selectClass(node.group.className)
+    if (!canEdit()) return
+    dragLives(e, { names: node.group.members.map((member) => member.name), lead: null, classActions: node.group.actions, mode })
+  }
+
+  /**
+   * The drag itself, for whatever lives it holds (D353): the named things and what their groups
+   * carry. `lead` is the object or the group whose clip is under the pointer, which alone goes up
+   * or down; a class has none. A move shifts every life by one time, with the own animations of
+   * the groups among them and of the class; an edge moves that edge of every life by one time.
+   */
+  const dragLives = (e: ReactPointerEvent<HTMLElement>, o: { names: string[]; lead: SceneObject | null; classActions?: ClassAction[]; mode: 'move' | 'start' | 'end'; onClick?: () => void }) => {
+    const s = useStore.getState()
+    const m = s.model
+    if (!m) return
+    const { mode, lead } = o
+    const clipEl = e.currentTarget.closest<HTMLElement>('.oclip')
+    // Everything the drag moves, each with where it was when the drag began. The lives are the objects'; a group moves by its own animations.
+    const moved = withCarried(m, o.names)
+      .map((name) => m.objects.find((x) => x.name === name))
+      .filter((x): x is SceneObject => !!x && !!x.decl && !x.codeDriven)
+    const lives = moved.filter((x) => x.className !== GROUP)
+    const endOf = (x: SceneObject): number => x.until ?? s.contentEnd ?? s.playbackEnd ?? x.at
+    const from = new Map(moved.map((x) => [x.name, { at: x.at, until: x.until, end: endOf(x), actions: snapshotOf(x.actions.map((_, index) => ({ object: x.name, index }))) }]))
+    // A class's own animations with a written start move with its members.
+    const classStarts =
+      mode === 'move'
+        ? (o.classActions ?? []).flatMap((c) => {
+            const span = classSpan(c)
+            return c.stmt && span && c.stmt.props.find((p) => p.key === 'at')?.kind === 'literal' ? [{ id: c.id, start: span.start, delay: activeMembers(c)[0]?.timing.delay ?? 0 }] : []
+          })
+        : []
+    // What the drag is measured from: the life of the object under the pointer, or the span of the group's or the class's clip.
+    const single = lead && lead.className !== GROUP ? lead : null
+    const leadStart = single ? single.at : Number(clipEl?.dataset['start'] ?? Math.min(...lives.map((x) => x.at), Infinity))
+    const leadEnd = single ? endOf(single) : Number(clipEl?.dataset['end'] ?? Math.max(...lives.map(endOf), 0))
+    const openEnded = single ? single.until === null : lives.some((x) => x.until === null)
+    const starts = lives.length > 0 ? lives.map((x) => x.at) : [...moved.flatMap((x) => x.actions.map((a) => a.start)), ...classStarts.map((c) => c.start)]
+    const earliest = Math.min(...starts, Infinity)
+    const inTimeAllowed = Number.isFinite(leadStart) && (mode === 'move' ? Number.isFinite(earliest) : lives.length > 0)
+    const origin = { x: e.clientX, y: e.clientY, pps: viewRef.current.pps }
     const minimum = frameSeconds(fps)
     const snapOn = s.snap
-    const currentModel = s.model
-    const clipEl = e.currentTarget.closest<HTMLElement>('.oclip')
     const clipRect = clipEl?.getBoundingClientRect()
     /** Where in the clip it was grabbed, so the clip keeps that under the pointer. */
     const grab = clipRect ? e.clientY - clipRect.top : 0
@@ -867,19 +906,19 @@ export function TimelinePane() {
     const onMove = (ev: PointerEvent) => {
       const dx = ev.clientX - origin.x
       const dy = ev.clientY - origin.y
-      if (!inTime && !isGroup && Math.abs(dx) >= 3) inTime = true
-      if (!inLevels && mode === 'move' && Math.abs(dy) >= 3) inLevels = true
-      if (inLevels && clipEl) {
+      if (!inTime && inTimeAllowed && Math.abs(dx) >= 3) inTime = true
+      if (!inLevels && mode === 'move' && lead && Math.abs(dy) >= 3) inLevels = true
+      if (inLevels && clipEl && lead) {
         const track = clipEl.closest<HTMLElement>('.tl-track')
         const top = ev.clientY - grab
-        if (track) setClipDrag({ name: obj.name, top: top - track.getBoundingClientRect().top })
+        if (track) setClipDrag({ name: lead.name, top: top - track.getBoundingClientRect().top })
         const drop = levelDrop(clipEl, top + clipHeightPx / 2)
         if (drop && !drop.satisfied) {
           if (!gesture) {
             gesture = true
             beginGesture()
           }
-          moveDeclaration(obj.name, drop.target)
+          moveDeclaration(lead.name, drop.target)
         }
       }
       if (!inTime) return
@@ -888,21 +927,37 @@ export function TimelinePane() {
         beginGesture()
       }
       const dt = dx / origin.pps
-      if (mode === 'end') {
-        const snapped = snapTimeInfo(origin.end + dt, currentModel, obj, origin.pps, snapOn)
+      if (mode === 'move') {
+        const snapped = openEnded ? snapTimeInfo(leadStart + dt, m, lives, origin.pps, snapOn) : snapSpan(leadStart + dt, leadEnd - leadStart, m, lives, origin.pps, snapOn)
         setSnapLine(snapped.hit)
-        setLifetime(obj.name, { until: Math.max(origin.at + minimum, snapped.time) })
-      } else if (mode === 'move') {
-        const snapped = origin.until !== null ? snapSpan(origin.at + dt, origin.until - origin.at, currentModel, moving, origin.pps, snapOn) : snapTimeInfo(origin.at + dt, currentModel, moving, origin.pps, snapOn)
+        // Everything moves by the same time, and the earliest of it stops at the start of time.
+        const shift = Math.max(('start' in snapped ? snapped.start : snapped.time) - leadStart, -earliest)
+        shiftLives(
+          moved.map((x) => ({ name: x.name, from: from.get(x.name)! })),
+          shift,
+        )
+        for (const c of classStarts) setClassActionTiming(c.id, { at: Math.max(0, c.start + shift - c.delay) })
+      } else if (mode === 'end') {
+        const snapped = snapTimeInfo(leadEnd + dt, m, lives, origin.pps, snapOn)
         setSnapLine(snapped.hit)
-        // Every object moves by the same time, and the earliest of them stops at the start of time.
-        const shift = Math.max(('start' in snapped ? snapped.start : snapped.time) - origin.at, -earliest)
-        placeObjects([{ name: obj.name, at: origin.at + shift, from: origin }, ...followers.map((f) => ({ name: f.object.name, at: f.origin.at + shift, from: f.origin }))])
+        const delta = snapped.time - leadEnd
+        setLifetimes(
+          lives.map((x) => {
+            const was = from.get(x.name)!
+            return { name: x.name, until: Math.max(was.at + minimum, was.end + delta) }
+          }),
+        )
       } else {
-        // The start edge trims: when the object begins changes, its animations stay where they are (D279).
-        const snapped = snapTimeInfo(origin.at + dt, currentModel, obj, origin.pps, snapOn)
+        // The start edge trims: when each object begins changes, its animations stay where they are (D279).
+        const snapped = snapTimeInfo(leadStart + dt, m, lives, origin.pps, snapOn)
         setSnapLine(snapped.hit)
-        setLifetime(obj.name, { at: Math.min(snapped.time, origin.end - minimum) })
+        const delta = snapped.time - leadStart
+        setLifetimes(
+          lives.map((x) => {
+            const was = from.get(x.name)!
+            return { name: x.name, at: Math.max(0, Math.min(was.at + delta, was.end - minimum)) }
+          }),
+        )
       }
     }
     const onEnd = () => {
@@ -910,7 +965,7 @@ export function TimelinePane() {
       setClipDrag(null)
       if (gesture) endGesture()
       // A click, not a drag, on one of several selected: that one alone (D319).
-      if (several && !inTime && !inLevels) select([obj.name])
+      if (!inTime && !inLevels) o.onClick?.()
     }
     // The title drag listens on the window: moving the object in the cast moves its clip in the DOM, which would drop a capture held on it.
     if (mode === 'move') captureWindow(e.pointerId, onMove, onEnd)
@@ -1301,6 +1356,8 @@ export function TimelinePane() {
     return set
   }, [model, selectedActions])
   const tree = useMemo(() => (model ? classTree(model) : null), [model])
+  /** What the selected groups carry: it shows as selected with them, as the preview outlines it (D351). */
+  const carried = useMemo(() => (model ? carriedBy(model, selection) : new Set<string>()), [model, selection])
   /** Who refers to each action's or object's timing, for the mark on the thing referred to (D169). */
   const dependents = useMemo(() => (model ? dependentsByTarget(model) : new Map<string, string[]>()), [model])
 
@@ -1485,7 +1542,7 @@ export function TimelinePane() {
     const allSelected = group.members.length > 0 && group.members.every((m) => selection.includes(m.name))
     const selected = allSelected || group.actions.some((a) => selectedClassActions.has(a))
     return (
-      <div key={key} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { if (!ownHandlers(e.target)) selectClass(group.className) }} onDoubleClick={classDoubleClick(group.className, start)} className={`oclip class${selected ? ' selected' : ''}${isCollapsed ? ' collapsed' : ''}`} style={{ left, top, width: clipWidth, height: classClipHeight(node, start, end, isCollapsed) }} data-class={group.className} data-start={start} data-end={end} onContextMenu={classMenu(node)}>
+      <div key={key} onPointerDown={beginClassLifeDrag(node, 'move')} onClick={(e) => { if (!ownHandlers(e.target)) selectClass(group.className) }} onDoubleClick={classDoubleClick(group.className, start)} className={`oclip class${selected ? ' selected' : ''}${isCollapsed ? ' collapsed' : ''}`} style={{ left, top, width: clipWidth, height: classClipHeight(node, start, end, isCollapsed) }} data-class={group.className} data-start={start} data-end={end} onContextMenu={classMenu(node)}>
         <div className="oclip-title" title={`Class ${group.className}`}>
           <button
             className="oclip-fold"
@@ -1503,6 +1560,8 @@ export function TimelinePane() {
           <span className="kind">class</span>
           <span className="kind members">{group.members.map((m) => m.name).join(' · ')}</span>
         </div>
+        {editable && <div className="oclip-edge left" onPointerDown={beginClassLifeDrag(node, 'start')} title={`Begins at ${timecode(start, fps)}`} />}
+        {editable && <div className="oclip-edge right" onPointerDown={beginClassLifeDrag(node, 'end')} title={`Ends at ${timecode(end, fps)}`} />}
         <div
           className="oclip-body"
           style={{ height: isCollapsed ? THIN_STRIP_H : count * LANE_H + 4 }}
@@ -1543,7 +1602,7 @@ export function TimelinePane() {
     const hasOpacity = clipOpacity && !!attrSchema(obj.className, 'opacity')
     const left = xAt(start)
     const clipWidth = Math.max(12, (end - start) * view.pps)
-    const selected = selection.includes(obj.name)
+    const selected = selection.includes(obj.name) || carried.has(obj.name)
     const isGroup = obj.className === GROUP
     const locked = !obj.decl || obj.codeDriven
     const openEnded = obj.until === null && !isGroup
@@ -1602,8 +1661,8 @@ export function TimelinePane() {
             </span>
           )}
         </div>
-        {!locked && !isGroup && <div className="oclip-edge left" onPointerDown={beginLifetimeDrag(obj, 'start')} title={`Begins at ${timecode(start, fps)}`} />}
-        {!locked && !isGroup && <div className="oclip-edge right" onPointerDown={beginLifetimeDrag(obj, 'end')} title={openEnded ? 'Lasts to the end' : `Removed at ${timecode(end, fps)}`} />}
+        {!locked && <div className="oclip-edge left" onPointerDown={beginLifetimeDrag(obj, 'start')} title={`Begins at ${timecode(start, fps)}`} />}
+        {!locked && <div className="oclip-edge right" onPointerDown={beginLifetimeDrag(obj, 'end')} title={isGroup ? `Ends at ${timecode(end, fps)}` : openEnded ? 'Lasts to the end' : `Removed at ${timecode(end, fps)}`} />}
         <div
           className="oclip-body"
           style={{ height: isCollapsed ? THIN_STRIP_H : count * LANE_H + 4 }}

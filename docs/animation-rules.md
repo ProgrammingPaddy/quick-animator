@@ -683,7 +683,11 @@ multiplies every member's, so `fade` on a group fades them as one; it has no fil
 its own, and its members keep theirs. Two or more things selected together are a group not yet
 made: the Objects pane and the Selected pane show it with a group's values, and the first value
 changed or key pressed there writes the group, `group1 = Group({ members: 'a b' })`, and goes to
-it, as a Shift-drag on several objects does; selecting alone writes nothing.
+it, as a Shift-drag on several objects does; selecting alone writes nothing. The members of a
+group, all selected, are still themselves, not the group: what is done to them as one goes to the
+group they already are, and moving them in time moves them alone. In the timeline a group's clip
+moves and trims everything it carries, its own animations moving with them, and a copy of a group
+copies the objects it carries.
 
 ## Masks
 
