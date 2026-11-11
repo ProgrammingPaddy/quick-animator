@@ -23,6 +23,8 @@ interface Look {
   fill: string
   round: boolean
   outline?: boolean
+  /** The outline's color when it is not a group's. */
+  stroke?: string
   text?: string
   /** A polygon, as the corners of its box in percent, for a Shape's picture (D232). */
   polygon?: string
@@ -33,6 +35,7 @@ const OBJECT_LOOK: Record<ObjectKind, Look> = {
   Circle: { width: 120, height: 120, fill: '#f59e0b', round: true },
   Text: { width: 106, height: 58, fill: '#ffffff', round: false, text: 'Text' },
   Shape: { width: 120, height: 100, fill: '#4f8cff', round: false, polygon: '50% 0%, 100% 100%, 0% 100%' },
+  Mask: { width: 240, height: 135, fill: 'rgba(34, 211, 238, 0.18)', round: false, outline: true, stroke: '#22d3ee' },
 }
 
 /** The families like animations fall into, by verb or by a family of their own, in the order they are listed (D265, D268); one named here by no family goes with the mixed ones. */
@@ -112,7 +115,7 @@ function ObjectImage({ look, scale }: { look: Look; scale: number }) {
       </span>
     )
   }
-  return <span className="object-image" style={{ width: Math.max(2, look.width * scale), height: Math.max(2, look.height * scale), background: look.fill, borderRadius: look.round ? '50%' : look.polygon ? 0 : Math.max(1, 6 * scale), border: look.outline ? '1px solid rgba(168, 85, 247, 0.9)' : undefined, clipPath: look.polygon ? `polygon(${look.polygon})` : undefined }} />
+  return <span className="object-image" style={{ width: Math.max(2, look.width * scale), height: Math.max(2, look.height * scale), background: look.fill, borderRadius: look.round ? '50%' : look.polygon ? 0 : Math.max(1, 6 * scale), border: look.outline ? `1px solid ${look.stroke ?? 'rgba(168, 85, 247, 0.9)'}` : undefined, clipPath: look.polygon ? `polygon(${look.polygon})` : undefined }} />
 }
 
 /**

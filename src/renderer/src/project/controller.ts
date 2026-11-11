@@ -91,6 +91,7 @@ export function applyProject(data: ProjectData): void {
     settings: data.settings,
     project: { path: data.path, name: data.name, sceneFile: scene?.file ?? 'scenes/main.js', inMemory: false },
     selection: [],
+    hidden: [],
     selectedAction: null,
     time: 0,
     playing: false,

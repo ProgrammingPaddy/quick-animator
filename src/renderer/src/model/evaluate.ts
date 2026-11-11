@@ -1,5 +1,6 @@
 import { CLASS_NAMES, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ALIASES, VERB_ATTRS, VERB_NAMES, VERB_PARAMS, canonicalVerb, classes, type Verb } from './registry'
 import { easeFrom, easePart, easeShare, namedEasings, ramps, easeAlong } from './easing'
+import { resolveMasks } from './masks'
 import { parseScene } from './parse'
 import { UNIT_KINDS, unitBegins, unitCount, type UnitKind } from './text'
 import { ellipsePathData, serializePathData, smoothPathData } from './pathData'
@@ -133,7 +134,7 @@ export function evaluateScene(source: string, fps: number): EvaluateResult {
   }
   /** Actions whose `overrides` names a class action declared further down, applied once the script has run (D148). */
   const deferredOverrides: { action: Action; name: string }[] = []
-  const model: SceneModel = { source, objects, actions, classActions, markers: [], classes: new Map(), groups: new Map(), lastActionEnd: null, lastUntil: null, contentEnd: null, lastDeclEnd: parsed.lastDeclEnd, warnings }
+  const model: SceneModel = { source, objects, actions, classActions, markers: [], classes: new Map(), groups: new Map(), masks: [], lastActionEnd: null, lastUntil: null, contentEnd: null, lastDeclEnd: parsed.lastDeclEnd, warnings }
 
   const actionHandle = (own: Action[], behind: Action | ClassAction): Record<string | symbol, unknown> => ({
     [HANDLE]: behind,
@@ -569,6 +570,8 @@ export function evaluateScene(source: string, fps: number): EvaluateResult {
       group.groups = group.groups.filter((n) => n !== last)
     }
   }
+  // The masks, once every name is known (D331): what draws each, and what each hides.
+  model.masks = resolveMasks(model, warn)
   const infosByObject = new Map<string, ActionInfo[]>()
   const infosByClass = new Map<string, ActionInfo[]>()
   for (const info of parsed.actions) {

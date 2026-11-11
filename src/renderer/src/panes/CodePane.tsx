@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { applyEdits, createEditor, getEditor, highlightRanges, markProblemLines, placeCursor, scrollToPos, setGhostClickHandler, setGhostLines, type GhostBlock, type HighlightSpec } from '../code/editor'
 import { DEFAULT_EASE_FRACTION } from '../model/easing'
 import { formatNumber, formatValue, setProp, setPropText } from '../model/edits'
+import { isMaskList } from '../model/masks'
 import { classes, GROUP, OBJECT_COLOR, PIVOT_PARAMS, VERB_COLORS } from '../model/registry'
 import { memberBox } from '../model/sample'
 import type { SceneModel, SceneObject } from '../model/types'
@@ -23,7 +24,9 @@ function declarationDefaults(obj: SceneObject, model: SceneModel): { key: string
   if (!schema || !obj.decl) return []
   const present = new Set(obj.decl.props.map((p) => p.key))
   // Derived attributes, such as a circle's width from its radius, stay out of the file unless set.
-  const out = schema.attrs.filter((a) => !present.has(a.name) && !a.derive).map((a) => ({ key: a.name, value: formatValue(a.default) }))
+  // Every object could be a mask, so `masks` is among its defaults, empty, which is no mask; `inverted` says something of a mask alone (D345).
+  const isMask = isMaskList(obj.attrs['masks'])
+  const out = schema.attrs.filter((a) => !present.has(a.name) && !a.derive && (isMask || a.name !== 'inverted')).map((a) => ({ key: a.name, value: formatValue(a.default) }))
   if (obj.className === GROUP) {
     const box = memberBox(model, obj, 0)
     if (box) for (const g of out) if (g.key === 'pivotX' || g.key === 'pivotY') g.value = formatNumber(Math.round(g.key === 'pivotX' ? box.x : box.y))

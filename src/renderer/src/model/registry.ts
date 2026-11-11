@@ -43,12 +43,19 @@ const common: AttrSchema[] = [
   { name: 'imported', type: 'string', default: '', doc: 'The file this came in from, when it was imported; the object pane tags it (D241).', animatable: false, hidden: true },
 ]
 
+/** What makes a thing a mask (D331): written on the mask, never on what it hides. */
+const masking: AttrSchema[] = [
+  { name: 'masks', type: 'string', default: '', doc: "Makes this a mask: it is not drawn, and what it lists shows only where it is. 'below' is every layer beneath it, 'above' every layer over it; names are objects, groups, or classes; after except come the ones it lets out, as in 'below except backdrop'.", animatable: false },
+  { name: 'inverted', type: 'boolean', default: false, doc: 'On a mask: hides what is inside it instead of what is outside.', animatable: false },
+]
+
 export const classes: Record<string, ClassSchema> = {
   Rect: {
     name: 'Rect',
     doc: 'A rectangle.',
     attrs: [
       ...common,
+      ...masking,
       { name: 'width', type: 'number', default: 200, doc: 'Width in pixels.', animatable: true },
       { name: 'height', type: 'number', default: 120, doc: 'Height in pixels.', animatable: true },
     ],
@@ -58,6 +65,7 @@ export const classes: Record<string, ClassSchema> = {
     doc: 'A circle, or an oval when its width and height differ.',
     attrs: [
       ...common,
+      ...masking,
       { name: 'radius', type: 'number', default: 60, doc: 'Radius in pixels: the width and the height are twice it unless they are set.', animatable: true },
       { name: 'width', type: 'number', default: 120, doc: 'Width in pixels. Unset: twice the radius.', animatable: true, derive: (a) => 2 * (typeof a['radius'] === 'number' ? a['radius'] : 60) },
       { name: 'height', type: 'number', default: 120, doc: 'Height in pixels. Unset: twice the radius.', animatable: true, derive: (a) => 2 * (typeof a['radius'] === 'number' ? a['radius'] : 60) },
@@ -68,6 +76,7 @@ export const classes: Record<string, ClassSchema> = {
     doc: 'Text, in one line or several.',
     attrs: [
       ...common,
+      ...masking,
       { name: 'text', type: 'string', default: 'Text', doc: 'The text; a line break starts a new line.', animatable: true },
       { name: 'fontSize', type: 'number', default: 48, doc: 'Font size in pixels.', animatable: true },
       { name: 'font', type: 'string', default: 'Segoe UI', doc: "Font family: one installed, or a font file in the project's assets/fonts folder, by its file name (D267).", animatable: false },
@@ -83,6 +92,7 @@ export const classes: Record<string, ClassSchema> = {
     doc: 'A polygon or a line through points of its own, or any SVG path (D232, D238).',
     attrs: [
       ...common,
+      ...masking,
       { name: 'points', type: 'points', default: [], doc: 'The corners, [[x, y], ...], around x and y. Shape.rect(w, h), Shape.polygon(sides, r), and Shape.star(points, outer, inner) give lists.', animatable: true },
       { name: 'curves', type: 'pathdata', default: '', doc: "SVG path data, 'M 0 0 C 50 -80 150 -80 200 0 Z': curves, and several pieces, which the Shape tool draws. Set, it is drawn instead of the points. Shape.circle(r) gives a circle.", animatable: true },
       { name: 'closed', type: 'boolean', default: true, doc: 'Joins the last point to the first and fills it. False draws an open line.', animatable: false },
@@ -106,6 +116,8 @@ export const classes: Record<string, ClassSchema> = {
       { name: 'scale', type: 'number', default: 1, doc: "What the group has multiplied its members by: this value around its pivot, then each scaling around the center of their box when that scaling began.", animatable: true },
       { name: 'pivotX', type: 'number', default: 0, doc: "What the group's own rotation and scale pivot on, in the members' space. The GUI writes the center of their box when it first turns or scales the group; unset, that center at time zero.", animatable: false },
       { name: 'pivotY', type: 'number', default: 0, doc: 'The pivot, up.', animatable: false },
+      { name: 'masks', type: 'string', default: '', doc: "Makes the group one mask (D336): its members together are the mask's picture, drawn nowhere else, and what this lists shows only where they are. The words are a mask's: 'below', 'above', names, and except.", animatable: false },
+      { name: 'inverted', type: 'boolean', default: false, doc: 'On a mask: hides what is inside it instead of what is outside.', animatable: false },
       { name: 'imported', type: 'string', default: '', doc: 'The file this came in from, when it was imported; the object pane tags it (D241).', animatable: false, hidden: true },
     ],
   },
@@ -115,6 +127,8 @@ export const classes: Record<string, ClassSchema> = {
 export const GROUP = 'Group'
 /** The class drawn from points of its own (D232). */
 export const SHAPE = 'Shape'
+/** The attributes that say something of a mask alone (D331): the Selected pane shows them on a mask and nowhere else. */
+export const MASK_ATTRS: ReadonlySet<string> = new Set(['masks', 'inverted'])
 
 export const CLASS_NAMES: ReadonlySet<string> = new Set(Object.keys(classes))
 

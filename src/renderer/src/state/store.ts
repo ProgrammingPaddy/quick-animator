@@ -15,9 +15,20 @@ export interface ProjectSettings {
   background: string
 }
 
-/** The kinds of object the GUI adds. */
-export type ObjectKind = 'Rect' | 'Circle' | 'Text' | 'Shape'
-export const OBJECT_KINDS: ObjectKind[] = ['Rect', 'Circle', 'Text', 'Shape']
+/** The kinds of object the GUI adds; a Mask is a rectangle that masks every layer beneath it (D331). */
+export type ObjectKind = 'Rect' | 'Circle' | 'Text' | 'Shape' | 'Mask'
+export const OBJECT_KINDS: ObjectKind[] = ['Rect', 'Circle', 'Text', 'Shape', 'Mask']
+
+/** The timeline's sections (D339), in the order they come unless the preferences say another. */
+export const TIMELINE_SECTIONS = ['objects', 'groups', 'classes', 'masks'] as const
+export type TimelineSection = (typeof TIMELINE_SECTIONS)[number]
+export const SECTION_LABEL: Record<TimelineSection, string> = { objects: 'Objects', groups: 'Groups', classes: 'Classes', masks: 'Masks' }
+
+/** The sections in the order the preferences give, with any they leave out after, in the usual order. */
+export function sectionOrder(saved: readonly string[] | undefined): TimelineSection[] {
+  const known = (saved ?? []).filter((s, i, all): s is TimelineSection => (TIMELINE_SECTIONS as readonly string[]).includes(s) && all.indexOf(s) === i)
+  return [...known, ...TIMELINE_SECTIONS.filter((s) => !known.includes(s))]
+}
 
 /** The preview's tool (D203): Select, the default, acts on objects and on the selected path's points; Object places one of the chosen kind per click (D163); Path starts a path on an object, draws points, and moves the path and its points. A tool stays until put away. */
 export type Tool = 'select' | 'object' | 'path' | 'shape' | 'pencil' | 'paint'
@@ -149,6 +160,10 @@ export interface Prefs {
   clipOpacity?: boolean
   /** How many of the colors used lately show beside a color, 0 to 12 (D309); 4 unless set. */
   recentColors?: number
+  /** The order of the timeline's sections, top first (D339); Objects, Groups, Classes, Masks unless set. */
+  timelineOrder?: readonly TimelineSection[]
+  /** Whether what is hidden in the view is left out of exports too (D349); off unless turned on. */
+  hideInExport?: boolean
 }
 
 export const DEFAULT_PREFS: Prefs = { objectLength: 2, timeHints: true, clipOpacity: true, recentColors: 4 }
@@ -209,7 +224,7 @@ function loadPrefs(): Prefs {
     if (saved.hotkeys && typeof saved.hotkeys === 'object') {
       for (const [id, keys] of Object.entries(saved.hotkeys)) if (Array.isArray(keys) && keys.every((k) => typeof k === 'string')) hotkeys[id] = keys
     }
-    return { objectLength: length === null ? null : typeof length === 'number' && length > 0 ? length : DEFAULT_PREFS.objectLength, hotkeys, timeHints: saved.timeHints !== false, clipOpacity: saved.clipOpacity !== false, recentColors: typeof saved.recentColors === 'number' && Number.isFinite(saved.recentColors) ? Math.max(0, Math.min(RECENT_COLORS_MAX, Math.round(saved.recentColors))) : DEFAULT_PREFS.recentColors }
+    return { objectLength: length === null ? null : typeof length === 'number' && length > 0 ? length : DEFAULT_PREFS.objectLength, hotkeys, timeHints: saved.timeHints !== false, clipOpacity: saved.clipOpacity !== false, recentColors: typeof saved.recentColors === 'number' && Number.isFinite(saved.recentColors) ? Math.max(0, Math.min(RECENT_COLORS_MAX, Math.round(saved.recentColors))) : DEFAULT_PREFS.recentColors, ...(Array.isArray(saved.timelineOrder) ? { timelineOrder: sectionOrder(saved.timelineOrder) } : {}), hideInExport: saved.hideInExport === true }
   } catch {
     return DEFAULT_PREFS
   }
@@ -290,6 +305,8 @@ const CHAIN_KEY = 'quick-animator.chain'
 const FRAME_SNAP_KEY = 'quick-animator.frameSnap'
 const ANCHOR_KEY = 'quick-animator.anchor'
 const SHOW_PATHS_KEY = 'quick-animator.showPaths'
+const OBJECTS_VIEW_KEY = 'quick-animator.objectsView'
+const SHOW_MASKS_KEY = 'quick-animator.showMasks'
 
 function loadChoice<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   try {
@@ -461,6 +478,12 @@ interface State {
   showPaths: boolean
   /** Paths hidden for now, while the Path tool is on, as object:index (D209). */
   hiddenPaths: string[]
+  /** What is hidden in the view for now, by name (D335, D341): an object is not drawn there, a mask does not mask there, a group hides what it carries. An export shows everything, unless the preferences leave hidden things out of it (D349). */
+  hidden: string[]
+  /** Whether the preview outlines the masks (D344, D350): those on what is selected, or with nothing selected every mask there is at the playhead; off unless turned on, and persisted. */
+  showMasks: boolean
+  /** The Objects pane's view (D338): the layers, top first, or the objects by type. */
+  objectsView: 'layers' | 'type'
   /** The marker whose text is being typed on the ruler, by its index (D307). */
   markerEdit: number | null
   setMarkerEdit: (index: number | null) => void
@@ -530,6 +553,9 @@ interface State {
   setNotice: (notice: string | null) => void
   toggleShowPaths: () => void
   setPathHidden: (key: string, hidden: boolean) => void
+  setHidden: (names: string[], hidden: boolean) => void
+  toggleShowMasks: () => void
+  setObjectsView: (view: 'layers' | 'type') => void
   setPathPoints: (indices: number[]) => void
   setAddKind: (kind: ObjectKind) => void
   setAddPreset: (addPreset: string | null) => void
@@ -612,6 +638,9 @@ function createAppStore() {
       notice: null,
       showPaths: loadChoice<'on' | 'off'>(SHOW_PATHS_KEY, ['on', 'off'], 'on') === 'on',
       hiddenPaths: [],
+      hidden: [],
+      showMasks: loadChoice<'on' | 'off'>(SHOW_MASKS_KEY, ['on', 'off'], 'off') === 'on',
+      objectsView: loadChoice<'layers' | 'type'>(OBJECTS_VIEW_KEY, ['layers', 'type'], 'layers'),
       markerEdit: null,
       recentColors: loadColors(),
       shapeStyle: loadShapeStyle(),
@@ -761,6 +790,16 @@ function createAppStore() {
           return { showPaths: !s.showPaths }
         }),
       setPathHidden: (key, hidden) => set((s) => ({ hiddenPaths: hidden ? [...new Set([...s.hiddenPaths, key])] : s.hiddenPaths.filter((k) => k !== key) })),
+      setHidden: (names, hidden) => set((s) => ({ hidden: hidden ? [...new Set([...s.hidden, ...names])] : s.hidden.filter((n) => !names.includes(n)) })),
+      toggleShowMasks: () =>
+        set((s) => {
+          saveChoice(SHOW_MASKS_KEY, s.showMasks ? 'off' : 'on')
+          return { showMasks: !s.showMasks }
+        }),
+      setObjectsView: (objectsView) => {
+        saveChoice(OBJECTS_VIEW_KEY, objectsView)
+        set({ objectsView })
+      },
       setPathPoints: (pathPoints) => set({ pathPoints }),
       setAddKind: (addKind) => set({ addKind, addPreset: null }),
       setAddPreset: (addPreset) => set({ addPreset }),

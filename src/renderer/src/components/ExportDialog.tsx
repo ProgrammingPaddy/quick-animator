@@ -42,6 +42,11 @@ function ExportDialog() {
   const playbackEnd = useStore((s) => s.playbackEnd)
   const project = useStore((s) => s.project)
   const error = useStore((s) => s.error)
+  // What the view hides is left out of the export when the preferences say so (D349): the dialog says what that is.
+  const hideInExport = useStore((s) => s.prefs.hideInExport === true)
+  const hidden = useStore((s) => s.hidden)
+  const scene = useStore((s) => s.model)
+  const leftOut = hideInExport && scene ? hidden.filter((n) => scene.objects.some((o) => o.name === n)) : []
   const [preset, setPreset] = useState<ExportPreset>(loadPreset)
   const [quality, setQuality] = useState(loadQuality)
   const [from, setFrom] = useState(0)
@@ -87,7 +92,7 @@ function ExportDialog() {
     cancelRef.current = false
     setStatus({ kind: 'running', frame: 0, total: span.count })
     const started = performance.now()
-    const result = await runExport(model, settings, { from, to }, preset, quality, path, (p) => setStatus({ kind: 'running', ...p }), () => cancelRef.current)
+    const result = await runExport(model, settings, { from, to }, preset, quality, path, (p) => setStatus({ kind: 'running', ...p }), () => cancelRef.current, leftOut)
     setStatus(result.ok ? { kind: 'done', path, seconds: (performance.now() - started) / 1000 } : { kind: 'failed', message: result.message ?? 'Export failed' })
   }
 
@@ -142,6 +147,14 @@ function ExportDialog() {
           <span className="mono">
             {settings.width} × {settings.height}, {settings.fps} fps{PRESETS[preset].alpha ? ', with alpha' : `, on ${settings.background}`}
           </span>
+          {leftOut.length > 0 && (
+            <>
+              <span className="dim">Hidden</span>
+              <span title={leftOut.join(', ')}>
+                {leftOut.length} left out: {leftOut.join(', ')}
+              </span>
+            </>
+          )}
         </div>
         {status.kind === 'running' && (
           <div className="export-progress">

@@ -36,9 +36,9 @@ export function identifierEdits(source: string, renames: Record<string, string>)
   return edits
 }
 
-/** A group's `members` list with its names renamed: it is a string, which identifier renaming leaves alone (D124, D227). */
+/** A group's `members` list, and a mask's `masks`, with their names renamed: each is a string, which identifier renaming leaves alone (D124, D227, D333). */
 export function renameMembers(text: string, renames: Record<string, string>): string {
-  return text.replace(/members:\s*(['"])([^'"]*)\1/g, (_m, quote: string, list: string) => `members: ${quote}${list.split(/\s+/).filter(Boolean).map((n) => renames[n] ?? n).join(' ')}${quote}`)
+  return text.replace(/(members|masks):\s*(['"])([^'"]*)\2/g, (_m, key: string, quote: string, list: string) => `${key}: ${quote}${list.split(/\s+/).filter(Boolean).map((n) => renames[n] ?? n).join(' ')}${quote}`)
 }
 
 /** The text with every use of the given identifiers replaced. */

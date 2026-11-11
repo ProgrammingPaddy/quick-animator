@@ -10,6 +10,7 @@
   --playhead: #ef5a3c;
   --warning: #f59e0b;
   --error: #ef4444;
+  --mask: #22d3ee;
   --fg: #d8d8d8;
   --fg-dim: #8c8c8c;
   --fg-faint: #555555;
@@ -3736,3 +3737,362 @@ button.chevron:hover {
   font-size: 11px;
   color: var(--fg-dim);
 }
+
+/* The Objects pane's two views and its masks (D333, D335, D338) */
+.objects-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.objects-tabs button {
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 4px;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.objects-tabs button:hover {
+  color: var(--fg);
+}
+
+.objects-tabs button.active {
+  color: var(--fg);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  border-radius: 4px 4px 0 0;
+}
+
+.objects-tools button.small.fold {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 3px;
+}
+
+.objects-tools button.small.fold .chevron {
+  color: inherit;
+}
+
+.object-list li.object {
+  position: relative;
+}
+
+/* Down the pane's edge: a dot on a mask, a line through the rows it hides, brighter for the mask in hand. */
+.mask-line {
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--mask);
+  opacity: 0.4;
+}
+
+.mask-line.held {
+  opacity: 1;
+}
+
+.mask-line.cap {
+  left: 1px;
+  top: 10px;
+  bottom: auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  opacity: 0.85;
+}
+
+.badge.mask {
+  margin-left: 0;
+  flex: none;
+  color: var(--mask);
+}
+
+
+.object-row .eye {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: auto;
+  border-radius: 3px;
+  color: var(--fg-dim);
+}
+
+.object-row .eye:hover {
+  background: var(--bg-raised);
+  color: var(--fg);
+}
+
+.object-row .eye.off {
+  color: var(--fg-faint);
+}
+
+.mask-tick {
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  border: 1px solid var(--fg-faint);
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.mask-tick:hover {
+  border-color: var(--fg-dim);
+}
+
+.mask-tick:checked,
+.mask-tick:indeterminate {
+  border-color: var(--mask);
+  background: var(--mask);
+}
+
+.mask-tick:checked::after {
+  content: "";
+  position: absolute;
+  left: 3.5px;
+  top: 1px;
+  width: 3px;
+  height: 6px;
+  border: solid #0b1115;
+  border-width: 0 1.6px 1.6px 0;
+  transform: rotate(45deg);
+}
+
+.mask-tick:indeterminate::after {
+  content: "";
+  position: absolute;
+  left: 2.5px;
+  top: 5px;
+  width: 6px;
+  height: 1.6px;
+  background: #0b1115;
+}
+
+.mask-tick:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* A mask's row: its name first, then what it masks in what room is left. */
+.object-list li.mask > .object-row .name {
+  flex: 0 1 auto;
+  min-width: 2.5em;
+}
+
+.object-list li.mask > .object-row .members {
+  flex: 1 1 0;
+  margin-left: 0;
+}
+
+/* A layer dragged up or down: dim where it was, a line where it would land. */
+.object-list li.object.dragging > .object-row {
+  opacity: 0.4;
+}
+
+.object-list li.object.drop-above {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.object-list li.object.drop-below {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* The empty timeline: its Objects lane says so (D339). */
+.lane-empty {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fg-faint);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* The order of the timeline's sections, in the preferences (D339). */
+.section-order {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 150px;
+}
+
+.section-order-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  cursor: grab;
+}
+
+.section-order-row:hover,
+.section-order-row:focus-visible {
+  border-color: var(--fg-faint);
+  outline: none;
+}
+
+.section-order-row.dragging {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  cursor: grabbing;
+}
+
+.section-order-row .grip {
+  width: 6px;
+  height: 10px;
+  flex: none;
+  background-image: radial-gradient(circle, var(--fg-dim) 1px, transparent 1.2px);
+  background-size: 3px 4px;
+}
+
+.prefs-grid .dim.top {
+  align-self: start;
+  padding-top: 3px;
+}
+
+/* The Objects pane after the owner's first look (D340 to D342): the search and the filter on top, the tabs and the folds beneath; boxes at the head of the rows; an eye on every object. */
+.objects-tools-row.wrap {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  row-gap: 4px;
+}
+
+.objects-folds {
+  display: inline-flex;
+  gap: 4px;
+}
+
+/* Show All and Show Only Active, side by side: the one that is on is the one lit. */
+.objects-filter {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.objects-filter button {
+  height: 20px;
+  padding: 0 8px;
+  color: var(--fg-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.objects-filter button:hover {
+  color: var(--fg);
+}
+
+.objects-filter button.active {
+  background: var(--bg-raised);
+  color: var(--fg);
+}
+
+.object-list .glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.object-list .glyph.mask {
+  color: var(--mask);
+}
+
+.object-list .class-row .glyph {
+  color: var(--fg-dim);
+}
+
+/* The place of the box at the head of a row: nothing wide until a mask is in hand, then every row moves over together. */
+.tick-slot {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  width: 0;
+  margin-right: -6px;
+  overflow: hidden;
+  transition:
+    width 90ms,
+    margin-right 90ms;
+}
+
+.objects.masking .tick-slot {
+  width: 13px;
+  margin-right: 0;
+}
+
+.objects.masking .action-row {
+  padding-left: 41px;
+}
+
+.objects.masking .object-list li.member .action-row {
+  padding-left: 53px;
+}
+
+/* The eye: faint until the row is under the pointer, plain while the thing is hidden. */
+.object-row .eye {
+  color: var(--fg-faint);
+}
+
+.object-row:hover .eye {
+  color: var(--fg-dim);
+}
+
+.object-row .eye:hover,
+.object-row .eye.off {
+  color: var(--fg);
+}
+
+.object-list li.object.is-hidden > .object-row .name,
+.object-list li.object.is-hidden > .object-row .dim,
+.object-list li.object.is-hidden > .object-row .glyph,
+.object-list li.object.is-hidden > .mask-line {
+  opacity: 0.4;
+}
+
+/* A clip of something hidden in the view (D341): still there, grayed, with the eye that shows it again. */
+.oclip.is-hidden {
+  filter: grayscale(1);
+}
+
+.oclip.is-hidden .oclip-body,
+.oclip.is-hidden .oclip-opacity,
+.oclip.is-hidden .oclip-title .name,
+.oclip.is-hidden .oclip-title .kind {
+  opacity: 0.4;
+}
+
+.oclip-eye {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  color: #ffffff;
+}
+
+.oclip-eye:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* The preview's toggles, a little closer, so Show Masks sits beside Show Paths on one line at the window's first size (D344). */
+.preview-tools button {
+  padding: 0 6px;
+}
+
+/* Every row's type sits beside its eye, so the types line up down the pane; a mask's tag follows its name, and what it masks takes the room between (D347). */
+.object-row .kind {
+  flex: none;
+}
+

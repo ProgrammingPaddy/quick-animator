@@ -1,12 +1,13 @@
 import * as THREE from 'three'
 import { groupMembers } from '../model/groups'
 import { GROUP } from '../model/registry'
+import { maskDrawnBy, maskFor, masksOn } from '../model/masks'
 import { hasPathData } from '../model/pathData'
-import { existsAt, groupBox, opacityAt, parseColor, shapePieces, textPadding, textStyleAt, textUnitStates, valueAt, worldPose, type Pose, type ShapePiece } from '../model/sample'
+import { containers, existsAt, groupBox, opacityAt, parseColor, shapePieces, textPadding, textStyleAt, textUnitStates, valueAt, worldPose, type Pose, type ShapePiece } from '../model/sample'
 import { SHAPE } from '../model/registry'
 import { drawText, estimateMeasure, fontSpec, layoutOf, sameUnitStates, textMeasure, unitOverflow, type TextMeasure, type TextStyle, type UnitState } from '../model/text'
 import { fontsVersion } from '../project/fonts'
-import type { SceneModel, SceneObject } from '../model/types'
+import type { Mask, SceneModel, SceneObject } from '../model/types'
 import type { TransformMode } from '../state/store'
 
 interface Item {
@@ -52,6 +53,82 @@ const unitPlane = new THREE.PlaneGeometry(1, 1)
 const unitCircle = new THREE.CircleGeometry(0.5, 96)
 /** Canvas pixels per world pixel for text, so it stays crisp when zoomed in. */
 const TEXT_SCALE = 2
+
+/** One white pixel: what a material multiplies by while no mask hides its object. */
+const UNMASKED = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1)
+UNMASKED.needsUpdate = true
+
+/**
+ * An object's material, made to multiply its alpha by a mask picture read at the pixel being
+ * drawn (D337): one white pixel while nothing hides the object, else the picture of the masks
+ * that do. `size` is the size of what is drawn into, in pixels, shared by a renderer's materials.
+ */
+function maskable(material: THREE.MeshBasicMaterial, size: { value: THREE.Vector2 }): THREE.MeshBasicMaterial {
+  const picture = { value: UNMASKED as THREE.Texture }
+  material.userData['mask'] = picture
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms['maskPicture'] = picture
+    shader.uniforms['maskSize'] = size
+    shader.fragmentShader = shader.fragmentShader
+      .replace('void main() {', 'uniform sampler2D maskPicture;\nuniform vec2 maskSize;\nvoid main() {')
+      .replace('#include <opaque_fragment>', '#include <opaque_fragment>\n\tgl_FragColor.a *= texture2D( maskPicture, gl_FragCoord.xy / maskSize ).a;')
+  }
+  return material
+}
+
+/** The mask picture a mesh's material reads. */
+function pictureOf(mesh: THREE.Mesh): { value: THREE.Texture } {
+  return (mesh.material as THREE.Material).userData['mask'] as { value: THREE.Texture }
+}
+
+/** The meshes of an item that draw right now. */
+function drawing(item: Item): THREE.Mesh[] {
+  return [...(item.mesh.visible ? [item.mesh] : []), ...(item.stroke?.visible ? [item.stroke] : [])]
+}
+
+const screenQuad = new THREE.PlaneGeometry(2, 2)
+const SCREEN_VERTEX = 'void main() { gl_Position = vec4( position.xy, 0.0, 1.0 ); }'
+
+/** Multiplies what is drawn so far by a mask's picture, or by what the picture leaves out when the mask is inverted: several masks on one object become one picture (D332). */
+const joinMaterial = new THREE.ShaderMaterial({
+  uniforms: { map: { value: null as THREE.Texture | null }, size: { value: new THREE.Vector2(1, 1) }, inverted: { value: 0 } },
+  vertexShader: SCREEN_VERTEX,
+  fragmentShader: 'uniform sampler2D map; uniform vec2 size; uniform float inverted; void main() { float a = texture2D( map, gl_FragCoord.xy / size ).a; gl_FragColor = vec4( mix( a, 1.0 - a, inverted ) ); }',
+  blending: THREE.CustomBlending,
+  blendEquation: THREE.AddEquation,
+  blendSrc: THREE.ZeroFactor,
+  blendDst: THREE.SrcColorFactor,
+  blendSrcAlpha: THREE.ZeroFactor,
+  blendDstAlpha: THREE.SrcAlphaFactor,
+  depthTest: false,
+  depthWrite: false,
+})
+const joinQuad = new THREE.Mesh(screenQuad, joinMaterial)
+joinQuad.frustumCulled = false
+const screenCamera = new THREE.Camera()
+
+/** The color of a mask's edge in the view, and of its marks in the panes (D334). */
+const MASK_EDGE = 0x22d3ee
+/** How far past a mask's box its edge is drawn, in pixels of the drawing: the line and its rim. */
+const EDGE_MARGIN = 5
+
+/** A line where a mask's picture begins and ends, with a dark rim so it shows on any color: drawn over the mask's box, read from the picture at each pixel. */
+const EDGE_FRAGMENT = `uniform sampler2D map; uniform vec2 size; uniform float ratio; uniform float strength; uniform vec3 color;
+void main() {
+  vec2 uv = gl_FragCoord.xy / size;
+  float lo = 1.0; float hi = 0.0; float lo2 = 1.0; float hi2 = 0.0;
+  for ( int i = 0; i < 8; i ++ ) {
+    float t = float( i ) * 0.7853981634;
+    vec2 d = vec2( cos( t ), sin( t ) ) * ratio / size;
+    float a = texture2D( map, uv + d ).a;
+    float b = texture2D( map, uv + d * 2.5 ).a;
+    lo = min( lo, a ); hi = max( hi, a ); lo2 = min( lo2, b ); hi2 = max( hi2, b );
+  }
+  float line = smoothstep( 0.02, 0.25, hi - lo );
+  float rim = smoothstep( 0.02, 0.25, hi2 - lo2 );
+  if ( max( line, rim ) <= 0.0 ) discard;
+  gl_FragColor = vec4( mix( vec3( 0.067 ), color, line ), max( line, rim * 0.85 ) * strength );
+}`
 
 let measuringContext: CanvasRenderingContext2D | null = null
 
@@ -649,8 +726,26 @@ export class SceneRenderer {
   private model: SceneModel | null = null
   private time = 0
   private editing: string | null = null
+  private pixel = 1
   /** An object drawn where the pencil holds it while its motion is sketched (D297), whatever the model says. */
   private follow: { name: string; point: { x: number; y: number } } | null = null
+  /** Each mask's picture (D337): the meshes that draw it, kept out of the scene and drawn to a texture of their own. */
+  private readonly maskRoots = new Map<string, THREE.Group>()
+  /** The textures: one per mask by its name, and one per set of masks that hide an object together. */
+  private readonly maskTargets = new Map<string, THREE.WebGLRenderTarget>()
+  /** The size of what is being drawn into, in pixels, which every material reads the mask picture by. */
+  private readonly maskSize = { value: new THREE.Vector2(1, 1) }
+  /** This frame's masks: the ones that exist now and are on, and for each set of them that hides an object together, what it hides. */
+  private readonly liveMasks = new Set<Mask>()
+  private readonly maskSets = new Map<string, { masks: Mask[]; items: Item[] }>()
+  /** What the view hides, the names in hand, the selection, and whether the masks' edges show (D334, D341, D344). */
+  private hidden: ReadonlySet<string> = new Set()
+  private held: ReadonlySet<string> = new Set()
+  private showMasks = false
+  /** The masks whose edges show this frame, the one in hand strongest, each as a box in the scene drawn over it. */
+  private outlined: { mask: Mask; strength: number }[] = []
+  private readonly maskEdges: THREE.Mesh[] = []
+  private readonly keptColor = new THREE.Color()
 
   constructor() {
     this.rotateRing = new THREE.LineLoop(ringGeometry(), ringMaterial)
@@ -665,6 +760,207 @@ export class SceneRenderer {
     this.stem.renderOrder = ORDER + 1
     this.stem.visible = false
     this.group.add(this.gizmoOutline.group, this.rotateRing, this.rotateHandle.group, this.anchorCross.group, this.stem, this.guides.group, this.pathLine.group, this.shapeHandles.group)
+  }
+
+  /** Where a mask's picture is kept: its objects' meshes, apart from the scene. */
+  private maskRoot(name: string): THREE.Group {
+    let root = this.maskRoots.get(name)
+    if (!root) {
+      root = new THREE.Group()
+      this.maskRoots.set(name, root)
+    }
+    return root
+  }
+
+  /**
+   * How the view shows the scene (D334, D341, D344): what it hides, by name; what is in hand, the
+   * selection, whose mask shows its edge and is picked before anything drawn; and whether the
+   * edges of the masks on the selection show, or with nothing selected, of every mask there is.
+   */
+  setView(view: { hidden: readonly string[]; held: readonly string[]; showMasks: boolean }): void {
+    this.hidden = new Set(view.hidden)
+    this.held = new Set(view.held)
+    this.showMasks = view.showMasks
+  }
+
+  /** Whether the view hides an object: itself, or a group that carries it (D341). */
+  private hiddenNow(model: SceneModel, obj: SceneObject): boolean {
+    return this.hidden.size > 0 && (this.hidden.has(obj.name) || containers(model, obj).some((g) => this.hidden.has(g.name)))
+  }
+
+  private maskEdgeAt(index: number): THREE.Mesh {
+    while (this.maskEdges.length <= index) {
+      const edge = new THREE.Mesh(
+        unitPlane,
+        new THREE.ShaderMaterial({
+          uniforms: { map: { value: null as THREE.Texture | null }, size: this.maskSize, ratio: { value: 1 }, strength: { value: 1 }, color: { value: new THREE.Color(MASK_EDGE) } },
+          vertexShader: 'void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 ); }',
+          fragmentShader: EDGE_FRAGMENT,
+          transparent: true,
+          depthTest: false,
+          depthWrite: false,
+        }),
+      )
+      edge.renderOrder = ORDER - 1
+      edge.visible = false
+      this.group.add(edge)
+      this.maskEdges.push(edge)
+    }
+    return this.maskEdges[index]!
+  }
+
+  /**
+   * This frame's masks (D337): the ones that exist now and are on, and for every drawn object
+   * the set of them that hides it. The pictures are drawn, and handed to the materials, by
+   * `renderMasks`; until then nothing is hidden.
+   */
+  private planMasks(model: SceneModel | null, time: number, keepAliveFrom: number | undefined): void {
+    for (const item of this.items.values()) {
+      pictureOf(item.mesh).value = UNMASKED
+      if (item.stroke) pictureOf(item.stroke).value = UNMASKED
+    }
+    this.maskSets.clear()
+    this.liveMasks.clear()
+    this.outlined = []
+    const named = new Set<string>()
+    if (model && model.masks.length > 0) {
+      const byName = new Map(model.objects.map((o) => [o.name, o]))
+      const alive = (name: string): boolean => {
+        const o = byName.get(name)
+        return !!o && (existsAt(model, o, time) || (keepAliveFrom !== undefined && existsAt(model, o, keepAliveFrom)))
+      }
+      // A mask masks while it exists (D331): outside its life, what it lists is whole. Hidden in the view, it does not mask there (D335).
+      for (const mask of model.masks) {
+        named.add(mask.name)
+        const owner = byName.get(mask.name)
+        if (owner && !this.hiddenNow(model, owner) && mask.shapes.some(alive)) this.liveMasks.add(mask)
+      }
+      if (this.liveMasks.size > 0) {
+        for (const [name, item] of this.items) {
+          if (!item.mesh.visible && !item.stroke?.visible) continue
+          const hiding = masksOn(model, name).filter((m) => this.liveMasks.has(m))
+          if (hiding.length === 0) continue
+          const key = hiding.map((m) => `${m.inverted ? '!' : ''}${m.name}`).join(' ')
+          const set = this.maskSets.get(key) ?? { masks: hiding, items: [] }
+          set.items.push(item)
+          this.maskSets.set(key, set)
+        }
+      }
+      // The edges that show: the mask in hand always; with Show Masks, those on what is selected, or with nothing selected every mask there is now (D334, D344).
+      const inHand = new Set<Mask>()
+      const shown = new Set<Mask>()
+      for (const name of this.held) {
+        const mask = maskFor(model, name)
+        if (mask) inHand.add(mask)
+        else if (this.showMasks) for (const leaf of model.groups.has(name) ? groupMembers(model, name) : [name]) for (const m of masksOn(model, leaf)) if (this.liveMasks.has(m)) shown.add(m)
+      }
+      if (this.showMasks && this.held.size === 0) for (const m of this.liveMasks) shown.add(m)
+      this.outlined = [...[...inHand].map((mask) => ({ mask, strength: 1 })), ...[...shown].filter((m) => !inHand.has(m)).map((mask) => ({ mask, strength: 0.7 }))]
+    }
+    for (const [name, root] of this.maskRoots) {
+      if (named.has(name)) root.updateMatrixWorld()
+      else if (root.children.length === 0) this.maskRoots.delete(name)
+    }
+  }
+
+  /**
+   * Draw the pictures of this frame's masks and hand them to what they hide (D337): each mask's
+   * objects alone, through the camera the scene is about to be drawn with, into a texture the
+   * size of the drawing; where several masks hide one object, their pictures multiplied into
+   * one, so it shows only where every one of them lets it (D332). Whoever draws the scene calls
+   * this just before: the view, and the export.
+   */
+  renderMasks(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    const needed = new Set<Mask>()
+    for (const set of this.maskSets.values()) for (const mask of set.masks) needed.add(mask)
+    for (const { mask } of this.outlined) needed.add(mask)
+    const used = new Set<string>()
+    if (needed.size > 0) {
+      const size = renderer.getDrawingBufferSize(this.maskSize.value)
+      const target = (key: string, samples: number): THREE.WebGLRenderTarget => {
+        used.add(key)
+        let t = this.maskTargets.get(key)
+        if (!t) {
+          t = new THREE.WebGLRenderTarget(size.x, size.y, { samples, depthBuffer: false, stencilBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, generateMipmaps: false })
+          this.maskTargets.set(key, t)
+        } else if (t.width !== size.x || t.height !== size.y) t.setSize(size.x, size.y)
+        return t
+      }
+      const color = renderer.getClearColor(this.keptColor)
+      const alpha = renderer.getClearAlpha()
+      const before = renderer.getRenderTarget()
+      const autoClear = renderer.autoClear
+      renderer.autoClear = true
+      for (const mask of needed) {
+        renderer.setRenderTarget(target(mask.name, 4))
+        renderer.setClearColor(0x000000, 0)
+        renderer.render(this.maskRoot(mask.name), camera)
+      }
+      for (const [key, set] of this.maskSets) {
+        const only = set.masks[0]!
+        let picture = this.maskTargets.get(only.name)!.texture
+        if (set.masks.length > 1 || only.inverted) {
+          // A name holds no space, so a set's key is no mask's.
+          const joined = target(`set ${key}`, 0)
+          renderer.setRenderTarget(joined)
+          renderer.setClearColor(0xffffff, 1)
+          renderer.clear()
+          renderer.autoClear = false
+          joinMaterial.uniforms['size']!.value.copy(size)
+          for (const mask of set.masks) {
+            joinMaterial.uniforms['map']!.value = this.maskTargets.get(mask.name)!.texture
+            joinMaterial.uniforms['inverted']!.value = mask.inverted ? 1 : 0
+            renderer.render(joinQuad, screenCamera)
+          }
+          renderer.autoClear = true
+          picture = joined.texture
+        }
+        for (const item of set.items) {
+          pictureOf(item.mesh).value = picture
+          if (item.stroke) pictureOf(item.stroke).value = picture
+        }
+      }
+      renderer.autoClear = autoClear
+      renderer.setRenderTarget(before)
+      renderer.setClearColor(color, alpha)
+    }
+    // Each edge is a box in the scene around its mask's picture, a little larger, so only that much is looked through for the line.
+    const ortho = camera as THREE.OrthographicCamera
+    const pixel = ortho.isOrthographicCamera ? (ortho.right - ortho.left) / ortho.zoom / Math.max(1, this.maskSize.value.x) : this.pixel
+    this.outlined.forEach(({ mask, strength }, i) => {
+      const edge = this.maskEdgeAt(i)
+      let box: Box | null = null
+      for (const name of mask.shapes) {
+        const b = this.boxOf(name)
+        if (b) box = union(box, b)
+      }
+      edge.visible = !!box
+      if (!box) return
+      const margin = EDGE_MARGIN * pixel
+      edge.position.set((box.left + box.right) / 2, (box.top + box.bottom) / 2, 0.55)
+      edge.scale.set(box.right - box.left + 2 * margin, box.top - box.bottom + 2 * margin, 1)
+      const uniforms = (edge.material as THREE.ShaderMaterial).uniforms
+      uniforms['map']!.value = this.maskTargets.get(mask.name)!.texture
+      uniforms['ratio']!.value = renderer.getPixelRatio()
+      uniforms['strength']!.value = strength
+    })
+    for (let i = this.outlined.length; i < this.maskEdges.length; i++) this.maskEdges[i]!.visible = false
+    for (const [key, t] of this.maskTargets) {
+      if (used.has(key)) continue
+      t.dispose()
+      this.maskTargets.delete(key)
+    }
+  }
+
+  /** How many masks' edges show right now. */
+  maskEdgeCount(): number {
+    return this.maskEdges.filter((edge) => edge.visible).length
+  }
+
+  /** Let go of the mask pictures. */
+  dispose(): void {
+    for (const t of this.maskTargets.values()) t.dispose()
+    this.maskTargets.clear()
   }
 
   private outline(index: number): Outline {
@@ -686,13 +982,26 @@ export class SceneRenderer {
   update(model: SceneModel | null, time: number, selection: string[], mode: TransformMode = 'all', pixel = 1, axes = 0, keepAliveFrom?: number, anchored: string[] = [], handles = true): void {
     this.model = model
     this.time = time
+    this.pixel = pixel
     const seen = new Set<string>()
     if (model) {
       model.objects.forEach((obj, index) => {
         if (obj.className === GROUP) return
         seen.add(obj.name)
         const item = this.ensure(obj)
+        // A mask's picture is drawn apart, to a texture of its own, and nowhere else (D337).
+        const mask = model.masks.length > 0 ? maskDrawnBy(model, obj.name) : null
+        const home = mask ? this.maskRoot(mask.name) : this.group
+        if (item.mesh.parent !== home) {
+          home.add(item.mesh)
+          if (item.stroke) home.add(item.stroke)
+        }
         this.apply(item, obj, model, time, index, keepAliveFrom)
+        // Hidden in the view (D341): not drawn there, so neither picked nor framed. A mask's picture stays, so a mask in hand still shows where it is.
+        if (!mask && this.hiddenNow(model, obj)) {
+          item.mesh.visible = false
+          if (item.stroke) item.stroke.visible = false
+        }
         // The Text being edited in the preview shows its words in the editor alone (D270).
         if (obj.name === this.editing) item.mesh.visible = false
         // Held by the pencil: drawn under the pointer, the model untouched until the sketch is written (D297).
@@ -704,11 +1013,12 @@ export class SceneRenderer {
     }
     for (const [name, item] of this.items) {
       if (seen.has(name)) continue
-      this.group.remove(item.mesh)
-      if (item.stroke) this.group.remove(item.stroke)
+      item.mesh.removeFromParent()
+      item.stroke?.removeFromParent()
       disposeItem(item)
       this.items.delete(name)
     }
+    this.planMasks(model, time, keepAliveFrom)
 
     // An anchored object wears a small diamond at its center, so what a push cannot move is seen (D161).
     const pinned = anchored.filter((n) => this.shown(n))
@@ -950,42 +1260,71 @@ export class SceneRenderer {
   objectsIn(box: Box): string[] {
     const names: string[] = []
     for (const name of this.items.keys()) {
+      // A mask is not drawn, so a marquee does not take it (D334).
+      if (this.model && maskDrawnBy(this.model, name)) continue
       const b = this.boxOf(name)
       if (b && b.left <= box.right && b.right >= box.left && b.bottom <= box.top && b.top >= box.bottom) names.push(name)
     }
     return names
   }
 
-  /** The name of the topmost visible object under a normalized device coordinate, or null. */
+  /**
+   * The name of the topmost visible object under a normalized device coordinate, or null. A mask
+   * is not drawn, so it is not picked, but for the one in hand, which is picked before anything
+   * drawn; and what a mask hides at that point is not picked either, unless it is in hand, the
+   * selection, which can be dragged where it does not show (D334, D343).
+   */
   pick(camera: THREE.Camera, ndc: THREE.Vector2): string | null {
     this.raycaster.setFromCamera(ndc, camera)
+    const model = this.model
     // A Shape's stroke counts as the Shape: an open line has nothing else to hit (D232).
-    const meshes = [...this.items.values()].flatMap((i) => [...(i.mesh.visible ? [i.mesh] : []), ...(i.stroke?.visible ? [i.stroke] : [])])
-    const hits = this.raycaster.intersectObjects(meshes, false)
-    if (hits.length === 0) return null
-    hits.sort((a, b) => b.object.renderOrder - a.object.renderOrder)
-    const name = hits[0]!.object.userData['name']
-    return typeof name === 'string' ? name : null
+    const drawn: THREE.Mesh[] = []
+    const inHand: THREE.Mesh[] = []
+    for (const [name, item] of this.items) {
+      const mask = model ? maskDrawnBy(model, name) : null
+      if (!mask) drawn.push(...drawing(item))
+      else if (this.held.has(mask.name) || this.held.has(name)) inHand.push(...drawing(item))
+    }
+    const topmost = (meshes: THREE.Mesh[]): string[] =>
+      this.raycaster
+        .intersectObjects(meshes, false)
+        .sort((a, b) => b.object.renderOrder - a.object.renderOrder)
+        .map((hit) => hit.object.userData['name'])
+        .filter((name): name is string => typeof name === 'string')
+    const held = topmost(inHand)[0]
+    if (held !== undefined) return held
+    const inside = new Map<Mask, boolean>()
+    const lets = (mask: Mask): boolean => {
+      let within = inside.get(mask)
+      if (within === undefined) {
+        within = this.raycaster.intersectObjects(mask.shapes.flatMap((n) => { const item = this.items.get(n); return item ? drawing(item) : [] }), false).length > 0
+        inside.set(mask, within)
+      }
+      return within !== mask.inverted
+    }
+    const inSelection = (name: string): boolean => this.held.has(name) || (!!model && containers(model, model.objects.find((o) => o.name === name)!).some((g) => this.held.has(g.name)))
+    for (const name of topmost(drawn)) if (!model || inSelection(name) || masksOn(model, name).every((m) => !this.liveMasks.has(m) || lets(m))) return name
+    return null
   }
 
   private ensure(obj: SceneObject): Item {
     let item = this.items.get(obj.name)
     if (item && item.className !== obj.className) {
-      this.group.remove(item.mesh)
-      if (item.stroke) this.group.remove(item.stroke)
+      item.mesh.removeFromParent()
+      item.stroke?.removeFromParent()
       disposeItem(item)
       item = undefined
     }
     if (!item) {
       const isShape = obj.className === SHAPE
       // A Shape's triangles wind either way, as its points were drawn, so both sides show.
-      const material = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthTest: false, depthWrite: false, side: isShape ? THREE.DoubleSide : THREE.FrontSide })
+      const material = maskable(new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthTest: false, depthWrite: false, side: isShape ? THREE.DoubleSide : THREE.FrontSide }), this.maskSize)
       // A Shape's fill is its own geometry, rebuilt when its line changes; the unit plane and circle are shared (D232).
       const mesh = new THREE.Mesh(isShape ? new THREE.BufferGeometry() : obj.className === 'Circle' ? unitCircle : unitPlane, material)
       mesh.userData['name'] = obj.name
       item = { mesh, className: obj.className, width: 1, height: 1 }
       if (isShape) {
-        const stroke = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthTest: false, depthWrite: false, side: THREE.DoubleSide }))
+        const stroke = new THREE.Mesh(new THREE.BufferGeometry(), maskable(new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthTest: false, depthWrite: false, side: THREE.DoubleSide }), this.maskSize))
         stroke.userData['name'] = obj.name
         item.stroke = stroke
         this.group.add(stroke)

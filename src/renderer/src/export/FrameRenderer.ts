@@ -6,7 +6,8 @@ import { SceneRenderer } from '../preview/SceneRenderer'
  * Draws frames at project resolution through the same scene renderer as the preview, one world
  * pixel per output pixel, and reads their pixels (D25, R67, R112). An opaque frame sits on the
  * project's background; a frame with alpha leaves the background out and composites premultiplied,
- * so edges and fades come out right, then returns straight alpha as video formats expect.
+ * so edges and fades come out right, then returns straight alpha as video formats expect. `hidden`
+ * names what is left out, as the view hides it, when the preferences say Hide reaches exports (D349).
  */
 export class FrameRenderer {
   private readonly canvas = document.createElement('canvas')
@@ -23,7 +24,9 @@ export class FrameRenderer {
     readonly height: number,
     background: string,
     readonly alpha: boolean,
+    hidden: readonly string[] = [],
   ) {
+    if (hidden.length > 0) this.content.setView({ hidden, held: [], showMasks: false })
     this.canvas.width = width
     this.canvas.height = height
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true, premultipliedAlpha: alpha, preserveDrawingBuffer: true })
@@ -44,6 +47,8 @@ export class FrameRenderer {
   draw(model: SceneModel, time: number): Uint8Array {
     this.content.update(model, time, [], 'all', 1)
     if (this.alpha) this.premultiply()
+    // The masks' pictures, through the same camera, as the view draws them (D337).
+    this.content.renderMasks(this.renderer, this.camera)
     this.renderer.render(this.scene, this.camera)
     const gl = this.renderer.getContext()
     gl.readPixels(0, 0, this.width, this.height, gl.RGBA, gl.UNSIGNED_BYTE, this.read)
@@ -80,6 +85,7 @@ export class FrameRenderer {
   }
 
   dispose(): void {
+    this.content.dispose()
     this.renderer.dispose()
     this.backdrop.geometry.dispose()
     ;(this.backdrop.material as THREE.Material).dispose()

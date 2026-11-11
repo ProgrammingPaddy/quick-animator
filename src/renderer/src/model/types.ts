@@ -178,6 +178,18 @@ export interface Marker {
   stmt: MarkerInfo
 }
 
+/** A mask (D331): what it lists shows only where its picture is, or, inverted, only where it is not. */
+export interface Mask {
+  /** The object, or the group, that carries `masks`. */
+  name: string
+  /** The objects whose drawing is its picture: itself, or everything the group carries (D336). They are drawn nowhere else. */
+  shapes: string[]
+  /** The objects it hides outside its picture, in the order of the layers. */
+  targets: string[]
+  /** Hides inside its picture instead. */
+  inverted: boolean
+}
+
 export interface SceneModel {
   source: string
   objects: SceneObject[]
@@ -189,6 +201,8 @@ export interface SceneModel {
   classes: Map<string, string[]>
   /** Group name to the names it lists, resolved: objects and groups, classes expanded (D124). */
   groups: Map<string, string[]>
+  /** The masks, in the order of the layers (D331). */
+  masks: Mask[]
   /** End of the last action, or null when nothing animates. The hold is added elsewhere. */
   lastActionEnd: number | null
   /** The latest `until` any object names, or null when none does (D138). */

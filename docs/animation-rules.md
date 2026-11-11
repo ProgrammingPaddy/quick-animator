@@ -74,6 +74,8 @@ Every object has these attributes, with these defaults:
 | `Shape` | `points` `[]`, the corners around `x, y`; `curves` `''`, SVG path data, drawn instead of the points when set; `closed` true; `smooth` false; `stroke` `'#ffffff'`, `strokeWidth` 0. See Shapes |
 | `Group` | only these: `members` `''`; `x`, `y` 0, how far the group has shifted its members; `rotation` 0 and `scale` 1, how far it has turned and scaled them; `pivotX`, `pivotY`, what its own rotation and scale pivot on, unset the center of the members' box at time zero. See Groups |
 
+Every class also takes `masks` and `inverted`, which make an object a mask; see Masks.
+
 An omitted attribute takes its default. An unknown attribute is reported and ignored.
 
 ## Shapes
@@ -683,6 +685,99 @@ made: the Objects pane and the Selected pane show it with a group's values, and 
 changed or key pressed there writes the group, `group1 = Group({ members: 'a b' })`, and goes to
 it, as a Shift-drag on several objects does; selecting alone writes nothing.
 
+## Masks
+
+A mask is an object that is not drawn: what it lists shows only where the mask is. `masks` makes
+any Rect, Circle, Text, or Shape a mask and says what it masks. Nothing is written on what is
+masked.
+
+```js
+spot = Circle({
+  x: 0,
+  y: 0,
+  radius: 300,
+  masks: 'below except backdrop',
+})
+```
+
+The list is words separated by spaces:
+
+| Word | What it masks |
+|------|---------------|
+| `below` | every layer beneath the mask: every object declared before it |
+| `above` | every layer over it: every object declared after it |
+| a name | that object; everything a group carries; every member of a class, or of a type such as `Text` |
+| `except` | nothing itself: the names after it are let out |
+| `none` | nothing: a mask that masks nothing yet |
+
+`masks: 'below'` masks the whole scene under the mask; `masks: 'title logo'` those two, wherever
+they are; `masks: 'bars except bar3'` a class but one member. An empty list, the default, is no
+mask: the object is drawn as any other. The layers are
+the cast: a later declaration is over an earlier one, so moving a mask's declaration changes what
+`below` and `above` reach. A word that names nothing is reported at its line.
+
+A thing shows through a mask by how solid the mask would have been drawn there. Its `opacity`, a
+Shape's stroke, and a Text's letters all count; its color does not. So a mask at `opacity: 0.5`
+lets half through, a fade on a mask fades in what it masks, and a Text as a mask shows what is
+beneath through its letters. `inverted: true` hides what is inside the mask instead: a hole.
+
+In every other way a mask is the object it is. It has a life, and masks only while it exists:
+before `at` and after `until`, what it lists is whole. A `move` on it is a wipe and a `resize` an
+iris; it turns, morphs, follows a path, and takes keys as anything does.
+
+```js
+reveal = Rect({
+  x: -960,
+  width: 0,
+  height: 1080,
+  masks: 'title',
+})
+
+reveal.to({
+  x: 0,
+  width: 1920,
+  duration: 1,
+})
+```
+
+Several masks on one thing all apply: it shows only where every one of them lets it. Two masks
+cut it to where they overlap, and a mask with an inverted one cuts a hole in the first. A mask is
+never masked, and neither is the project's background.
+
+Several objects make one mask as a group: `masks` on a Group makes its members together the
+mask's picture, and what it lists shows where any of them is. The members are drawn nowhere else;
+each still moves and animates on its own, and the group moves them as one. `inverted` on the
+group turns the whole picture over.
+
+```js
+left = Circle({
+  x: -300,
+  radius: 150,
+})
+
+right = Circle({
+  x: 300,
+  radius: 150,
+})
+
+eyes = Group({
+  members: 'left right',
+  masks: 'below',
+})
+```
+
+In the GUI, Mask is among the kinds wherever objects are added: a rectangle half the frame
+across with `masks: 'below'`, on top; the code pane completes Mask to the same block, and
+`masks` in any block to `masks: 'below'`, with the words and the names inside the list.
+Right-click, Mask, offers Add mask, a rectangle around the selection that masks it alone; Use as
+mask, which writes `masks: 'below'` on the selection, or a group of it when it is several;
+Masked by, the masks to tick; and on a mask, Inverted, and Release mask, which takes `masks`
+away. With a mask selected, every row of the Objects pane has a box at its head, ticked where the
+mask hides it; a click rewrites the list the shortest way, a name added or dropped, or put after
+`except`, and `none` when the last one leaves. A group and a class take a mask by their rows
+under Type, by name. In the preview, Show Masks draws the edges of the masks on what is selected,
+or of every mask when nothing is. In the timeline, masks have a section of their own.
+
 ## Links
 
 An attribute can follow another object's attribute with a function: `x: () => box.x + 20`. It is
@@ -695,8 +790,13 @@ no name. The Selected pane takes code in any field and shows what a link comes t
 
 ## What the GUI can edit
 
-The Selected pane shows an object's values in sections: Life, Position, Size, Color, Classes,
-then what the class adds under its name.
+The Selected pane shows an object's values in sections: Lifetime, Position, Size, Color, Classes,
+then what the class adds under its name; a mask has a Mask section too, its list and `inverted`.
+The Objects pane lists the objects as layers, in drawing order with the top first, where a row
+dragged up or down moves its declaration, or by type, with the groups, the classes, and the masks
+after the kinds; see Masks for what it shows of them. The eye on a row, and Hide in a right-click,
+hide an object in the view alone: nothing of it is in the file, and an export shows everything,
+unless the preferences leave hidden objects out of exports.
 
 Literal numbers and strings in the cast and in action blocks, the two numbers of a range, the
 points of a path's shape, and the trailing number of a link.
@@ -815,4 +915,4 @@ title.fade({
 ## Coming
 
 orbits (a turn around a point, as its own verb), objects attached to another's path, the motion of a drag kept as a path, `link` actions, `Image`, `Video`, `Line`, `Polygon`,
-object states such as `startsMoving`, per-character text animation, 3D.
+object states such as `startsMoving`, per-character text animation, soft edges on any object, the camera, 3D.

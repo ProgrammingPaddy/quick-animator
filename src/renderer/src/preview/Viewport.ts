@@ -15,6 +15,8 @@ export class Viewport {
   zoom = 1
   /** Called after any change of zoom or position. */
   onChange?: () => void
+  /** Called before each drawing, with what draws and the camera it draws through: the masks' pictures are made here (D337). */
+  beforeRender?: (renderer: THREE.WebGLRenderer, camera: THREE.Camera) => void
   /** Scene objects are added here. */
   readonly content = new THREE.Group()
   readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1000, 1000)
@@ -137,6 +139,7 @@ export class Viewport {
 
   render(): void {
     if (this.view.width === 0 || this.view.height === 0) return
+    this.beforeRender?.(this.renderer, this.camera)
     this.renderer.render(this.scene, this.camera)
   }
 

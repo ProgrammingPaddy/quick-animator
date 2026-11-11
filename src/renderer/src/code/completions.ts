@@ -87,6 +87,8 @@ class Fields {
 function attrCompletion(attr: AttrSchema): Completion {
   const value = formatValue(attr.default)
   const f = new Fields()
+  // A list written empty would be no mask (D345): it starts as every layer beneath, with the cursor on the word.
+  if (attr.name === 'masks') return snippetCompletion(`masks: '${f.field('below')}',`, { label: attr.name, detail: "'below'", info: attr.doc, type: 'property' })
   return snippetCompletion(`${attr.name}: ${f.field(value)},`, { label: attr.name, detail: value, info: attr.doc, type: 'property' })
 }
 
@@ -142,6 +144,29 @@ function classSnippet(className: string, withName: boolean): Completion {
     label: className,
     detail: 'new object',
     info: `${schema.doc} Expands to a block of what defines it; the rest shows as ghost lines.`,
+    type: 'class',
+  })
+}
+
+/**
+ * A mask where a new object is written (D333, D345), as the Mask kind adds one: a rectangle half
+ * the frame across that masks every layer beneath it. There is no class of that name: any Rect,
+ * Circle, Text, Shape, or Group with `masks` is one.
+ */
+function maskSnippet(withName: boolean): Completion {
+  const f = new Fields()
+  const { width, height } = useStore.getState().settings
+  const head = withName ? `${f.field('mask')} = Rect` : 'Rect'
+  const size: Record<string, string> = { width: String(Math.round(width / 2)), height: String(Math.round(height / 2)) }
+  const lines: string[] = []
+  for (const a of objectSnippetAttrs('Rect')) {
+    if (a.name === 'fill') lines.push(`  masks: '${f.field('below')}',`)
+    else lines.push(`  ${a.name}: ${f.field(size[a.name] ?? a.value)},`)
+  }
+  return snippetCompletion(`${head}({\n${lines.join('\n')}\n})`, {
+    label: 'Mask',
+    detail: 'new mask',
+    info: 'A rectangle that is not drawn: every layer beneath it shows only where it is. Expands to a Rect with masks; any object with masks is a mask.',
     type: 'class',
   })
 }
@@ -263,6 +288,17 @@ function memberOptions(model: SceneModel | null): Completion[] {
   return [...objects, ...classNameOptions(model)]
 }
 
+/** What a mask's `masks` can hold (D331, D345): its words, then what a group's members can name. */
+function maskOptions(model: SceneModel | null): Completion[] {
+  return [
+    { label: 'below', type: 'keyword', info: 'Every layer beneath the mask.' },
+    { label: 'above', type: 'keyword', info: 'Every layer over the mask.' },
+    { label: 'except', type: 'keyword', info: 'The names after it are let out.' },
+    { label: 'none', type: 'keyword', info: 'A mask that masks nothing.' },
+    ...memberOptions(model),
+  ]
+}
+
 /** What `all('` can name: the classes in use and every type (D80). */
 function selectorOptions(model: SceneModel | null): Completion[] {
   const types = Object.keys(classes).map((name) => ({ label: name, type: 'class', info: `Every ${name}.` }))
@@ -340,7 +376,7 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
   // name = | : the name is already there, so the class expands without one.
   if (/^\s*(?:const\s+|let\s+|var\s+)?[A-Za-z_$][\w$]*\s*=\s*[\w$]*$/.test(before)) {
     if (!word || (word.from === word.to && !context.explicit)) return null
-    return { from: word.from, options: [...Object.keys(classes).map((c) => classSnippet(c, false)), allSnippet()], validFor: /^[\w$]*$/ }
+    return { from: word.from, options: [...Object.keys(classes).map((c) => classSnippet(c, false)), maskSnippet(false), allSnippet()], validFor: /^[\w$]*$/ }
   }
 
   const node = syntaxTree(state).resolveInner(pos, -1)
@@ -373,11 +409,11 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
       if (key === 'overrides') {
         return { from: word?.from ?? pos, options: classActionOptions(model), validFor: /^[\w$]*$/ }
       }
-      if ((key === 'class' || key === 'members') && call.kind === 'class') {
+      if ((key === 'class' || key === 'members' || key === 'masks') && call.kind === 'class') {
         // Inside the quotes only, so the closing quote the editor added stays in place.
         const inQuotes = /['"][\w$ -]*$/.test(before)
         const partial = /[\w$-]*$/.exec(before)![0]
-        return inQuotes ? { from: pos - partial.length, options: key === 'class' ? classNameOptions(model) : memberOptions(model), validFor: /^[\w$-]*$/ } : null
+        return inQuotes ? { from: pos - partial.length, options: key === 'class' ? classNameOptions(model) : key === 'masks' ? maskOptions(model) : memberOptions(model), validFor: /^[\w$-]*$/ } : null
       }
       return null
     }
@@ -408,7 +444,7 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
   // A statement start: a new object, an object to act on, or a class to act on.
   if (/^\s*[\w$]*$/.test(before)) {
     if (!word || (word.from === word.to && !context.explicit)) return null
-    const options: Completion[] = Object.keys(classes).map((c) => classSnippet(c, true))
+    const options: Completion[] = [...Object.keys(classes).map((c) => classSnippet(c, true)), maskSnippet(true)]
     for (const obj of model?.objects ?? []) options.push({ label: obj.name, type: 'variable', detail: obj.className, apply: `${obj.name}.` })
     options.push(allSnippet())
     return { from: word.from, options, validFor: /^[\w$]*$/ }

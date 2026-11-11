@@ -22,15 +22,16 @@ export function frameSpan(range: ExportRange, fps: number): { first: number; cou
 /**
  * Render a range of the scene frame by frame through the frame renderer and hand each frame to
  * the main process, which encodes it (D25). The model is the one given: edits made meanwhile do
- * not reach the file. Resolves with ffmpeg's verdict, or the failure, and never throws.
+ * not reach the file. `hidden` names what is left out of the frames (D349). Resolves with
+ * ffmpeg's verdict, or the failure, and never throws.
  */
-export async function runExport(model: SceneModel, settings: ProjectSettings, range: ExportRange, preset: ExportPreset, quality: number, path: string, onProgress: (p: ExportProgress) => void, cancelled: () => boolean): Promise<ExportResult> {
+export async function runExport(model: SceneModel, settings: ProjectSettings, range: ExportRange, preset: ExportPreset, quality: number, path: string, onProgress: (p: ExportProgress) => void, cancelled: () => boolean, hidden: readonly string[] = []): Promise<ExportResult> {
   const api = window.api?.export
   if (!api) return { ok: false, message: 'Export needs the desktop app' }
   const { first, count } = frameSpan(range, settings.fps)
   let renderer: FrameRenderer | null = null
   try {
-    renderer = new FrameRenderer(settings.width, settings.height, settings.background, PRESETS[preset].alpha)
+    renderer = new FrameRenderer(settings.width, settings.height, settings.background, PRESETS[preset].alpha, hidden)
     await api.start({ preset, quality, path, width: settings.width, height: settings.height, fps: settings.fps, frames: count })
     for (let i = 0; i < count; i++) {
       if (cancelled()) {

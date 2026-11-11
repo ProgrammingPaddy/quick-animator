@@ -6,6 +6,7 @@ import { FontField } from '../components/FontField'
 import { NumberField } from '../components/NumberField'
 import { ScrollBar } from '../components/ScrollBar'
 import { groupMembers } from '../model/groups'
+import { maskDrawnBy } from '../model/masks'
 import { anchorIsSmooth, placeBetween, type AnchorKind, type Seg } from '../model/pathData'
 import { attrSchema, GROUP, SHAPE, type AttrValue } from '../model/registry'
 import { ownBounds, pathControlsWorld, pathHolds, positionAt, shapeOwnAnchors, shapeOwnPoints, shapeOwnSegs, shapeWorldCurve, shapeWorldFrame, shapeWorldOf, shapeWorldPoints, shownValue, travelFrame, type PathFrame, type Point } from '../model/sample'
@@ -16,7 +17,7 @@ import { convertTextToShape } from '../project/textToShape'
 import { journeyOf, parseColor, textPadding, textStyleAt, valueAt, worldPose } from '../model/sample'
 import { layoutOf, type TextStyle } from '../model/text'
 import { DEFAULT_EASE_FRACTION, easingFor, unease } from '../model/easing'
-import { addMorph, addObject, addPath, beginFill, beginOutline, canEdit, paintFill, paintStroke, sketchLine, writeOnLine, setObjectProp, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, pathDragTarget, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestClasses, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, settleMorph, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphRunning, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
+import { hideMenuItems, maskMenuItems, addMorph, addObject, addPath, beginFill, beginOutline, canEdit, paintFill, paintStroke, sketchLine, writeOnLine, setObjectProp, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, pathDragTarget, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestClasses, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, settleMorph, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphRunning, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
 import { addUserObject, requestSavePreset } from '../project/userPresets'
 import { makeMover, outlineOf, resetMover, walk, type Mover, type Polygon, type Pushing } from '../preview/collide'
 import { SceneRenderer, type ControlHandle, type Frame, type GuideLine, type Handle } from '../preview/SceneRenderer'
@@ -420,6 +421,8 @@ export function PreviewPane() {
   const showPaths = useStore((s) => s.showPaths)
   const setPathMode = useStore((s) => s.setPathMode)
   const toggleShowPaths = useStore((s) => s.toggleShowPaths)
+  const showMasks = useStore((s) => s.showMasks)
+  const toggleShowMasks = useStore((s) => s.toggleShowMasks)
   const setAddKind = useStore((s) => s.setAddKind)
   const setTransformMode = useStore((s) => s.setTransformMode)
   const setPreviewSnap = useStore((s) => s.setPreviewSnap)
@@ -436,6 +439,8 @@ export function PreviewPane() {
     const viewport = new Viewport(canvas)
     const renderer = new SceneRenderer()
     viewport.content.add(renderer.group)
+    // The masks' pictures are drawn through the view's camera before each drawing (D337).
+    viewport.beforeRender = (gl, camera) => renderer.renderMasks(gl, camera)
     viewportRef.current = viewport
     rendererRef.current = renderer
     if (import.meta.env.DEV) Object.assign((window as unknown as { __quickAnimator?: object }).__quickAnimator ?? {}, { getRenderer: () => renderer })
@@ -444,6 +449,7 @@ export function PreviewPane() {
       const s = useStore.getState()
       // While Shift looks ahead, whatever was alive where the gesture began stays drawn (D138).
       // The selection shows in every tool but the Shape tool, whose handles show it; the box's handles belong to Select alone (D208, D236, D247).
+      renderer.setView({ hidden: s.hidden, held: s.selection, showMasks: s.showMasks })
       renderer.update(s.model, s.time, s.tool === 'shape' ? [] : s.selection, s.transformMode, 1 / viewport.zoom, axesRef.current, gestureRef.current?.restore, s.anchored, s.tool === 'select')
       // The selected path, or the first path of the selected object, shows its shape; with the path itself selected and its points written out, each point wears a handle (D192, D194).
       // Which paths show (D205, D209): with the Path tool, every object's, but for those hidden for now; otherwise the selected object's when Paths is on; and the selected path always. The selected path carries the handles.
@@ -674,6 +680,7 @@ export function PreviewPane() {
       observer.disconnect()
       delete dropTargets.preview
       delete dropTargets.previewCenter
+      renderer.dispose()
       viewport.dispose()
       viewportRef.current = null
       rendererRef.current = null
@@ -1581,12 +1588,15 @@ export function PreviewPane() {
           draggedPolys.push(outlineFor(o, f, sweepOrigin))
           continue
         }
+        // A mask is not drawn: nothing snaps to it or runs into it (D334).
+        if (maskDrawnBy(model, o.name)) continue
         others.push({ name: o.name, box: toBox(f) })
         // What a push moves is written through the solver from where it shows now; what cannot be written is as good as anchored.
         if (!base.has(o.name)) base.set(o.name, baseValues(model, o, sampleTime))
         obstacles.push(makeMover(o.name, [outlineFor(o, f)], store.anchored.includes(o.name) || !o.decl, store.soft.includes(o.name)))
       }
-      movers = { dragged: makeMover(primary.name, draggedPolys, false, false), obstacles }
+      // Nor does a dragged mask run into anything.
+      if (![...dragged].every((n) => maskDrawnBy(model, n))) movers = { dragged: makeMover(primary.name, draggedPolys, false, false), obstacles }
     }
     const drag: Drag = {
       kind,
@@ -2167,6 +2177,8 @@ export function PreviewPane() {
           { label: 'Jump to code', run: () => jumpToObject(group.name) },
           { label: 'Rename', run: () => requestRename({ object: group.name }) },
           { label: 'Save preset', run: () => requestSavePreset({ object: group.name }) },
+          ...(maskMenuItems([group.name]).length > 0 ? [{ label: 'Mask', children: maskMenuItems([group.name]) }] : []),
+          ...hideMenuItems([group.name]),
           { label: 'Select', keyword: hit, run: () => s.select([hit]) },
           { label: 'Ungroup', keyword: group.name, run: () => ungroup(group.name) },
         ])
@@ -2188,6 +2200,10 @@ export function PreviewPane() {
         ...(pathSub.length > 0 ? [{ label: 'Path', children: pathSub }] : []),
         ...(many ? [] : [{ label: 'Save preset', run: () => requestSavePreset({ object: hit }) }]),
         { label: 'Classes', run: () => requestClasses(targets) },
+        // The mask items sit one level down, as the shape's and the path's do (D256, D333).
+        ...(maskMenuItems(targets).length > 0 ? [{ label: 'Mask', children: maskMenuItems(targets) }] : []),
+        // Hidden, a thing is out of the way in the view alone (D341); the panes bring it back.
+        ...hideMenuItems(targets),
         {
           label: 'Collision',
           children: [
@@ -2473,6 +2489,9 @@ export function PreviewPane() {
         {previewSnap.on && <NumberField label="Angle step, in degrees" value={previewSnap.angle} unit={'°'} onChange={(angle) => setPreviewSnap({ angle })} />}
         <button className={showPaths ? 'on' : ''} onClick={toggleShowPaths} title={showPaths ? "Showing the selected object's paths" : 'Showing a path only while it is selected'} aria-pressed={showPaths}>
           Show Paths
+        </button>
+        <button className={showMasks ? 'on' : ''} onClick={toggleShowMasks} title={showMasks ? 'Showing the edges of the masks on what is selected, or of every mask with nothing selected' : "Showing a mask's edge only while it is selected"} aria-pressed={showMasks}>
+          Show Masks
         </button>
         <button className={previewSnap.edges ? 'on' : ''} onClick={() => setPreviewSnap({ edges: !previewSnap.edges })} title={previewSnap.edges ? 'Aligning to edges and centers' : 'Not aligning to other objects'} aria-pressed={previewSnap.edges}>
           Edges

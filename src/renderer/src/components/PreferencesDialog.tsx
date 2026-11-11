@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { updateSettings } from '../project/controller'
 import { roundSeconds } from '../project/operations'
 import { bindingsOf, conflictsOf, HOTKEYS, keyLabel, keyOf, NO_OVERRIDES, SCOPE_LABEL, SCOPES, type Hotkey } from '../state/hotkeys'
-import { DEFAULT_PREFS, RECENT_COLORS_MAX, useStore } from '../state/store'
+import { DEFAULT_PREFS, RECENT_COLORS_MAX, SECTION_LABEL, sectionOrder, TIMELINE_SECTIONS, useStore, type TimelineSection } from '../state/store'
 import { NumberField } from './NumberField'
 
 export function PreferencesDialogLayer() {
@@ -12,8 +12,9 @@ export function PreferencesDialogLayer() {
 }
 
 /**
- * The preferences (D145, D260): General, how long a new object lasts, an app setting, and how
- * long the final frame holds, a project setting written to project.json (D54); and Hotkeys,
+ * The preferences (D145, D260): General, how long a new object lasts, an app setting, how
+ * long the final frame holds, a project setting written to project.json (D54), whether Hide
+ * reaches exports (D349), and the order of the timeline's sections (D339); and Hotkeys,
  * every key the app answers to, each rebindable, with a warning when a key is already taken.
  */
 function PreferencesDialog() {
@@ -102,6 +103,13 @@ function GeneralTab() {
         <NumberField label="Seconds" value={hold} unit="s" min={0} step={0.1} onChange={(v) => updateSettings({ hold: roundSeconds(v) })} disabled={!project} />
         {!project && <span className="dim">Open a project first.</span>}
       </div>
+      <span className="dim">Hidden objects</span>
+      <div className="row">
+        <label className="check" title="What is hidden in the view is left out of exports too, and a hidden mask does not mask there">
+          <input type="checkbox" checked={prefs.hideInExport === true} onChange={(e) => setPrefs({ hideInExport: e.target.checked })} />
+          left out of exports
+        </label>
+      </div>
       <span className="dim">Code pane</span>
       <div className="row">
         <label className="check" title="Frames beside every time in the code">
@@ -120,6 +128,72 @@ function GeneralTab() {
           opacity on object clips
         </label>
       </div>
+      <span className="dim top">Timeline sections</span>
+      <SectionOrder />
+    </div>
+  )
+}
+
+/** The order of the timeline's sections, top first (D339): a row dragged up or down, or moved with the arrow keys, takes its new place at once. */
+function SectionOrder() {
+  const saved = useStore((s) => s.prefs.timelineOrder)
+  const setPrefs = useStore((s) => s.setPrefs)
+  const order = sectionOrder(saved)
+  const [dragging, setDragging] = useState<TimelineSection | null>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const place = (key: TimelineSection, index: number) => {
+    const current = sectionOrder(useStore.getState().prefs.timelineOrder)
+    const next = current.filter((k) => k !== key)
+    next.splice(Math.max(0, Math.min(next.length, index)), 0, key)
+    if (next.join() !== current.join()) setPrefs({ timelineOrder: next })
+  }
+  const begin = (key: TimelineSection) => (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.currentTarget.focus()
+    setDragging(key)
+    const onMove = (ev: PointerEvent) => {
+      // The row sits where the pointer is: before the first other row whose middle is under the pointer.
+      const rows = [...(listRef.current?.querySelectorAll<HTMLElement>('[data-section]') ?? [])].filter((el) => el.dataset['section'] !== key)
+      let index = rows.length
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i]!.getBoundingClientRect()
+        if (ev.clientY < r.top + r.height / 2) {
+          index = i
+          break
+        }
+      }
+      place(key, index)
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      setDragging(null)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+  const onKey = (key: TimelineSection) => (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+    e.preventDefault()
+    e.stopPropagation()
+    place(key, order.indexOf(key) + (e.key === 'ArrowUp' ? -1 : 1))
+  }
+  return (
+    <div className="row">
+      <div className="section-order" ref={listRef} title="Top first: drag a row, or move it with the arrow keys">
+        {order.map((key) => (
+          <div key={key} className={`section-order-row${dragging === key ? ' dragging' : ''}`} data-section={key} tabIndex={0} onPointerDown={begin(key)} onKeyDown={onKey(key)}>
+            <span className="grip" aria-hidden="true" />
+            {SECTION_LABEL[key]}
+          </div>
+        ))}
+      </div>
+      {order.join() !== TIMELINE_SECTIONS.join() && (
+        <button className="small" onClick={() => setPrefs({ timelineOrder: undefined })} title="Back to Objects, Groups, Classes, Masks">
+          Reset
+        </button>
+      )}
     </div>
   )
 }

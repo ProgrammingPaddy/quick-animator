@@ -1,10 +1,12 @@
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { showMenu } from '../components/ContextMenu'
+import { Eye } from '../components/KindIcon'
 import { LinkIcon } from '../components/LinkIcon'
 import { NumberField } from '../components/NumberField'
 import { ScrollBar } from '../components/ScrollBar'
 import { beginGesture, endGesture } from '../code/editor'
 import { actionIdents, activeMembers, classActionIdents, classKey, classSpan, classStandIn, classTree, groupMembers, overrideOf, type ClassNode } from '../model/groups'
+import { maskFor } from '../model/masks'
 import { attrSchema, GROUP, labelOn, PIVOT_PARAMS, VERB_ATTRS, VERB_COLORS, VERBS } from '../model/registry'
 import { actionLinks, classActionLinks, dependentsByTarget, objectLinks, targetKey, type LinkInfo } from '../model/links'
 import { containers, opacityAt, tailOf, TIME_TOLERANCE, unitShareAt, unitSpans, valueAt, visibleShareAt, writtenSpan } from '../model/sample'
@@ -58,13 +60,15 @@ import {
   placeObjects,
   setLifetime,
   easeMenuItems,
+  hiddenInView,
+  hideMenuItems,
   mergeActions,
   mergeable,
   type LifetimeOrigin,
 } from '../project/operations'
 import { requestSavePreset } from '../project/userPresets'
 import { dropTargets } from '../state/dropTargets'
-import { isActionSelected, OBJECT_KINDS, useStore, type ActionRef } from '../state/store'
+import { isActionSelected, OBJECT_KINDS, sectionOrder, useStore, type ActionRef, type TimelineSection } from '../state/store'
 import { formatTime, snapToFrame, timecode } from '../state/time'
 
 /** Zoom limits in pixels per second. At the top, single frames at 60 fps sit about 65 px apart. */
@@ -342,6 +346,8 @@ function MarkerInput({ initial, placeholder, onDone }: { initial: string; placeh
 export function TimelinePane() {
   const playing = useStore((s) => s.playing)
   const clipOpacity = useStore((s) => s.prefs.clipOpacity !== false)
+  const timelineOrder = useStore((s) => s.prefs.timelineOrder)
+  const hidden = useStore((s) => s.hidden)
   const loop = useStore((s) => s.loop)
   const snap = useStore((s) => s.snap)
   const openLinksDialog = useStore((s) => s.openLinksDialog)
@@ -920,7 +926,7 @@ export function TimelinePane() {
   const levelDrop = (clipEl: HTMLElement, middleY: number): { target: { before: string } | { after: string }; satisfied: boolean } | null => {
     const m = useStore.getState().model
     const lane = clipEl.closest<HTMLElement>('.tl-row.lane')
-    if (!m || !lane) return null
+    if (!m || !lane || lane.dataset['lane'] === 'masks') return null
     const name = clipEl.dataset['object']
     if (!name) return null
     const start = Number(clipEl.dataset['start'])
@@ -1202,6 +1208,8 @@ export function TimelinePane() {
             ...(obj.until !== null ? [{ label: 'No end', run: () => setLifetime(obj.name, { until: null }) }] : []),
             { label: 'Links', run: () => openLinksDialog({ object: obj.name }) },
           ]),
+      // Hidden in the view alone (D341): its clip stays, grayed, with the eye that shows it again.
+      ...hideMenuItems(s.selection.length > 1 && s.selection.includes(obj.name) ? s.selection : [obj.name]),
       { label: 'Duplicate', run: () => duplicateObjects([obj.name]) },
       ...(!editableObject ? [] : [{ label: 'Save preset', run: () => requestSavePreset({ object: obj.name }) }]),
       isGroup ? { label: 'Ungroup', run: () => ungroup(obj.name), danger: true } : { label: 'Delete', run: () => deleteObjects([obj.name]), danger: true },
@@ -1541,10 +1549,11 @@ export function TimelinePane() {
     const openEnded = obj.until === null && !isGroup
     const title = `${obj.name}  ${timecode(start, fps)} to ${openEnded ? 'the end' : timecode(end, fps)}`
     const dragging = clipDrag?.name === obj.name
+    const isHidden = hiddenInView(model, hidden, obj)
     return (
       <div
         key={obj.name}
-        className={`oclip${selected ? ' selected' : ''}${isGroup ? ' group' : ''}${locked ? ' locked' : ''}${isCollapsed ? ' collapsed' : ''}${dragging ? ' dragging' : ''}`}
+        className={`oclip${selected ? ' selected' : ''}${isGroup ? ' group' : ''}${locked ? ' locked' : ''}${isCollapsed ? ' collapsed' : ''}${dragging ? ' dragging' : ''}${isHidden ? ' is-hidden' : ''}`}
         style={{ left, top: dragging ? clipDrag!.top : top, width: clipWidth, height: clipHeight(obj, start, end, isCollapsed) }}
         data-object={obj.name}
         data-start={start}
@@ -1566,6 +1575,20 @@ export function TimelinePane() {
           >
             {isCollapsed ? '▸' : '▾'}
           </button>
+          {isHidden && (
+            <button
+              className="oclip-eye"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                useStore.getState().setHidden([obj.name, ...containers(model, obj).map((g) => g.name)], false)
+              }}
+              title="Hidden in the view: show"
+              aria-label="Show"
+            >
+              <Eye off />
+            </button>
+          )}
           <span className="name">{obj.name}</span>
           <span className="kind">{obj.className}</span>
           {isGroup && <span className="kind members">{(model.groups.get(obj.name) ?? []).join(' · ')}</span>}
@@ -1612,8 +1635,8 @@ export function TimelinePane() {
   }
 
   /**
-   * The objects view (D139, D152, D164): the Objects, Groups, and Classes lanes, like the tracks
-   * of a video editor. Within a lane the clips stack by drawing order, not by time: a clip sits
+   * The objects view (D139, D152, D164, D339): the Objects, Groups, Classes, and Masks lanes, like the
+   * tracks of a video editor, in the order the preferences give. Within a lane the clips stack by drawing order, not by time: a clip sits
    * above whatever it overlaps in time and was declared after, so whatever is higher up appears
    * on top, and clips that never share a moment can share a level. Drag a clip's title up or down
    * to change that order, sideways to move it in time.
@@ -1650,7 +1673,7 @@ export function TimelinePane() {
       const isCollapsed = !!collapsed[key]
       return { key, start, end, collapsed: isCollapsed, height: classClipHeight(node, start, end, isCollapsed), render: (top) => renderClassClip(node, start, end, isCollapsed, top) }
     }
-    const lane = (key: 'objects' | 'groups' | 'classes', label: string, hint: string, items: LaneItem[]) => {
+    const lane = (key: TimelineSection, label: string, hint: string, items: LaneItem[], empty?: string) => {
       // A clip's level: one above the highest of the earlier clips it overlaps in time, else the bottom.
       const level = new Map<string, number>()
       for (const item of items) {
@@ -1693,20 +1716,26 @@ export function TimelinePane() {
             {ticks.map((t) => (
               <div key={t} className="grid-line" style={{ left: xAt(t) }} />
             ))}
+            {empty && items.length === 0 && <span className="lane-empty">{empty}</span>}
             {items.map((item) => item.render(tops[level.get(item.key)!]!))}
           </div>
         </div>
       )
     }
     const flat = (nodes: ClassNode[]): ClassNode[] => nodes.flatMap((n) => [n, ...flat(n.children)])
-    const objects = model.objects.filter((o) => o.className !== GROUP).map(objectItem)
-    const groups = model.objects.filter((o) => o.className === GROUP).map(objectItem)
+    // A mask, and the objects that are one mask's picture, have a section of their own (D339).
+    const isMask = (o: SceneObject): boolean => !!maskFor(model, o.name)
+    const objects = model.objects.filter((o) => o.className !== GROUP && !isMask(o)).map(objectItem)
+    const groups = model.objects.filter((o) => o.className === GROUP && !isMask(o)).map(objectItem)
+    const masks = model.objects.filter(isMask).map(objectItem)
     const classNodes = tree ? flat(tree.roots) : []
-    return [
-      lane('objects', 'Objects', 'Stacked by drawing order, highest on top', objects),
-      ...(groups.length > 0 ? [lane('groups', 'Groups', 'Every group, spanning its members, with its own animations and opacity inside. Its moves also show inside its members, labelled with its name.', groups)] : []),
-      ...(classNodes.length > 0 ? [lane('classes', 'Classes', "Every class, spanning its members, with the animations written on all('name') inside: they run on every member, and show dashed inside each member's clip.", classNodes.map(classItem))] : []),
-    ]
+    const sections: Record<TimelineSection, ReactNode> = {
+      objects: lane('objects', 'Objects', 'Stacked by drawing order, highest on top', objects, model.objects.length === 0 ? 'No objects yet' : undefined),
+      groups: groups.length > 0 ? lane('groups', 'Groups', 'Every group, spanning its members, with its own animations and opacity inside. Its moves also show inside its members, labelled with its name.', groups) : null,
+      classes: classNodes.length > 0 ? lane('classes', 'Classes', "Every class, spanning its members, with the animations written on all('name') inside: they run on every member, and show dashed inside each member's clip.", classNodes.map(classItem)) : null,
+      masks: masks.length > 0 ? lane('masks', 'Masks', 'Every mask: what it lists shows only where it is, while it exists.', masks) : null,
+    }
+    return sectionOrder(timelineOrder).map((key) => sections[key])
   }
 
   return (
@@ -1874,7 +1903,6 @@ export function TimelinePane() {
         </div>
         <div className="tl-body" ref={bodyRef}>
           <div className={`tl-rows${razor ? ' razor' : ''}`} ref={rowsRef} onPointerDown={beginMarquee} onContextMenu={blankMenu} onPointerMove={razor ? (e) => setSnapLine(snappedAt(e.clientX)) : undefined} onPointerLeave={razor ? () => setSnapLine(null) : undefined}>
-            {model && model.objects.length === 0 && <div className="empty">No objects yet.</div>}
             {renderObjectsView()}
             <div className="tl-playhead-layer" aria-hidden="true">
               {model?.markers.map((m, i) => (

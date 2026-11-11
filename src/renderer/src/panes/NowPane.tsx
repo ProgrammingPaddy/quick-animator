@@ -7,7 +7,8 @@ import { FontField } from '../components/FontField'
 import { LinkIcon } from '../components/LinkIcon'
 import { actionLinks, objectLinks } from '../model/links'
 import { hasPathData, parsePathData, pathAnchors } from '../model/pathData'
-import { EASE_NAMES, GROUP, PIVOT_PARAMS, schemaOf, type AttrSchema, type AttrType, type AttrValue } from '../model/registry'
+import { maskNamed } from '../model/masks'
+import { EASE_NAMES, GROUP, MASK_ATTRS, PIVOT_PARAMS, schemaOf, type AttrSchema, type AttrType, type AttrValue } from '../model/registry'
 import { basePivot, definingAction, isVisibleAt, pathCurves, pathShape, shownValue, valueAt, withWritten, writesFrom } from '../model/sample'
 import { DEFAULT_STAGGER, UNIT_KINDS } from '../model/text'
 import type { Action, SceneModel, SceneObject } from '../model/types'
@@ -29,7 +30,7 @@ const RANGES: Record<string, { min: number; max: number; step: number }> = {
 }
 
 /** Attributes that hold lists of names, never code (D183). */
-const NAME_LISTS = new Set(['class', 'members'])
+const NAME_LISTS = new Set(['class', 'members', 'masks'])
 
 function stepFor(attr: string): number {
   if (attr === 'scale' || attr === 'opacity') return 0.05
@@ -354,7 +355,8 @@ export function NowPane() {
   if (!model || !obj || !schema) {
     return <div className="empty">{selection.length === 0 ? 'Nothing selected.' : 'Nothing to show.'}</div>
   }
-  return <ObjectView model={model} obj={obj} attrs={schema.attrs.filter((a) => !a.hidden)} time={time} editable={editable} openLinks={(key) => openLinksDialog({ object: obj.name, key })} />
+  const isMask = !!maskNamed(model, obj.name)
+  return <ObjectView model={model} obj={obj} attrs={schema.attrs.filter((a) => !a.hidden && (isMask || !MASK_ATTRS.has(a.name)))} time={time} editable={editable} openLinks={(key) => openLinksDialog({ object: obj.name, key })} />
 }
 
 /**
@@ -364,6 +366,7 @@ export function NowPane() {
  */
 function ObjectView({ model, obj, attrs, time, editable, openLinks, make }: { model: SceneModel; obj: SceneObject; attrs: AttrSchema[]; time: number; editable: boolean; openLinks: (key: string) => void; make?: () => string | null }) {
   const visible = make ? true : isVisibleAt(model, obj, time)
+  const isMask = !make && !!maskNamed(model, obj.name)
   const links = objectLinks(obj)
   const locked = !editable || obj.codeDriven || (!obj.decl && !make)
   const fps = useStore((s) => s.settings.fps)
@@ -382,8 +385,9 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks, make }: { mo
       <div className="now-head">
         <span className="name">{obj.name}</span>
         <span className="dim">{obj.className}</span>
+        {isMask && <span className="badge mask">mask</span>}
         <span className={`dim ${visible ? '' : 'hidden-now'}`} title={make ? 'Not made yet: a value or a key makes it' : undefined}>
-          {make ? String(obj.attrs['members'] ?? '').split(/\s+/).filter(Boolean).join(' · ') : visible ? 'visible' : time < obj.at ? `does not exist until ${obj.at} s` : obj.until !== null && time >= obj.until ? `does not exist after ${obj.until} s` : 'not visible: opacity is 0'}
+          {make ? String(obj.attrs['members'] ?? '').split(/\s+/).filter(Boolean).join(' · ') : visible ? (isMask ? '' : 'visible') : time < obj.at ? `does not exist until ${obj.at} s` : obj.until !== null && time >= obj.until ? `does not exist after ${obj.until} s` : isMask ? 'hides all: opacity is 0' : 'not visible: opacity is 0'}
         </span>
         {obj.codeDriven && <span className="badge">code</span>}
       </div>
@@ -427,7 +431,7 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks, make }: { mo
                 setAttrsAt(name, { [attr.name]: typeof shown === 'number' ? shown : next }, time)
               }
               else if (defining?.stmt && !defining.classAction && next !== null) setActionProp({ object: name, index: obj.actions.indexOf(defining) }, attr.name, next)
-              else setObjectProp(name, attr.name, next === '' && NAME_LISTS.has(attr.name) ? null : next)
+              else setObjectProp(name, attr.name, (next === '' && NAME_LISTS.has(attr.name)) || (next === false && attr.name === 'inverted') ? null : next)
             }
             const writeCode = (text: string) => {
               const name = target()
@@ -520,12 +524,13 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks, make }: { mo
   )
 }
 
-/** The pane's sections for an object's values (D330): when it exists, where it is, how big, its colors, its lists, then what its class adds. */
+/** The pane's sections for an object's values (D330, D346): when it exists, where it is, how big, its colors, a mask's own, its lists, then what its class adds. */
 const SECTIONS: [string, string[]][] = [
-  ['Life', ['at', 'until']],
+  ['Lifetime', ['at', 'until']],
   ['Position', ['x', 'y', 'z', 'rotation', 'pivotX', 'pivotY']],
   ['Size', ['width', 'height', 'radius', 'scale', 'fontSize']],
   ['Color', ['fill', 'stroke', 'strokeWidth', 'fillOpacity', 'strokeOpacity', 'opacity']],
+  ['Mask', ['masks', 'inverted']],
   ['Classes', ['class', 'members']],
 ]
 

@@ -4,6 +4,7 @@ import { appendStatement, blockText, formatNumber, formatValue, insertDeclaratio
 import { DEFAULT_EASE_FRACTION, namedEasings } from '../model/easing'
 import { isMember } from '../model/evaluate'
 import { activeMembers, groupMembers, memberRef, normalizeSelection } from '../model/groups'
+import { isMaskList, MASK_BELOW, maskDrawnBy, maskFor, maskNamed, maskWord, scopeRenamed, scopeWith } from '../model/masks'
 import { attrSchema, classes, EASE_NAMES, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
 import { absoluteAt, actionCourse, anchorTime, memberBox, pathCutAt, pathFrame, pathHolds, pathShift, pointsCenter, positionAt, progressAt, rawFromWorld, morphInForce, morphRunning, morphTargetSegs, shapeCurves, shapeOwnFromWorld, shapeOwnPoints, shapeSegsAt, travelFrame, type Point, type ShapePiece } from '../model/sample'
 import { anchorCurved, anchorKind, closePath, cornerAnchors, curveSegment, dragAnchorHandle, ellipsePathData, flattenPathData, formatCurves, hasPathData, moveAnchor, openPath, parsePathData, pathAnchors, pathDataBounds, polygonPathData, removeAnchor, scalePathData, segmentKind, serializePathData, smoothAnchors, smoothPathData, splitSegment, straightenAll, straightenAnchors, straightenSegment, translatePathData, type Anchor, type AnchorKind, type Seg } from '../model/pathData'
@@ -11,8 +12,8 @@ import { insertPointsEdit, pointText, removePointEdit, setPointEdit, shapeLitera
 import { readSvg, scaleImported, type ImportedItem } from './svgImport'
 import { identifierEdits, nameProblem, renameMembers, replaceIdentifiers } from '../model/rename'
 import { currentWritten, definingAction, shownValue, valueAt, withWritten, writesFrom, writtenValues } from '../model/sample'
-import { begun, journeyOf, unitTurns, writtenSpan } from '../model/sample'
-import type { Action, ActionInfo, BlockInfo, ClassAction, PropInfo, Range, SceneModel, SceneObject } from '../model/types'
+import { begun, containers, journeyOf, ownBounds, unitTurns, worldPose, writtenSpan } from '../model/sample'
+import type { Action, ActionInfo, BlockInfo, ClassAction, Mask, PropInfo, Range, SceneModel, SceneObject } from '../model/types'
 import { useStore, type ActionRef, type Clip, type ClipAction, type ClipObject, type MenuItem, type Pin, type SelectionState, type ObjectKind } from '../state/store'
 
 /**
@@ -138,6 +139,9 @@ export function addObject(className: ObjectKind, x: number, y: number, at = stat
   if (!model) return null
   const name = uniqueName(className.toLowerCase())
   const attrs: Record<string, AttrValue> = { x: Math.round(x), y: Math.round(y) }
+  // A Mask is a rectangle half the frame across that masks every layer beneath it (D331): added last, it is the top layer.
+  const settings = useStore.getState().settings
+  if (className === 'Mask') Object.assign(attrs, { width: Math.round(settings.width / 2), height: Math.round(settings.height / 2), masks: MASK_BELOW })
   if (className === 'Rect') Object.assign(attrs, { width: 240, height: 140, fill: '#4f8cff' })
   if (className === 'Circle') Object.assign(attrs, { radius: 60, fill: '#f59e0b' })
   if (className === 'Text') Object.assign(attrs, { text: 'Text', fontSize: 48, fill: '#ffffff' })
@@ -147,7 +151,7 @@ export function addObject(className: ObjectKind, x: number, y: number, at = stat
   if (at > 0) attrs['at'] = roundSeconds(at)
   const length = useStore.getState().prefs.objectLength
   if (length !== null) attrs['until'] = roundSeconds(at + length)
-  applyEdits([insertDeclaration(model.lastDeclEnd, blockText(`${name} = ${className}`, attrs))], objectsSelected([name]))
+  applyEdits([insertDeclaration(model.lastDeclEnd, blockText(`${name} = ${className === 'Mask' ? 'Rect' : className}`, attrs))], objectsSelected([name]))
   // A Shape's points stay folded until wanted (D204, D244).
   if (className === SHAPE) foldShapes()
   return name
@@ -2921,6 +2925,9 @@ function confirmRemoval(title: string, dependents: Dependent[], run: () => void)
 export function deleteObjects(names: string[], confirmed = false): void {
   const { source, model } = state()
   if (!model) return
+  // A mask made of several objects goes with them: they are its picture and nothing else (D336).
+  const maskGroups = names.filter((n) => model.groups.has(n) && maskNamed(model, n))
+  if (maskGroups.length > 0) return deleteObjects([...new Set([...names.filter((n) => !maskGroups.includes(n)), ...maskGroups.flatMap((g) => groupMembers(model, g))])], confirmed)
   // A group has no body of its own: deleting it takes it apart and keeps its members (D124).
   const groups = names.filter((n) => model.objects.some((o) => o.name === n && o.className === GROUP))
   if (groups.length > 0) {
@@ -2957,6 +2964,8 @@ export function deleteObjects(names: string[], confirmed = false): void {
         for (const action of group.actions) if (action.stmt && !action.classAction) ranges.push(action.stmt.range)
       }
     }
+    // And the lists of the masks that named them (D333).
+    lists.push(...scopeEdits(source, model, Object.fromEntries(objects.map((o) => [o.name, null])), [...objects, ...model.objects.filter((o) => o.decl && ranges.includes(o.decl.range))]))
     applyEdits([...removeStatements(source, ranges), ...resolutionEdits(model, source, dependents), ...lists], objectsSelected([]))
   }
   if (confirmed) run()
@@ -3280,6 +3289,8 @@ function applyRename(target: RenameTarget, newName: string): void {
       const list = memberNames(group)
       if (list.includes(obj.name)) edits.push(setProp(source, group.decl, 'members', list.map((n) => (n === obj.name ? newName : n)).join(' ')))
     }
+    // So do the masks, in theirs (D333).
+    edits.push(...scopeEdits(source, model, { [obj.name]: newName }))
     applyEdits(edits, objectsSelected([newName]))
     return
   }
@@ -3382,6 +3393,211 @@ export function ungroup(name: string, confirmed = false): void {
       danger: true,
       onConfirm: run,
     })
+}
+
+/** A mask's list as its declaration writes it, when that is a plain string the GUI can rewrite; else null, as for a thing that is no mask (D345). */
+function writtenScope(owner: SceneObject): string | null {
+  const written = owner.attrs['masks']
+  return owner.decl && isMaskList(written) && owner.decl.props.find((p) => p.key === 'masks')?.kind === 'literal' ? written : null
+}
+
+/** Every mask's list with names changed, or dropped where the new name is null, as edits: a list is a string, which renaming identifiers does not reach. */
+function scopeEdits(source: string, model: SceneModel, renames: Readonly<Record<string, string | null>>, skip: readonly SceneObject[] = []): TextEdit[] {
+  const edits: TextEdit[] = []
+  for (const owner of model.objects) {
+    if (skip.includes(owner)) continue
+    const written = writtenScope(owner)
+    if (written === null) continue
+    const next = scopeRenamed(written, renames)
+    if (next !== written) edits.push(setProp(source, owner.decl!, 'masks', next))
+  }
+  return edits
+}
+
+/** Whether the GUI can rewrite a mask's list: it is written as a plain string in a declaration the GUI edits. */
+export function maskListEditable(name: string): boolean {
+  const owner = findObject(name)
+  return !!owner && !owner.codeDriven && writtenScope(owner) !== null && canEdit()
+}
+
+/** The upright box around objects as they are drawn at a time, each at its own beginning when it is not there then; null when there is nothing to go around. */
+function boxAround(model: SceneModel, objects: SceneObject[], time: number): { x: number; y: number; width: number; height: number } | null {
+  let left = Infinity
+  let right = -Infinity
+  let bottom = Infinity
+  let top = -Infinity
+  for (const obj of objects) {
+    const when = time < obj.at || (obj.until !== null && time >= obj.until) ? obj.at : time
+    const pose = worldPose(model, obj, when)
+    const b = ownBounds(model, obj, when)
+    const a = (pose.rotation * Math.PI) / 180
+    const cos = Math.cos(a)
+    const sin = Math.sin(a)
+    const x = pose.x + pose.scale * (cos * b.x - sin * b.y)
+    const y = pose.y + pose.scale * (sin * b.x + cos * b.y)
+    const halfWidth = ((Math.abs(cos) * b.width + Math.abs(sin) * b.height) * Math.abs(pose.scale)) / 2
+    const halfHeight = ((Math.abs(sin) * b.width + Math.abs(cos) * b.height) * Math.abs(pose.scale)) / 2
+    left = Math.min(left, x - halfWidth)
+    right = Math.max(right, x + halfWidth)
+    bottom = Math.min(bottom, y - halfHeight)
+    top = Math.max(top, y + halfHeight)
+  }
+  if (!Number.isFinite(left)) return null
+  return { x: (left + right) / 2, y: (bottom + top) / 2, width: right - left, height: top - bottom }
+}
+
+/**
+ * A new mask for things (D333): a rectangle the size of the box around them, that masks them
+ * alone, lasts as long as they do, and sits just over the highest of them in the layers; so
+ * nothing changes until it is moved or shaped. `listed` is what the list says when that is not
+ * the things themselves: a class, by its name. Returns its name.
+ */
+export function addMaskFor(names: string[], listed?: string[]): string | null {
+  const { model, time } = state()
+  if (!model) return null
+  const things = normalizeSelection(model, names.filter((n) => model.objects.some((o) => o.name === n && o.decl))).filter((n) => !maskFor(model, n))
+  const leaves = [...new Set(things.flatMap((n) => (model.groups.has(n) ? groupMembers(model, n) : [n])))].map((n) => model.objects.find((o) => o.name === n)).filter((o): o is SceneObject => !!o?.decl)
+  const box = boxAround(model, leaves, time)
+  if (!box) return null
+  const name = uniqueName('mask')
+  const attrs: Record<string, AttrValue> = { x: Math.round(box.x), y: Math.round(box.y), width: Math.max(1, Math.round(box.width)), height: Math.max(1, Math.round(box.height)), masks: (listed ?? things).join(' ') }
+  const at = Math.min(...leaves.map((o) => o.at))
+  if (at > 0) attrs['at'] = roundSeconds(at)
+  if (leaves.every((o) => o.until !== null)) attrs['until'] = roundSeconds(Math.max(...leaves.map((o) => o.until!)))
+  const highest = leaves.reduce((a, b) => (b.id > a.id ? b : a))
+  applyEdits([{ from: highest.decl!.range.to, to: highest.decl!.range.to, insert: `\n\n${blockText(`${name} = Rect`, attrs)}` }], objectsSelected([name]))
+  return name
+}
+
+/**
+ * Turn things into a mask (D333, D336). One object, or one group, becomes a mask of every
+ * layer beneath it, where it is. Several become one mask: a group of them, just over the highest
+ * of them, with the list the highest of them had when any was a mask already, and what each
+ * masked on its own goes. Returns the mask's name.
+ */
+export function useAsMask(names: string[]): string | null {
+  const { source, model } = state()
+  if (!model) return null
+  const things = normalizeSelection(model, names.filter((n) => model.objects.some((o) => o.name === n && o.decl)))
+  const objects = things.map((n) => model.objects.find((o) => o.name === n)!).filter((o) => o.decl)
+  if (objects.length === 0) return null
+  if (objects.length === 1) {
+    const only = objects[0]!
+    if (!maskFor(model, only.name)) applyEdits([setProp(source, only.decl!, 'masks', MASK_BELOW)], objectsSelected([only.name]))
+    return maskFor(model, only.name)?.name ?? only.name
+  }
+  const name = uniqueName('mask')
+  const edits: TextEdit[] = []
+  let scope: string = MASK_BELOW
+  let inverted = false
+  for (const obj of [...objects].sort((a, b) => a.id - b.id)) {
+    const written = writtenScope(obj)
+    if (written === null) continue
+    scope = written
+    inverted = obj.attrs['inverted'] === true
+    for (const key of ['masks', 'inverted']) {
+      const edit = removeProp(source, obj.decl!, key)
+      if (edit) edits.push(edit)
+    }
+  }
+  // The list names none of what is now its own picture.
+  scope = scopeRenamed(scope, Object.fromEntries(things.map((n) => [n, null])))
+  const highest = objects.reduce((a, b) => (b.id > a.id ? b : a))
+  edits.push({ from: highest.decl!.range.to, to: highest.decl!.range.to, insert: `\n\n${blockText(`${name} = Group`, { members: things.join(' '), masks: scope, ...(inverted ? { inverted: true } : {}) })}` })
+  applyEdits(edits, objectsSelected([name]))
+  return name
+}
+
+/** Make a mask a plain object again, or a plain group (D333): it is drawn, and what it hid is whole. */
+export function releaseMask(name: string): void {
+  const { source, model } = state()
+  const mask = model ? maskFor(model, name) : null
+  const owner = mask ? model!.objects.find((o) => o.name === mask.name) : null
+  if (!owner?.decl) return
+  const edits = ['masks', 'inverted'].map((key) => removeProp(source, owner.decl!, key)).filter((e): e is TextEdit => !!e)
+  applyEdits(edits, objectsSelected([owner.name]))
+  // Drawn again, it is not left hidden from when it was a mask switched off.
+  useStore.getState().setHidden([owner.name], false)
+}
+
+/** Take things into a mask's list, or let them out of it (D333): objects, groups, or classes, by name. The selection stays. */
+export function setMasked(maskName: string, things: string[], on: boolean): void {
+  const { source, model } = state()
+  const mask = model ? maskNamed(model, maskName) : null
+  const owner = mask ? model!.objects.find((o) => o.name === mask.name) : null
+  const written = owner ? writtenScope(owner) : null
+  if (!model || !mask || !owner || written === null) return
+  const next = scopeWith(model, mask, written, things, on)
+  if (next !== written) applyEdits([setProp(source, owner.decl!, 'masks', next)])
+}
+
+/** Whether a mask hides all of what a name stands for, some of it, or none: an object, a group, or a class. */
+export function maskedShare(model: SceneModel, mask: Mask, thing: string): 'all' | 'some' | 'none' {
+  const owner = model.objects.find((o) => o.name === mask.name)
+  const names = (owner ? maskWord(model, owner, thing) : null)?.filter((n) => !maskDrawnBy(model, n)) ?? []
+  const hidden = names.filter((n) => mask.targets.includes(n)).length
+  return names.length > 0 && hidden === names.length ? 'all' : hidden > 0 ? 'some' : 'none'
+}
+
+/** Whether the view hides an object: itself, or a group that carries it (D341). */
+export function hiddenInView(model: SceneModel, hidden: readonly string[], obj: SceneObject): boolean {
+  return hidden.length > 0 && (hidden.includes(obj.name) || containers(model, obj).some((g) => hidden.includes(g.name)))
+}
+
+/** Hide in the view, or show again, what a right-click is on (D341): the view's alone, nothing written. */
+export function hideMenuItems(targets: string[]): MenuItem[] {
+  const names = targets.filter((n) => useStore.getState().model?.objects.some((o) => o.name === n))
+  if (names.length === 0) return []
+  const hidden = names.every((n) => useStore.getState().hidden.includes(n))
+  return [{ label: hidden ? 'Show' : 'Hide', run: () => useStore.getState().setHidden(names, !hidden) }]
+}
+
+/** The masks, each ticked where it hides all of what the names stand for, to take them in or let them out (D333). */
+function maskedByItems(model: SceneModel, masks: Mask[], names: string[]): MenuItem[] {
+  if (masks.length === 0) return []
+  return [
+    {
+      label: 'Masked by',
+      children: masks.map((m) => {
+        const shares = names.map((n) => maskedShare(model, m, n))
+        const all = shares.every((s) => s === 'all')
+        return { label: m.name, keyword: all ? '✓' : shares.some((s) => s !== 'none') ? '–' : undefined, run: () => setMasked(m.name, names, !all) }
+      }),
+    },
+  ]
+}
+
+/** What a right-click on a class offers about masks (D342): a new mask that lists the class, and the masks that hide it. */
+export function classMaskItems(className: string): MenuItem[] {
+  const { model } = state()
+  const members = model?.classes.get(className) ?? []
+  if (!model || members.length === 0) return []
+  return [{ label: 'Add mask', run: () => addMaskFor(members, [className]) }, ...maskedByItems(model, model.masks, [className])]
+}
+
+/**
+ * What a right-click offers about masks (D333). On a mask: inverted, and release. On anything
+ * else: a new mask for it, itself as a mask, and the masks that hide it, each ticked, to take it
+ * in or let it out.
+ */
+export function maskMenuItems(targets: string[]): MenuItem[] {
+  const { model } = state()
+  if (!model) return []
+  const names = targets.filter((n) => model.objects.some((o) => o.name === n && o.decl))
+  if (names.length === 0) return []
+  const own = names.length === 1 ? maskFor(model, names[0]!) : null
+  if (own) {
+    return [
+      { label: 'Inverted', keyword: own.inverted ? '✓' : undefined, run: () => setObjectProp(own.name, 'inverted', own.inverted ? null : true) },
+      { label: 'Release mask', run: () => releaseMask(own.name) },
+    ]
+  }
+  const masks = names.filter((n) => maskFor(model, n))
+  const items: MenuItem[] = []
+  if (masks.length === 0) items.push({ label: 'Add mask', run: () => addMaskFor(names) })
+  items.push({ label: masks.length === names.length ? 'Merge masks' : 'Use as mask', run: () => useAsMask(names) })
+  if (masks.length === 0) items.push(...maskedByItems(model, model.masks, names))
+  return items
 }
 
 /** Scroll the code pane to an object's declaration. */

@@ -44,6 +44,7 @@ const TOPICS: Topic[] = [
       ['Collide, Push', 'Dragged objects stop at the outlines of others and slide along them. Push shoves what a plain drag actually touches, and it stays shoved; an animation shoves what its straight line meets, and whatever that line no longer meets is let go. Right-click an object to anchor it, or to let drags pass through it.'],
       ['Select, Object, Path, Shape', 'The tools down the left; the top bar holds what the tool in hand can do. Select, the default, works on objects and on a selected path\'s points, with the transform modes. Object: pick a kind, then click to place one. Path: click an object to pick its path or start one, with Edit and Move path as its modes. Shape: Create draws one, Edit works on its points. A tool stays on until clicked again, or Escape.'],
       ['Paths', 'Among the tools on the right: shows the selected object\'s paths without one being selected. The Path tool shows every path; right-click one to hide it for now.'],
+      ['Show Masks', 'Beside it: the edges of the masks on what is selected, or of every mask when nothing is. A selected mask shows its edge either way. What a mask hides is not picked where it is hidden, unless it is selected.'],
       ['Right-click', 'On an object: jump to code, rename, Shape (smooth, straighten, close or open a line, convert a Rect or a Circle), Path (edit, add, show), save as preset, classes, Collision (anchor, passthrough), duplicate, delete. On empty space: Add.'],
       ['100%, Fit', 'Actual size; fit the frame.'],
     ],
@@ -65,7 +66,7 @@ const TOPICS: Topic[] = [
   {
     title: 'Timeline',
     entries: [
-      ['Lanes', 'Objects, Groups, and Classes. Each object is a clip from when it begins to when it is removed, its animations and opacity inside. Clips stack by drawing order: higher up draws on top.'],
+      ['Lanes', 'Objects, Groups, Classes, and Masks, in the order Preferences gives. Each object is a clip from when it begins to when it is removed, its animations and opacity inside. Clips stack by drawing order: higher up draws on top.'],
       ['Click a clip', 'Anywhere on it selects the object; a double-click also puts the playhead where the clip begins. Dragging it sideways moves the object in time, its animations with it; up or down changes the drawing order. The clip\'s edges trim when it begins and is removed, the animations staying where they are. An animation at the edge is above it: grab the edge on the title row or beside the animations. The arrow in its corner collapses it.'],
       ['Click an animation', 'Select it; a double-click also puts the playhead at its start. Drag it to retime it, its edges to change its length. Ctrl + click selects several; a drag then retimes them together.'],
       ['Razor', 'The blade beside Frames, or R. A click on an animation slices it there: the first piece goes to the state reached and holds it, the second continues from there, and the two run together as the whole did. One by character, word, or line is cut between its units; a class animation is cut for every member. A hold or a return is not cut; what is not cut says why. The pointer, or Escape, puts it away.'],
@@ -98,9 +99,12 @@ const TOPICS: Topic[] = [
   {
     title: 'Objects',
     entries: [
-      ['Search, Collapse all', 'Filter by name; fold every section and group.'],
-      ['Active', 'Only what exists at the playhead; with animations too, only the animations running at the playhead.'],
-      ['Rows', 'Click selects, Ctrl + click extends, double-click jumps to the code. Type sections and groups fold.'],
+      ['Search, Show All, Show Only Active', 'Filter by name. Show Only Active lists what is on screen at the playhead and, under it, the animations running then.'],
+      ['Layers, Type', 'Layers: every object once, in drawing order, top first; drag a row up or down to change that order. Type: by kind, then the groups, the classes with their members, and the masks.'],
+      ['Objects, Animations', 'Each folds or unfolds its kind with one press: the animations under their objects; by type, the objects under their headings.'],
+      ['Rows', 'Click selects, Ctrl + click extends, double-click jumps to the code; a click on empty space selects nothing. Types and groups fold.'],
+      ['The eye, Hide', 'Hides an object in the view, and shows it again: its clip stays in the timeline, grayed. A group hides what it carries; a hidden mask does not mask. Nothing is written, and an export shows everything unless Preferences leaves hidden objects out of exports.'],
+      ['Masks', 'A mask is a layer that is not drawn: what it lists shows only where it is. Add one as any object, or right-click, Mask: Add mask for the selection, or Use as mask; several things used as a mask become one mask. With a mask selected every row has a box at its head, ticked where the mask hides it; a group or a class has its box under Type. Its place in the layers decides what is beneath it.'],
       ['Chain marks', 'A mark says what a row\'s timing or value refers to; a yellow one, that something refers to it. Right-click for Edit links.'],
     ],
   },
