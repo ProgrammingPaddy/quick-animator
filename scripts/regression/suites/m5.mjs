@@ -100,8 +100,8 @@ return out`,
   SHOW1: `${base}${DOM}
 const out = {};
 const edges = () => { st.setState({}); return QA.getRenderer().maskEdgeCount() };
-const button = [...document.querySelectorAll('.preview-tools button')].find(b => b.textContent.trim() === 'Show Masks');
-const paths = [...document.querySelectorAll('.preview-tools button')].find(b => b.textContent.trim() === 'Show Paths');
+const button = [...document.querySelectorAll('.preview-options button')].find(b => b.textContent.trim() === 'Show Masks');
+const paths = [...document.querySelectorAll('.preview-options button')].find(b => b.textContent.trim() === 'Show Paths');
 out.button = { there: !!button, on: button.classList.contains('on'), besidePaths: paths.nextElementSibling === button };
 out.none = edges();
 S().select(['title']); await tick(150); out.maskedSelected = edges();

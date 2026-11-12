@@ -760,6 +760,11 @@ export class SceneRenderer {
   private readonly cameraFrames = new Map<string, Frame>()
   private liveCamera: string | null = null
   private readonly cameraLines: FrameLine[] = []
+  /** What was last asked to be drawn over the scene, kept so it can be laid out again in another view's pixels (D366): the selected path, the other paths, a Shape's handles, and the guides. */
+  private pathSpec: { points: { x: number; y: number }[] | null; anchors: { x: number; y: number }[] | null; active: number[]; dashed: boolean; handles: ControlHandle[]; round: boolean[] } = { points: null, anchors: null, active: [], dashed: false, handles: [], round: [] }
+  private otherSpec: { points: { x: number; y: number }[]; dashed: boolean }[] = []
+  private shapeSpec: { points: { x: number; y: number }[] | null; active: number[]; handles: ControlHandle[]; round: boolean[] } = { points: null, active: [], handles: [], round: [] }
+  private guideSpec: { lines: GuideLine[]; view: { left: number; right: number; top: number; bottom: number } } | null = null
   private readonly items = new Map<string, Item>()
   private readonly outlines: Outline[] = []
   private readonly gizmoOutline = new Outline()
@@ -861,11 +866,12 @@ export class SceneRenderer {
   }
 
   /**
-   * Draw the scene as last updated through a camera, with nothing of the gizmos (D360): what the
-   * Camera view shows, the masks' pictures made for it first.
+   * Draw the scene as last updated through a camera, the masks' pictures made for it first: what
+   * the Camera view shows (D360). With `overlay`, what is drawn for the one working on the scene
+   * shows too, as it was last laid out (D366); without, the scene alone.
    */
-  drawThrough(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
-    this.overlay.visible = false
+  drawThrough(renderer: THREE.WebGLRenderer, camera: THREE.Camera, overlay = false): void {
+    this.overlay.visible = overlay
     this.renderMasks(renderer, camera)
     renderer.render(this.group, camera)
     this.overlay.visible = true
@@ -1142,7 +1148,28 @@ export class SceneRenderer {
         this.cameraFrames.set(camera.name, { x: v.x, y: v.y, rotation: v.rotation, width: this.composition.width / v.zoom, height: this.composition.height / v.zoom })
       }
     }
-    const dashed = [...this.cameraFrames]
+    this.layout({ selection, mode, pixel, axes, anchored, handles, cameras: true }, false)
+  }
+
+  /**
+   * Lay out what is drawn over the scene for the one working on it, in a view's own pixels: the
+   * frames of the cameras, the marks of anchored things, the selection's outlines, and its
+   * handles. `update` does it for the view it is given; a second view of the same scene, the
+   * Camera view, has it laid out again before it is drawn or pressed (D366), the paths, a
+   * Shape's handles, and the guides with it. `cameras` says whether the cameras' frames show:
+   * they do in the Preview view, and the Camera view is the camera's own.
+   */
+  layout(o: { selection: string[]; mode: TransformMode; pixel: number; axes: number; anchored: string[]; handles: boolean; cameras: boolean }, again = true): void {
+    const { selection, mode, pixel, axes, anchored, handles } = o
+    const model = this.model
+    this.pixel = pixel
+    if (again) {
+      this.applyPath(pixel)
+      this.applyOtherPaths(pixel)
+      this.applyShapeHandles(pixel)
+      if (this.guideSpec) this.guides.set(this.guideSpec.lines, this.guideSpec.view, pixel)
+    }
+    const dashed = o.cameras ? [...this.cameraFrames] : []
     while (this.cameraLines.length < dashed.length) {
       const line = new FrameLine()
       this.overlay.add(line.group)
@@ -1238,12 +1265,19 @@ export class SceneRenderer {
 
   /** Show the lines a drag has snapped to, across the view (D135). They stay until cleared. */
   setGuides(lines: GuideLine[], view: { left: number; right: number; top: number; bottom: number }, pixel: number): void {
+    this.guideSpec = { lines, view }
     this.guides.set(lines, view, pixel)
   }
 
   /** Draw a path's curve as a line with its ends marked, with a handle on each anchor when they can be edited, the picked ones larger, or nothing (D192, D194, D198); dashed when its shape is code (D226). */
   setPath(points: { x: number; y: number }[] | null, pixel: number, anchors: { x: number; y: number }[] | null = null, active: number[] = [], dashed = false, handles: ControlHandle[] = [], round: boolean[] = []): void {
-    if (points) this.pathLine.set(points, pixel, anchors, active, dashed, handles, round)
+    this.pathSpec = { points, anchors, active, dashed, handles, round }
+    this.applyPath(pixel)
+  }
+
+  private applyPath(pixel: number): void {
+    const s = this.pathSpec
+    if (s.points) this.pathLine.set(s.points, pixel, s.anchors, s.active, s.dashed, s.handles, s.round)
     else this.pathLine.hide()
   }
 
@@ -1254,6 +1288,12 @@ export class SceneRenderer {
 
   /** The other paths shown, as lines without handles (D205), each dashed when its shape is code (D226). */
   setOtherPaths(curves: { points: { x: number; y: number }[]; dashed: boolean }[], pixel: number): void {
+    this.otherSpec = curves
+    this.applyOtherPaths(pixel)
+  }
+
+  private applyOtherPaths(pixel: number): void {
+    const curves = this.otherSpec
     while (this.otherLines.length < curves.length) {
       const line = new PathLine()
       this.overlay.add(line.group)
@@ -1268,7 +1308,13 @@ export class SceneRenderer {
 
   /** The points of the selected Shape as handles, the picked ones larger, with the controls of the picked anchors, or none (D233, D240). */
   setShapeHandles(points: { x: number; y: number }[] | null, pixel: number, active: number[] = [], handles: ControlHandle[] = [], round: boolean[] = []): void {
-    if (points && points.length > 0) this.shapeHandles.set(points, pixel, active, handles, round)
+    this.shapeSpec = { points, active, handles, round }
+    this.applyShapeHandles(pixel)
+  }
+
+  private applyShapeHandles(pixel: number): void {
+    const s = this.shapeSpec
+    if (s.points && s.points.length > 0) this.shapeHandles.set(s.points, pixel, s.active, s.handles, s.round)
     else this.shapeHandles.hide()
   }
 
@@ -1288,6 +1334,7 @@ export class SceneRenderer {
   }
 
   clearGuides(): void {
+    this.guideSpec = null
     this.guides.hide()
   }
 
@@ -1403,6 +1450,40 @@ export class SceneRenderer {
       if (this.model && maskDrawnBy(this.model, name)) continue
       const b = this.boxOf(name)
       if (b && b.left <= box.right && b.right >= box.left && b.bottom <= box.top && b.top >= box.bottom) names.push(name)
+    }
+    return names
+  }
+
+  /**
+   * The visible objects whose frames, as a view shows them, touch a box on the pane, for a box
+   * drawn in a view that may be turned, the Camera view's (D366): `toPane` is that view's own.
+   */
+  objectsOnPane(box: { left: number; right: number; top: number; bottom: number }, toPane: (x: number, y: number) => { x: number; y: number }): string[] {
+    const names: string[] = []
+    for (const name of this.items.keys()) {
+      if (this.model && maskDrawnBy(this.model, name)) continue
+      const f = this.frameOf(name)
+      if (!f) continue
+      const a = (f.rotation * Math.PI) / 180
+      const c = Math.cos(a)
+      const s = Math.sin(a)
+      let left = Infinity
+      let right = -Infinity
+      let top = Infinity
+      let bottom = -Infinity
+      for (const [lx, ly] of [
+        [-f.width / 2, -f.height / 2],
+        [f.width / 2, -f.height / 2],
+        [-f.width / 2, f.height / 2],
+        [f.width / 2, f.height / 2],
+      ]) {
+        const p = toPane(f.x + lx! * c - ly! * s, f.y + lx! * s + ly! * c)
+        left = Math.min(left, p.x)
+        right = Math.max(right, p.x)
+        top = Math.min(top, p.y)
+        bottom = Math.max(bottom, p.y)
+      }
+      if (left <= box.right && right >= box.left && top <= box.bottom && bottom >= box.top) names.push(name)
     }
     return names
   }

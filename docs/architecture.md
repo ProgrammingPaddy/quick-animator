@@ -210,6 +210,23 @@ the same way. To the gizmo a camera's frame is a frame like any object's, so a c
 an object's drags, its zoom standing where the size would; on the Camera view a drag is mapped the
 other way, the picture following the pointer.
 
+Working in the Camera view (D366). Both views are a `Surface` (`preview/Viewport.ts`): pane
+position to scene and back, a drag's distance in the scene, the pixel's size, the Three.js camera
+to pick through, and the frame's box. `Viewport` is the Preview view's and `CameraView`
+(`preview/CameraView.ts`) the Camera view's, which also owns its canvas and renderer. A press
+finds the surface it is on and the gesture keeps it, so the preview pane's drags, boxes, strokes,
+and menus are written once, against a surface, and work in either view. What is drawn for the one
+working on the scene is laid out per view: `SceneRenderer.update` builds the scene and ends in
+`layout`, which sizes and places the outlines, the handles, the paths, the shape points, and the
+guides for one view's pixel size; the pane calls `layout` again with the Camera view's before it
+draws that view, with the cameras' own frames left out, and once more for the view a press lands
+in, so the handles picked are the ones that view shows.
+
+Cuts (D365) are text edits like any other, in `project/operations.ts`: `addCamera` and
+`cutToCamera` write a camera declared last with the life the picture leaves it, and end the shot
+before it; `cutCamera` cuts a camera's clip in two, cutting the animations that cross the cut with
+the razor's own `sliceAction` and giving the later ones to the second camera.
+
 ## Time (D41)
 
 - Time in code is seconds. The timeline shows seconds and frames and snaps to frames.

@@ -135,7 +135,8 @@
       "Circle",
       "Text",
       "Shape",
-      "Mask"
+      "Mask",
+      "Camera"
      ]
     }
    ],
@@ -162,7 +163,8 @@
       "Circle",
       "Text",
       "Shape",
-      "Mask"
+      "Mask",
+      "Camera"
      ]
     }
    ],

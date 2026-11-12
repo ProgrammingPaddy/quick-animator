@@ -1,0 +1,755 @@
+{
+ "results": {
+  "WORK1": {
+   "clicked": [
+    "box"
+   ],
+   "dragged": [
+    "x: -150,",
+    "y: -100,"
+   ],
+   "resized": [
+    "x: -150,",
+    "y: -100,",
+    "width: 480,",
+    "height: 280,"
+   ],
+   "turned": [
+    "rotation: 90,"
+   ],
+   "boxed": [
+    "dot"
+   ],
+   "margin": true,
+   "pastTheEdge": [],
+   "placed": {
+    "name": "rect1",
+    "kind": "Rect",
+    "at": [
+     "x: -300,",
+     "y: 250,"
+    ]
+   },
+   "held": {
+    "landed": [
+     -200,
+     -100
+    ],
+    "written": [
+     "x: 175,",
+     "y: 166,"
+    ]
+   },
+   "lookAhead": 1,
+   "animated": {
+    "acts": [
+     [
+      "move",
+      0,
+      1,
+      {
+       "x": 300,
+       "y": -50
+      }
+     ]
+    ],
+    "time": 0
+   },
+   "error": null
+  },
+  "WORK2": {
+   "pencil": {
+    "name": "line1",
+    "kind": "Shape",
+    "frame": {
+     "x": 150,
+     "y": -100,
+     "w": 303,
+     "h": 3,
+     "rot": 0
+    }
+   },
+   "shape": {
+    "name": "shape1",
+    "kind": "Shape",
+    "frame": {
+     "x": -250,
+     "y": 350,
+     "w": 103,
+     "h": 103,
+     "rot": 0
+    }
+   },
+   "pathStarted": {
+    "path": [
+     "box.path({ shape: [ [-100, 100], [150, -220], ], at: 0, duration: 1, })"
+    ],
+    "selected": [
+     {
+      "object": "box",
+      "index": 0
+     }
+    ]
+   },
+   "pathEdited": [
+    "box.path({ shape: [ [-100, 100], [25, -30], [150, -160], [-300, -150], ], at: 0, duration: 1, })"
+   ],
+   "text": {
+    "offMiddle": [
+     0,
+     0
+    ],
+    "sizeAsShown": true,
+    "selected": [
+     "title"
+    ]
+   },
+   "error": null
+  },
+  "WHEEL1": {
+   "wheel": {
+    "zoom": 3,
+    "stillUnder": true,
+    "written": [
+     "x: 379,",
+     "y: 69,",
+     "zoom: 3,",
+     "rotation: 12,"
+    ],
+    "selection": [
+     "dot"
+    ],
+    "tool": "select"
+   },
+   "oneUndoForTheRun": true,
+   "shiftLeavesIt": true,
+   "middle": {
+    "asWanted": true,
+    "zoom": 1.5,
+    "selection": [
+     "dot"
+    ]
+   },
+   "made": {
+    "camera": "camera = Camera({\n  x: 0,\n  y: 0,\n  zoom: 2,\n})",
+    "selection": [
+     "camera"
+    ]
+   },
+   "madeUndone": true,
+   "error": null
+  },
+  "ADD1": {
+   "lane": [
+    "Add camera 0:05:00",
+    "Cut to 0:05:00"
+   ],
+   "added": {
+    "camera": "camera = Camera({\n  x: 600,\n  y: 0,\n  zoom: 1,\n  at: 5,\n})",
+    "selected": [
+     "camera"
+    ],
+    "time": 5,
+    "who": [
+     "wide",
+     "camera",
+     "camera"
+    ],
+    "declaredLast": "camera",
+    "baseEnds": null
+   },
+   "undone": [
+    "wide",
+    "close"
+   ],
+   "objectsLane": [
+    "Add 0:08:00"
+   ],
+   "objectsLaneAdd": [
+    "Rect",
+    "Circle",
+    "Text",
+    "Shape",
+    "Mask",
+    "Camera"
+   ],
+   "below": [
+    "Add 0:08:00"
+   ],
+   "belowAdd": [
+    "Rect",
+    "Circle",
+    "Text",
+    "Shape",
+    "Mask",
+    "Camera"
+   ],
+   "objectsPane": [
+    "Add"
+   ],
+   "objectsPaneAdd": [
+    "Rect",
+    "Circle",
+    "Text",
+    "Shape",
+    "Mask",
+    "Camera"
+   ],
+   "fromThePane": {
+    "camera": "camera = Camera({\n  x: 600,\n  y: 0,\n  zoom: 1,\n  at: 6,\n})",
+    "selected": [
+     "camera"
+    ],
+    "who": [
+     "wide",
+     "camera",
+     "camera"
+    ]
+   },
+   "preview": [
+    "Add"
+   ],
+   "previewAdd": [
+    "Rect",
+    "Circle",
+    "Text",
+    "Shape",
+    "Mask",
+    "Camera"
+   ],
+   "cameraView": [
+    "Add"
+   ],
+   "cameraViewAdd": [
+    "Rect",
+    "Circle",
+    "Text",
+    "Shape",
+    "Mask",
+    "Camera"
+   ],
+   "error": null
+  },
+  "CUT2": {
+   "add3": "camera",
+   "after3": {
+    "cams": [
+     [
+      "wide",
+      0,
+      null,
+      0,
+      0,
+      1
+     ],
+     [
+      "shotA",
+      6,
+      8,
+      -300,
+      100,
+      2
+     ],
+     [
+      "camera",
+      3,
+      6,
+      450,
+      0,
+      1
+     ]
+    ],
+    "who": [
+     "wide",
+     "camera",
+     "camera",
+     "shotA",
+     "shotA",
+     "wide",
+     "wide"
+    ]
+   },
+   "add45": "camera2",
+   "after45": {
+    "cams": [
+     [
+      "wide",
+      0,
+      null,
+      0,
+      0,
+      1
+     ],
+     [
+      "shotA",
+      6,
+      8,
+      -300,
+      100,
+      2
+     ],
+     [
+      "camera",
+      3,
+      4.5,
+      450,
+      0,
+      1
+     ],
+     [
+      "camera2",
+      4.5,
+      6,
+      450,
+      0,
+      1
+     ]
+    ],
+    "who": [
+     "camera",
+     "camera2",
+     "camera2",
+     "shotA"
+    ]
+   },
+   "toLater": "shotA2",
+   "afterLater": {
+    "cams": [
+     [
+      "wide",
+      0,
+      null,
+      0,
+      0,
+      1
+     ],
+     [
+      "shotA",
+      6,
+      8,
+      -300,
+      100,
+      2
+     ],
+     [
+      "camera",
+      3,
+      4.5,
+      450,
+      0,
+      1
+     ],
+     [
+      "camera2",
+      4.5,
+      5,
+      450,
+      0,
+      1
+     ],
+     [
+      "shotA2",
+      5,
+      6,
+      -300,
+      100,
+      2
+     ]
+    ],
+    "who": [
+     "camera2",
+     "shotA2",
+     "shotA2",
+     "shotA",
+     "wide"
+    ]
+   },
+   "toBottom": "wide",
+   "afterBottom": {
+    "cams": [
+     [
+      "wide",
+      0,
+      null,
+      0,
+      0,
+      1
+     ],
+     [
+      "shotA",
+      6,
+      8,
+      -300,
+      100,
+      2
+     ],
+     [
+      "camera",
+      3,
+      4.5,
+      450,
+      0,
+      1
+     ],
+     [
+      "camera2",
+      4.5,
+      5,
+      450,
+      0,
+      1
+     ],
+     [
+      "shotA2",
+      5,
+      5.5,
+      -300,
+      100,
+      2
+     ]
+    ],
+    "who": [
+     "shotA2",
+     "wide",
+     "wide",
+     "shotA",
+     "wide"
+    ],
+    "selected": [
+     "wide"
+    ]
+   },
+   "there": {
+    "result": null,
+    "notice": "A cut is there already.",
+    "same": true
+   },
+   "already": {
+    "result": null,
+    "notice": "wide has the picture there already.",
+    "same": true
+   },
+   "offered": {
+    "at5": [
+     "camera2",
+     "camera",
+     "shotA",
+     "wide"
+    ],
+    "at7": [
+     "shotA2",
+     "camera2",
+     "camera",
+     "wide"
+    ]
+   },
+   "laneAt6": [
+    "Add camera 0:06:00",
+    "Cut to 0:06:00"
+   ],
+   "laneCutTo": [
+    "close"
+   ],
+   "backToClose": {
+    "cams": [
+     [
+      "wide",
+      0,
+      null,
+      0,
+      0,
+      1
+     ],
+     [
+      "close",
+      2,
+      4,
+      -300,
+      100,
+      4
+     ],
+     [
+      "close2",
+      6,
+      null,
+      -300,
+      100,
+      2
+     ]
+    ],
+    "selected": [
+     "close2"
+    ],
+    "time": 6,
+    "who": [
+     "wide",
+     "close2",
+     "close2"
+    ],
+    "view": [
+     -300,
+     100,
+     2,
+     0
+    ]
+   },
+   "clipMenu": [
+    "Cut at 0:07:00",
+    "Cut to 0:07:00"
+   ],
+   "clipCutTo": [
+    "close",
+    "wide"
+   ],
+   "backToWide": {
+    "cams": [
+     [
+      "wide",
+      0,
+      null,
+      0,
+      0,
+      1
+     ],
+     [
+      "close",
+      2,
+      4,
+      -300,
+      100,
+      4
+     ],
+     [
+      "close2",
+      6,
+      7,
+      -300,
+      100,
+      2
+     ]
+    ],
+    "selected": [
+     "wide"
+    ],
+    "time": 7,
+    "who": [
+     "close2",
+     "wide",
+     "wide"
+    ]
+   },
+   "rows": {
+    "holder": [],
+    "other": [
+     "Cut to 0:06:30"
+    ],
+    "ended": [
+     "Cut to 0:06:30"
+    ]
+   },
+   "error": null
+  },
+  "RAZOR1": {
+   "cut": {
+    "cams": [
+     [
+      "wide",
+      0,
+      null,
+      0,
+      0,
+      1
+     ],
+     [
+      "shot",
+      2,
+      4,
+      0,
+      0,
+      1
+     ],
+     [
+      "shot2",
+      4,
+      8,
+      200,
+      0,
+      1
+     ]
+    ],
+    "moves": [
+     "shot.move({ x: 200, at: 3, duration: 1, ease: Ease.part('linear', 0, 0.5), })",
+     "shot2.move({ x: 400, at: 4, duration: 1, ease: Ease.part('linear', 0.5, 1), })"
+    ],
+    "zooms": [
+     "shot2.to({ zoom: 2, at: 6, duration: 1, ease: 'linear', })"
+    ],
+    "who": [
+     "shot",
+     "shot2",
+     "shot2",
+     "wide"
+    ],
+    "samePicture": true,
+    "selected": [
+     "shot2"
+    ],
+    "time": 4
+   },
+   "sideBySide": true,
+   "oneUndo": true,
+   "menu": [
+    "Cut at 0:02:00",
+    "Cut to 0:02:00"
+   ],
+   "bottom": {
+    "cams": [
+     [
+      "wide",
+      0,
+      2,
+      0,
+      0,
+      1
+     ],
+     [
+      "wide2",
+      2,
+      null,
+      300,
+      0,
+      1
+     ],
+     [
+      "shot",
+      2,
+      8,
+      0,
+      0,
+      1
+     ]
+    ],
+    "moves": [
+     "wide.move({ x: 300, at: 0, duration: 2, ease: Ease.part('linear', 0, 0.5), })",
+     "wide2.move({ x: 600, at: 2, duration: 2, ease: Ease.part('linear', 0.5, 1), })"
+    ],
+    "who": [
+     "wide",
+     "shot",
+     "shot",
+     "wide2",
+     "wide2"
+    ],
+    "samePicture": true,
+    "time": 2
+   },
+   "add9": "camera",
+   "after9": {
+    "who": [
+     "wide2",
+     "camera"
+    ],
+    "wide2Ends": null
+   },
+   "edge": {
+    "result": null,
+    "notice": "A cut at the edge of a clip changes nothing.",
+    "same": true
+   },
+   "error": null
+  },
+  "FIT1": {
+   "far": {
+    "zoom": 34,
+    "live": "far",
+    "frameOnScreen": 326,
+    "roomForIt": 406,
+    "tagFromLeft": 40
+   },
+   "notFollowed": {
+    "zoom": 34,
+    "live": "near",
+    "frameOnScreen": 653,
+    "roomForIt": 406,
+    "tagFromLeft": -938
+   },
+   "near": {
+    "zoom": 17,
+    "live": "near",
+    "frameOnScreen": 326,
+    "roomForIt": 406,
+    "tagFromLeft": 40
+   },
+   "none": {
+    "zoom": 17,
+    "frames": 0
+   },
+   "topRight": [
+    "zoom",
+    "Fit"
+   ],
+   "title": "Fit the camera's frame",
+   "error": null
+  },
+  "HEADER1": {
+   "header": [
+    "Object*",
+    "Group",
+    "Class",
+    "Starts at playhead",
+    "Chain",
+    "Snap",
+    "Show Paths",
+    "Show Masks",
+    "Edges",
+    "Collision",
+    "Preview",
+    "Both*",
+    "Camera"
+   ],
+   "oneRow": 28,
+   "noGrid": true,
+   "snapOn": {
+    "on": true,
+    "lit": true,
+    "numbers": [
+     "Grid, in pixels",
+     "Angle step, in degrees"
+    ],
+    "title": "Snapping to the grid"
+   },
+   "snapOff": {
+    "on": false,
+    "numbers": 0,
+    "title": "Free placement"
+   },
+   "pick": {
+    "pick": "group",
+    "header": [
+     "Object",
+     "Group*",
+     "Class"
+    ]
+   },
+   "paths": {
+    "on": true,
+    "lit": true
+   },
+   "rightClick": {
+    "menu": false,
+    "prevented": true
+   },
+   "palette": [
+    "Select",
+    "Object",
+    "Path",
+    "Shape",
+    "Pencil",
+    "Paint",
+    "Camera"
+   ],
+   "error": null
+  }
+ },
+ "volatile": {}
+}

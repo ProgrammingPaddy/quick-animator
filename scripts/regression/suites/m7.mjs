@@ -74,5 +74,5 @@ return out`,
 
   // Show Masks is off until turned on.
   SHOWOFF1: `${base}
-return { stored: localStorage.getItem('quick-animator.showMasks'), on: S().showMasks, button: [...document.querySelectorAll('.preview-tools button')].find(b => b.textContent.trim() === 'Show Masks')?.classList.contains('on'), edges: (st.setState({}), QA.getRenderer().maskEdgeCount()) }`,
+return { stored: localStorage.getItem('quick-animator.showMasks'), on: S().showMasks, button: [...document.querySelectorAll('.preview-options button')].find(b => b.textContent.trim() === 'Show Masks')?.classList.contains('on'), edges: (st.setState({}), QA.getRenderer().maskEdgeCount()) }`,
 }

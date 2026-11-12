@@ -21,8 +21,10 @@ import {
   adjustDurations,
   appearClassHere,
   appearHere,
+  addCamera,
   canEdit,
   cutCamera,
+  cutToItems,
   deleteAction,
   deleteClass,
   deleteClassAction,
@@ -1264,6 +1266,19 @@ export function TimelinePane() {
       { label: 'Go to start', keyword: timecode(obj.at, fps), run: () => useStore.getState().setTime(obj.at) },
       ...(obj.until !== null || s.contentEnd !== null ? [{ label: 'Go to end', keyword: timecode(obj.until ?? s.contentEnd ?? 0, fps), run: () => useStore.getState().setTime(obj.until ?? s.contentEnd ?? 0) }] : []),
       { label: 'Rename', run: () => requestRename({ object: obj.name }) },
+      // A camera's clip is cut from its menu as by the razor, and cut away from to another camera (D365).
+      ...(isCamera && editableObject
+        ? [
+            {
+              label: 'Cut at',
+              keyword: timecode(t, fps),
+              run: () => {
+                if (cutCamera(obj.name, t) !== null) useStore.getState().setTime(t)
+              },
+            },
+          ]
+        : []),
+      ...(isCamera ? cutTo(t) : []),
       // Several selected: the classes go to all of them (D292).
       ...(isGroup ? [] : [{ label: 'Classes', run: () => requestClasses(s.selection.length > 1 && s.selection.includes(obj.name) ? s.selection : [obj.name]) }]),
       ...(isGroup || !editableObject
@@ -1283,12 +1298,27 @@ export function TimelinePane() {
     ])
   }
 
+  /** A camera among what a right-click adds (D365): from that time on, framed as the picture is just before it, the playhead put on the cut so it is what is reframed next. */
+  const cameraAdd = (t: number) => ({
+    label: 'Camera',
+    run: () => {
+      if (addCamera(t) !== null) useStore.getState().setTime(t)
+    },
+  })
+  /** Cut to one of the cameras at a time (D365), the playhead put on the cut. */
+  const cutTo = (t: number) => {
+    const items = cutToItems(t, () => useStore.getState().setTime(t))
+    return items.length > 0 ? [{ label: 'Cut to', keyword: timecode(t, fps), children: items }] : []
+  }
+
   /** Right-click on a lane's empty space in the objects view: add an object that begins there (D139). */
-  const laneMenu = (e: ReactMouseEvent) => {
+  const laneMenu = (section: TimelineSection) => (e: ReactMouseEvent) => {
     if (!(e.target instanceof Element) || !e.target.matches('.tl-track, .grid-line') || !canEdit()) return
     e.preventDefault()
     const t = snappedAt(e.clientX)
-    showMenu(e, [{ label: 'Add', keyword: timecode(t, fps), children: OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, 0, 0, t) })) }])
+    // The Cameras section adds a camera in one click, and is where a cut to another is made (D365).
+    if (section === 'cameras') showMenu(e, [{ ...cameraAdd(t), label: 'Add camera', keyword: timecode(t, fps) }, ...cutTo(t)])
+    else showMenu(e, [{ label: 'Add', keyword: timecode(t, fps), children: [...OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, 0, 0, t) })), cameraAdd(t)] }])
   }
 
   /** Right-click on a class's track: add an action for every member at that time. */
@@ -1322,7 +1352,7 @@ export function TimelinePane() {
   const blankMenu = (e: ReactMouseEvent) => {
     if (!(e.target instanceof Element) || !e.target.matches('.tl-rows, .empty') || !canEdit()) return
     const t = snappedAt(e.clientX)
-    showMenu(e, [{ label: 'Add', keyword: t > 0 ? timecode(t, fps) : undefined, children: OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, 0, 0, t) })) }])
+    showMenu(e, [{ label: 'Add', keyword: t > 0 ? timecode(t, fps) : undefined, children: [...OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, 0, 0, t) })), cameraAdd(t)] }])
   }
 
   /** The parts of a clip with handlers of their own, which a click or a double-click on the clip leaves alone. */
@@ -1789,7 +1819,7 @@ export function TimelinePane() {
               </button>
             )}
           </div>
-          <div className="tl-track" onContextMenu={laneMenu}>
+          <div className="tl-track" onContextMenu={laneMenu(key)}>
             {ticks.map((t) => (
               <div key={t} className="grid-line" style={{ left: xAt(t) }} />
             ))}

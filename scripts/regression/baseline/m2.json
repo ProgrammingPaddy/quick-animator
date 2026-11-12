@@ -572,16 +572,17 @@
     "Circle",
     "Text",
     "Shape",
-    "Mask"
+    "Mask",
+    "Camera"
    ],
    "toolKinds": [
+    "Object",
+    "Group",
+    "Class",
     "Rect",
     "Circle",
     "Text",
-    "Mask",
-    "Object",
-    "Group",
-    "Class"
+    "Mask"
    ],
    "placed": {
     "selection": [

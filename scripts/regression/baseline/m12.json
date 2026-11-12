@@ -166,7 +166,12 @@
     "zoom": 4,
     "stillUnder": true
    },
-   "onlyShows": true,
+   "wheelWithSelect": {
+    "twiceAsClose": 2,
+    "selection": [
+     "box"
+    ]
+   },
    "made": {
     "decl": "camera = Camera({\n  x: 203,\n  y: 0,\n  zoom: 1,\n})",
     "selected": [
@@ -290,7 +295,7 @@
     }
    ],
    "cut": {
-    "code": "wide = Camera({\n  x: 0,\n  y: 0,\n  zoom: 1,\n})\n\nwide2 = Camera({\n  x: 450,\n  y: 0,\n  zoom: 1,\n  at: 3,\n})",
+    "code": "wide = Camera({\n  x: 0,\n  y: 0,\n  zoom: 1,\n  until: 3,\n})\n\nwide2 = Camera({\n  x: 450,\n  y: 0,\n  zoom: 1,\n  at: 3,\n})\n\nwide.move({\n  x: 450,\n  at: 0,\n  duration: 3,\n  ease: Ease.part('linear', 0, 0.75),\n})\n\nwide2.move({\n  x: 600,\n  at: 3,\n  duration: 1,\n  ease: Ease.part('linear', 0.75, 1),\n})",
     "selected": [
      "wide2"
     ],
@@ -299,8 +304,8 @@
      {
       "name": "wide",
       "start": 0,
-      "end": 8,
-      "level": 50,
+      "end": 3,
+      "level": 4,
       "lit": [
        [
         0,
@@ -327,8 +332,13 @@
      "wide2"
     ]
    },
-   "higherIsAbove": true,
+   "sideBySide": true,
    "sameAtTheCut": true,
+   "runsOn": [
+    525,
+    600,
+    600
+   ],
    "shownName": "wide2",
    "atTheEdge": {
     "same": true,

@@ -65,6 +65,9 @@ S().setTool('select'); S().setTransformMode('move'); if (S().collide) S().setCol
 const nl = String.fromCharCode(10);
 const decl = ['b = Rect({', '  x: -300,', '  y: 0,', '  width: 100,', '  height: 60,', '})', '', 'c = Circle({', '  x: 500,', '  y: -400,', '  radius: 20,', '})', ''].join(nl);
 const scene = (...acts) => decl + acts.map(a => nl + a + nl).join('');
+// The places on the screen are worked out for the frame fitted at the scene's middle. A project opens fitted by its own camera's frame (D367), and the sample scene has a camera, so the matrix's scene goes in first, which has none, and Fit is pressed.
+await setSource(scene()); await tick(150);
+[...document.querySelectorAll('.preview-tools button')].find((b) => b.textContent.trim() === 'Fit')?.click(); await tick(300);
 const move = 'b.move({ x: 0, at: 1, duration: 1 })';
 const pathAbs = 'b.path({ shape: [[-300, 0], [0, 200]], at: 0, duration: 2 })';
 const orbit = 'b.path({ shape: (p) => [Math.cos(p * 2 * Math.PI) * 100, Math.sin(p * 2 * Math.PI) * 100], relative: true, at: 0, duration: 2 })';

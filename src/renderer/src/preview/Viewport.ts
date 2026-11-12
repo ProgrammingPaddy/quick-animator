@@ -6,6 +6,36 @@ const PADDING = 40
 const MIN_ZOOM = 0.02
 const MAX_ZOOM = 32
 
+/** An upright box in the scene. */
+export interface Rect {
+  left: number
+  right: number
+  top: number
+  bottom: number
+}
+
+/**
+ * What a gesture needs of a view of the scene (D366): the Preview view, or the Camera view,
+ * which looks through the camera. Places on the pane are from the preview's top left corner in
+ * both, so what is drawn over the pane, a box, a trail, sits where the pointer is in either.
+ */
+export interface Surface {
+  /** Pane pixels per pixel of the scene. */
+  readonly zoom: number
+  /** How far the view is turned from the scene's own axes, in degrees. */
+  readonly turn: number
+  readonly camera: THREE.Camera
+  toWorld(paneX: number, paneY: number): { x: number; y: number }
+  toPane(x: number, y: number): { x: number; y: number }
+  toNdc(paneX: number, paneY: number): THREE.Vector2
+  /** How far a drag of so many pane pixels goes in the scene. */
+  delta(dx: number, dy: number): { x: number; y: number }
+  /** The upright box around what the view shows. */
+  viewRect(): Rect
+  frameRect(): Rect
+  sceneRect(): Rect
+}
+
 /**
  * The Three.js view of the world. The camera frame, at project resolution, is what gets
  * rendered to video; the space around it exists so things can live and move off screen.
@@ -13,9 +43,11 @@ const MAX_ZOOM = 32
  * camera that has the picture puts it, turned and sized as it frames; with no camera, at the
  * scene's middle (D357).
  */
-export class Viewport {
+export class Viewport implements Surface {
   /** Pane pixels per world pixel. */
   zoom = 1
+  /** The Preview view is never turned. */
+  readonly turn = 0
   /** Called after any change of zoom or position. */
   onChange?: () => void
   /** Called before each drawing, with what draws and the camera it draws through: the masks' pictures are made here (D337). */
@@ -41,6 +73,8 @@ export class Viewport {
   private center = { x: 0, y: 0 }
   /** True once the user has zoomed or panned since the last fit. Until then, resizes keep fitting. */
   private adjusted = false
+  /** The box of the scene Fit last showed, which a resize goes on showing until the view is zoomed or moved. */
+  private fittedTo: Rect | null = null
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
@@ -55,12 +89,13 @@ export class Viewport {
     this.applyComposition()
   }
 
-  /** The frame's size and the color inside it, the project's background (D131). */
+  /** The frame's size and the color inside it, the project's background (D131). A new size is fitted; a new color leaves the view where it is. */
   setComposition(width: number, height: number, background: string): void {
+    const resized = width !== this.composition.width || height !== this.composition.height
     this.composition = { width, height }
     ;(this.frame.material as THREE.MeshBasicMaterial).color.set(background)
     this.applyComposition()
-    this.fit()
+    if (resized || !this.fittedTo) this.fit()
   }
 
   /** Put the frame where a camera frames (D357); the view itself stays where it is. */
@@ -75,22 +110,28 @@ export class Viewport {
     this.view = { width, height }
     this.renderer.setPixelRatio(pixelRatio)
     this.renderer.setSize(width, height, false)
+    // A view left as Fit left it keeps showing what Fit showed, whatever the pane's size: the camera may have moved since, and the view does not follow it (D367).
     if (this.adjusted) this.updateCamera()
-    else this.fit()
+    else this.show(this.fittedTo ?? this.frameRect())
   }
 
-  /** Show the project's frame at the scene's middle and the camera's frame where it is now, centered, with padding (D359): with no camera, or one that looks inside the scene, that is the scene as it always was. */
+  /** Show the whole frame, centered, with padding: where the camera that has the picture puts it now (D367), which with no camera is the scene's middle. */
   fit(): void {
+    this.fittedTo = this.frameRect()
+    this.show(this.fittedTo)
+  }
+
+  /** Show a box of the scene whole, centered, with padding, as a view not yet zoomed or moved. */
+  private show(box: Rect): void {
     const { width, height } = this.view
     if (width === 0 || height === 0) return
     this.adjusted = false
-    const frame = this.fitRect()
     const zoom = Math.min(
-      (width - PADDING * 2) / (frame.right - frame.left),
-      (height - PADDING * 2) / (frame.top - frame.bottom),
+      (width - PADDING * 2) / (box.right - box.left),
+      (height - PADDING * 2) / (box.top - box.bottom),
     )
     this.zoom = Math.max(zoom, MIN_ZOOM)
-    this.center = { x: (frame.left + frame.right) / 2, y: (frame.top + frame.bottom) / 2 }
+    this.center = { x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 }
     this.updateCamera()
   }
 
@@ -144,13 +185,6 @@ export class Viewport {
     return { left: v.x - halfWidth, right: v.x + halfWidth, top: v.y + halfHeight, bottom: v.y - halfHeight }
   }
 
-  /** What Fit shows: the box around the project's frame at the scene's middle and the camera's frame. */
-  fitRect(): { left: number; right: number; top: number; bottom: number } {
-    const a = this.sceneRect()
-    const b = this.frameRect()
-    return { left: Math.min(a.left, b.left), right: Math.max(a.right, b.right), top: Math.max(a.top, b.top), bottom: Math.min(a.bottom, b.bottom) }
-  }
-
   /** The project's frame at the scene's middle, whatever a camera frames. */
   sceneRect(): { left: number; right: number; top: number; bottom: number } {
     return { left: -this.composition.width / 2, right: this.composition.width / 2, top: this.composition.height / 2, bottom: -this.composition.height / 2 }
@@ -167,6 +201,11 @@ export class Viewport {
   /** The pane position of a place in the world: the inverse of `toWorld`. */
   toPane(x: number, y: number): { x: number; y: number } {
     return { x: (x - this.center.x) * this.zoom + this.view.width / 2, y: -(y - this.center.y) * this.zoom + this.view.height / 2 }
+  }
+
+  /** How far a drag of so many pane pixels goes in the world. */
+  delta(dx: number, dy: number): { x: number; y: number } {
+    return { x: dx / this.zoom, y: -dy / this.zoom }
   }
 
   /** Normalized device coordinates of a pane position, for picking. */

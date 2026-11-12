@@ -8,7 +8,7 @@ import { maskDrawnBy, maskFor, maskNamed, masksOn } from '../model/masks'
 import { CAMERA, GROUP, PIVOT_PARAMS, VERB_COLORS } from '../model/registry'
 import { cameraAt, containers, isVisibleAt } from '../model/sample'
 import type { Action, Mask, SceneObject } from '../model/types'
-import { addObject, attachMenuItems, canEdit, classMaskItems, createGroup, prospectiveGroup, deleteAction, deleteClass, deleteClassAction, deleteObjects, duplicateObjects, hideMenuItems, jumpToAction, jumpToClass, jumpToObject, maskedShare, maskListEditable, maskMenuItems, materializeClassAction, moveDeclaration, overrideClassAction, removeFromClass, requestClasses, requestRename, selectClass, selectClassAction, setMasked, ungroup, setLifetime } from '../project/operations'
+import { addCamera, addObject, attachMenuItems, canEdit, classMaskItems, cutHereItems, createGroup, prospectiveGroup, deleteAction, deleteClass, deleteClassAction, deleteObjects, duplicateObjects, hideMenuItems, jumpToAction, jumpToClass, jumpToObject, maskedShare, maskListEditable, maskMenuItems, materializeClassAction, moveDeclaration, overrideClassAction, removeFromClass, requestClasses, requestRename, selectClass, selectClassAction, setMasked, ungroup, setLifetime } from '../project/operations'
 import { requestSavePreset } from '../project/userPresets'
 import { updateSettings } from '../project/controller'
 import { ColorPicker } from '../components/ColorPicker'
@@ -234,6 +234,8 @@ export function ObjectPane() {
         { label: 'Rename', run: () => requestRename({ object: obj.name }) },
         { label: 'Classes', run: () => requestClasses(targets) },
         { label: 'Links', run: () => useStore.getState().openLinksDialog({ object: obj.name }) },
+        // Cut to it at the playhead (D365).
+        ...cutHereItems(obj.name),
         { label: 'Duplicate', run: () => duplicateObjects(targets) },
         { label: 'Delete', run: () => deleteObjects(targets), danger: true },
       ])
@@ -327,7 +329,8 @@ export function ObjectPane() {
     if (!(e.target instanceof Element) || !e.target.matches('.object-list, .empty, .group-head')) return
     showMenu(
       e,
-      [{ label: 'Add', children: OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, 0, 0) })) }],
+      // A camera among them (D365): from the playhead on, framed as the picture is there.
+      [{ label: 'Add', children: [...OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, 0, 0) })), { label: 'Camera', run: () => void addCamera() }] }],
     )
   }
 

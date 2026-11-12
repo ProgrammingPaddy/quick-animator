@@ -65,7 +65,7 @@ out.frame = QA.getRenderer().cameras();
 out.name = [...document.querySelectorAll('.camera-tag')].map((el) => ({ text: el.textContent.trim(), cls: el.className }));
 return out`,
 
-  // The Camera tool in the Camera view: a drag moves the picture, so the camera goes the other way by the picture's scale and its zoom; the wheel zooms, the place under the pointer staying under it. In a scene with no camera the first press makes one, in one undo step with what the drag does.
+  // The Camera tool in the Camera view: a drag moves the picture, so the camera goes the other way by the picture's scale and its zoom; the wheel zooms, the place under the pointer staying under it, with another tool as with this one. In a scene with no camera the first press makes one, in one undo step with what the drag does.
   TOOL1: `${HELP}
 const out = {};
 await start(${JSON.stringify(SCENE + WIDE)}, 'both', 'camera');
@@ -80,13 +80,12 @@ document.querySelector('.preview-camera canvas').dispatchEvent(new WheelEvent('w
 await tick(700);
 const after = view(0);
 out.afterWheel = { decl: decl('wide'), zoom: after.zoom, stillUnder: Math.abs(after.x + 100 / c.k / after.zoom - under.x) < 1.5 };
-// With another tool the Camera view only shows.
-S().setTool('select'); S().select([]); await tick(200);
-const was = decl('wide');
-await pull(c.panel, { x: c.cx, y: c.cy }, { x: c.cx + 60, y: c.cy + 30 });
-document.querySelector('.preview-camera canvas').dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: c.cx, clientY: c.cy, deltaY: -200 }));
-await tick(300);
-out.onlyShows = decl('wide') === was && S().selection.length === 0;
+// With another tool the wheel there is still the camera's (D369), and what is selected stays selected; what a press does there is the tool's own (D366, suite m13).
+S().setTool('select'); S().select(['box']); await tick(200);
+const zoomWas = view(0).zoom;
+document.querySelector('.preview-camera canvas').dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: c.cx, clientY: c.cy, deltaY: -Math.log(2) / 0.0015 }));
+await tick(700);
+out.wheelWithSelect = { twiceAsClose: r2(view(0).zoom / zoomWas), selection: S().selection };
 // No camera yet: the tool's first drag makes one and moves it; one undo takes both away.
 await start(${JSON.stringify(SCENE)}, 'both', 'camera');
 const c2 = cgeom();
@@ -153,7 +152,7 @@ key('keyup', 'Shift'); await tick(300);
 out.zoomAnimated = { acts: acts('wide'), decl: decl('wide') };
 return out`,
 
-  // The timeline's Cameras section: the clips stack as the cast has them, each lit where it has the picture. The razor on a camera's clip writes a second camera from there, framed as the first is at that moment, puts the playhead on the cut, and has the new one selected.
+  // The timeline's Cameras section: the clips stack as the cast has them, each lit where it has the picture. The razor on a camera's clip cuts it in two (D365): the first ends there, a second begins there framed as the first is at that moment, the move that ran across the cut is cut with it, the playhead is put on the cut, and the new one is selected.
   CUT1: `${HELP}
 const out = {};
 await start(${JSON.stringify(HELD)}, 'both', 'select');
@@ -167,10 +166,12 @@ const cr = clip.getBoundingClientRect();
 const xAt = (t) => cr.left + ((t - Number(clip.dataset.start)) / (Number(clip.dataset.end) - Number(clip.dataset.start))) * cr.width;
 pe(clip.querySelector('.oclip-title'), 'pointerdown', xAt(3), cr.top + 6); await tick(60); pe(document.body, 'pointerup', xAt(3), cr.top + 6); await tick(400);
 S().setTimelineTool('select'); await tick(200);
-out.cut = { code: tail('wide').slice(0, tail('wide').indexOf('wide.move')).trim(), selected: S().selection, time: S().time, clips: clips(), who: [2, 3, 5].map(who) };
-out.higherIsAbove = out.cut.clips.find((c) => c.name === 'wide2').level < out.cut.clips.find((c) => c.name === 'wide').level;
-// Nothing shows until the new one is reframed: the picture at the cut is what it was.
+out.cut = { code: tail('wide').trim(), selected: S().selection, time: S().time, clips: clips(), who: [2, 3, 5].map(who) };
+// The two never share a moment, so they sit side by side on one level.
+out.sideBySide = out.cut.clips.find((c) => c.name === 'wide2').level === out.cut.clips.find((c) => c.name === 'wide').level;
+// Nothing shows until the new one is reframed: the picture at the cut is what it was, and the move runs on after it.
 out.sameAtTheCut = JSON.stringify(view(3)) === JSON.stringify({ x: 450, y: 0, zoom: 1, rotation: 0 });
+out.runsOn = [view(3.5).x, view(4).x, view(5).x];
 out.shownName = document.querySelector('.preview-camera .view-tag b').textContent;
 // A cut at the clip's very start changes nothing, and says so.
 S().setTimelineTool('razor'); await tick(150);

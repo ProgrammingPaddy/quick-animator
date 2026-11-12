@@ -848,6 +848,37 @@ close = Camera({
 is throughout, moving or still, whether or not it has the picture. With no camera alive at a
 moment, the picture is the scene's middle.
 
+Shots one after another are cameras whose lives meet, over one camera that runs the whole scene
+and has the picture whenever no shot does:
+
+```js
+wide = Camera({
+  x: 0,
+  y: 0,
+  zoom: 1,
+})
+
+left = Camera({
+  x: -400,
+  y: 0,
+  zoom: 2,
+  at: 2,
+  until: 4,
+})
+
+right = Camera({
+  x: 400,
+  y: 0,
+  zoom: 2,
+  at: 4,
+  until: 6,
+})
+```
+
+Going back to an angle is another camera framed the same, with a later life: `left2`, from 6 to
+8, with `left`'s `x`, `y`, and `zoom`. A cut that nothing shows is a camera that begins framed as
+the one before it is at that moment.
+
 Held on the screen: `attached: true` on any object, or on a group for everything it carries,
 places it by the picture instead of the scene. Its `x, y` are from the middle of the picture, in
 the project's pixels, and no camera's move, zoom, or roll changes where it shows. It keeps its
@@ -870,15 +901,30 @@ whatever the camera does.
 
 In the GUI. The preview's header switches what the pane shows: Preview, the scene as it is worked
 on, with the frame of the camera that has the picture drawn in it; Camera, what that camera sees;
-or Both, side by side; C goes to the next. The Camera tool, the last in the palette, moves the
-camera that has the picture at the playhead, and makes one in a scene that has none: in the
-Camera view a drag moves the picture and the wheel zooms; in the Preview view a drag moves the
-frame, a corner zooms, the handle above rolls; Shift makes the change an animation, as with any
-object. With Select, a camera is picked by its frame's line or by its name at the frame's corner.
-The timeline has a Cameras section, the clips stacked as the cast has them and lit where each
-has the picture; the razor on a camera's clip writes a second camera from there, framed as the
-first was at that moment. In the Objects pane the cameras are under Type, and the Layers end in
-the Background, with the project's color. Right-click an object for Attach to screen.
+or Both, side by side; C goes to the next. Every tool works in the Camera view as in the Preview
+view, through the camera: what is selected, dragged, resized, drawn, or typed there is written as
+it would be in the Preview view. Fit shows the frame of the camera that has the picture. The
+Camera tool, the last in the palette, moves the camera that has the picture at the playhead, and
+makes one in a scene that has none: in the Camera view a drag moves the picture; in the Preview
+view a drag moves the frame, a corner zooms, the handle above rolls; Shift makes the change an
+animation, as with any object. With any tool, the wheel over the Camera view zooms the camera at
+the pointer and the middle button drags it. With Select, a camera is picked by its frame's line
+or by its name at the frame's corner.
+
+Cuts. Add, in the right-click menus of the timeline, the Objects pane, and the preview, lists
+Camera, and the timeline's Cameras section has Add camera: a camera that begins there, declared
+last, framed as the picture is at that moment, with the picture until it next changes hands, so
+the shots after it are as they were. Cut to gives the picture to another camera from there: one
+still alive beneath has it back as itself, the cameras over it ending; one that has ended comes
+back as a copy framed as it ended. A cut ends the shot before it, which gets its `until` there;
+the camera at the bottom, the first declared of those alive, is left to run on under the shots.
+The razor on a camera's clip, or Cut at in its menu, cuts the clip in two: the first ends there,
+a second declared right after it begins there framed as the first is at that moment, an animation
+running across the cut is cut with it, and the later ones go to the second.
+
+The timeline's Cameras section stacks the clips as the cast has them and lights each where it
+has the picture. In the Objects pane the cameras are under Type, and the Layers end in the
+Background, with the project's color. Right-click an object for Attach to screen.
 
 ## Links
 

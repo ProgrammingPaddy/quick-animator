@@ -1,18 +1,18 @@
 rect3 = Rect({
-  x: -226,
-  y: 206,
+  x: 1,
+  y: 243,
   width: 240,
   height: 140,
   fill: '#4f8cff',
   until: 3.4167,
   class: 'adw',
-  attached: true,
-  scale: 1.82,
+  scale: 0.59,
+  rotation: 0.4,
 })
 
 circle2 = Shape({
-  x: 211,
-  y: 114,
+  x: -541,
+  y: 172,
   fill: '#f59e0b',
   until: 3.4167,
   class: 'adw',
@@ -36,48 +36,44 @@ circle1 = Circle({
   attached: true,
 })
 
+shape1 = Shape({
+  x: -183,
+  y: 165,
+  fill: '#4f8cff',
+  at: 4.75,
+  until: 6.75,
+  curves: `
+    M 0 56.39
+    L -60 -43.61
+    L 60 -43.61
+    Z
+  `,
+  smooth: false,
+})
+
 camera = Camera({
-  x: 67,
-  y: 82,
-  zoom: 1.82,
-  rotation: 0,
+  x: -332,
+  y: 204,
+  zoom: 1.6,
 })
+
+camera2 = Camera({
+  x: 0,
+  y: 0,
+  zoom: 1,
+  at: 1.4167,
+  until: 2.25,
+})
+
+camera3 = Camera({
+  x: -349,
+  y: 138,
+  zoom: 2.07,
+  at: 2.9167,
+  until: 4.25,
+})
+
  
-
-camera.move({
-  x: 598,
-  y: 184,
-  at: 0,
-  duration: 1,
-})
-
-camera.move({
-  x: -91,
-  y: 124,
-  at: 2.25,
-  duration: 1,
-})
-
-camera.move({
-  x: 265,
-  y: 35,
-  at: 0,
-  duration: 1,
-})
-
-camera.move({
-  x: -60,
-  y: 54,
-  at: 1,
-  duration: 1,
-})
-
-camera.move({
-  x: 218,
-  y: -37,
-  at: 0,
-  duration: 1,
-})
 
 rect3.move({
   x: 345,
@@ -85,3 +81,4 @@ rect3.move({
   at: 1,
   duration: 1,
 })
+

@@ -192,9 +192,9 @@
    ],
    "overlap": false,
    "barRight": 340,
-   "toolsLeft": 340,
-   "barBottom": 68,
-   "toolsTop": 72,
+   "toolsLeft": 999,
+   "barBottom": 92,
+   "toolsTop": 92,
    "err": null
   },
   "IMPORT3": {

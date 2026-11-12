@@ -341,6 +341,56 @@ button.small:hover {
   flex: 1;
 }
 
+/* The preview's header holds its options and its views (D371): it grows a second row where one will not hold them. */
+.pane.center > .pane-header {
+  height: auto;
+  min-height: var(--header-h);
+  flex-wrap: wrap;
+  row-gap: 3px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+/* The preview's options, in its pane's header (D371): the looks of the bar they came from, on the header's own ground. */
+.preview-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+}
+
+.preview-options button {
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--fg-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.preview-options button:hover {
+  color: var(--fg);
+}
+
+.preview-options button.on {
+  color: var(--accent);
+}
+
+.preview-options .preview-modes,
+.preview-options .preview-toggle {
+  margin-left: 0;
+}
+
+.preview-options .preview-modes button {
+  border-radius: 0;
+}
+
+.preview-options .preview-modes button.active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
 /* What the preview shows (D359), in its pane's header: three buttons as one, the one that is on lit. */
 .preview-views {
   display: flex;
@@ -869,7 +919,7 @@ button.icon:hover {
   pointer-events: auto;
 }
 
-/* The top of the preview is one row that wraps: the tool's own controls on the left, the pick and view buttons on the right, never one under the other (D251). */
+/* The top of the preview is one row that wraps: the tool's own controls on the left, the zoom and Fit on the right, never one under the other (D251). The pick, the options, and the views are in the pane's header (D371). */
 .preview-top {
   position: absolute;
   top: 8px;
