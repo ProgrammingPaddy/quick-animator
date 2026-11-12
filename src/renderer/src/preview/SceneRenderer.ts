@@ -805,6 +805,8 @@ export class SceneRenderer {
   private hidden: ReadonlySet<string> = new Set()
   private held: ReadonlySet<string> = new Set()
   private showMasks = false
+  /** Whether every camera alive shows its frame, or only one in hand (D374). */
+  private showCameras = false
   /** The masks whose edges show this frame, the one in hand strongest, each as a box in the scene drawn over it. */
   private outlined: { mask: Mask; strength: number }[] = []
   private readonly maskEdges: THREE.Mesh[] = []
@@ -832,8 +834,56 @@ export class SceneRenderer {
   }
 
   /** The cameras alive right now, with the frame each cuts from the scene, and whether it has the picture (D358, D361). */
-  cameras(): { name: string; frame: Frame; live: boolean }[] {
-    return [...this.cameraFrames].map(([name, frame]) => ({ name, frame, live: name === this.liveCamera }))
+  cameras(): { name: string; frame: Frame; live: boolean; shown: boolean }[] {
+    return [...this.cameraFrames].map(([name, frame]) => ({ name, frame, live: name === this.liveCamera, shown: this.cameraShown(name) }))
+  }
+
+  /** Whether a camera's frame is drawn (D374): every camera's when they are shown, else one in hand, the selection. */
+  private cameraShown(name: string): boolean {
+    return this.showCameras || this.held.has(name)
+  }
+
+  /** A place in the scene in a frame's own space, from its middle, with how far the frame reaches each way. */
+  private within(f: Frame, world: { x: number; y: number }): { x: number; y: number; halfWidth: number; halfHeight: number } {
+    const a = (-f.rotation * Math.PI) / 180
+    const dx = world.x - f.x
+    const dy = world.y - f.y
+    return { x: dx * Math.cos(a) - dy * Math.sin(a), y: dx * Math.sin(a) + dy * Math.cos(a), halfWidth: f.width / 2, halfHeight: f.height / 2 }
+  }
+
+  /**
+   * The camera whose frame holds a place in the scene, for the Camera tool (D373), which picks a
+   * camera by all of its frame: one of `prefer`, what is selected, when it holds the place, so a
+   * camera in hand stays in hand; else the smallest frame, the one a larger frame would hide.
+   */
+  pickCameraInside(world: { x: number; y: number }, prefer: readonly string[]): string | null {
+    let best: string | null = null
+    let bestArea = Infinity
+    for (const [name, f] of this.cameraFrames) {
+      if (!this.cameraShown(name)) continue
+      const p = this.within(f, world)
+      if (Math.abs(p.x) > p.halfWidth || Math.abs(p.y) > p.halfHeight) continue
+      if (prefer.includes(name)) return name
+      const area = f.width * f.height
+      if (area < bestArea) {
+        best = name
+        bestArea = area
+      }
+    }
+    return best
+  }
+
+  /** The cameras whose frames a box of the scene touches, as a box drawn with the Camera tool takes them (D373). */
+  camerasIn(box: { left: number; right: number; top: number; bottom: number }): string[] {
+    const names: string[] = []
+    for (const [name, f] of this.cameraFrames) {
+      if (!this.cameraShown(name)) continue
+      const a = (f.rotation * Math.PI) / 180
+      const halfWidth = (Math.abs(Math.cos(a)) * f.width + Math.abs(Math.sin(a)) * f.height) / 2
+      const halfHeight = (Math.abs(Math.sin(a)) * f.width + Math.abs(Math.cos(a)) * f.height) / 2
+      if (f.x + halfWidth >= box.left && f.x - halfWidth <= box.right && f.y + halfHeight >= box.bottom && f.y - halfHeight <= box.top) names.push(name)
+    }
+    return names
   }
 
   /** The camera whose frame's line runs within `reach` of a place in the scene, the nearest when several do, or null (D361): a camera is picked by its line, never by what it frames. */
@@ -841,11 +891,11 @@ export class SceneRenderer {
     let best: string | null = null
     let bestDistance = Infinity
     for (const [name, f] of this.cameraFrames) {
-      const a = (-f.rotation * Math.PI) / 180
-      const dx = world.x - f.x
-      const dy = world.y - f.y
-      const ox = Math.abs(dx * Math.cos(a) - dy * Math.sin(a)) - f.width / 2
-      const oy = Math.abs(dx * Math.sin(a) + dy * Math.cos(a)) - f.height / 2
+      // A frame that is not drawn is not picked (D374).
+      if (!this.cameraShown(name)) continue
+      const p = this.within(f, world)
+      const ox = Math.abs(p.x) - p.halfWidth
+      const oy = Math.abs(p.y) - p.halfHeight
       const distance = ox <= 0 && oy <= 0 ? Math.min(-ox, -oy) : Math.hypot(Math.max(ox, 0), Math.max(oy, 0))
       if (distance <= reach && distance < bestDistance) {
         best = name
@@ -891,11 +941,13 @@ export class SceneRenderer {
    * How the view shows the scene (D334, D341, D344): what it hides, by name; what is in hand, the
    * selection, whose mask shows its edge and is picked before anything drawn; and whether the
    * edges of the masks on the selection show, or with nothing selected, of every mask there is.
+   * `showCameras` says whether every camera alive shows its frame (D374); one in hand always does.
    */
-  setView(view: { hidden: readonly string[]; held: readonly string[]; showMasks: boolean }): void {
+  setView(view: { hidden: readonly string[]; held: readonly string[]; showMasks: boolean; showCameras?: boolean }): void {
     this.hidden = new Set(view.hidden)
     this.held = new Set(view.held)
     this.showMasks = view.showMasks
+    this.showCameras = view.showCameras === true
   }
 
   /** Whether the view hides an object: itself, or a group that carries it (D341). */
@@ -1169,7 +1221,7 @@ export class SceneRenderer {
       this.applyShapeHandles(pixel)
       if (this.guideSpec) this.guides.set(this.guideSpec.lines, this.guideSpec.view, pixel)
     }
-    const dashed = o.cameras ? [...this.cameraFrames] : []
+    const dashed = o.cameras ? [...this.cameraFrames].filter(([name]) => this.cameraShown(name)) : []
     while (this.cameraLines.length < dashed.length) {
       const line = new FrameLine()
       this.overlay.add(line.group)

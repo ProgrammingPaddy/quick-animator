@@ -165,7 +165,7 @@
     "logo": "#24324a"
    },
    "timelineMenu2": [
-    "Show"
+    "Unhide"
    ],
    "previewMenu": [
     "Jump to code",
@@ -173,11 +173,9 @@
     "Shape",
     "Path",
     "Save preset",
-    "Classes",
     "Mask",
     "Hide",
-    "Attach to screen",
-    "Collision",
+    "Properties",
     "Duplicate",
     "Delete"
    ],

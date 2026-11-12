@@ -140,7 +140,8 @@
       "width": 960,
       "height": 540
      },
-     "live": true
+     "live": true,
+     "shown": true
     }
    ],
    "name": [
@@ -151,15 +152,16 @@
    ]
   },
   "TOOL1": {
-   "inHand": [
-    "wide"
-   ],
+   "inHand": [],
    "afterDrag": {
     "decl": "wide = Camera({\n  x: -152,\n  y: 76,\n  zoom: 2,\n})",
     "expected": {
      "x": -152,
      "y": 76
-    }
+    },
+    "selected": [
+     "wide"
+    ]
    },
    "afterWheel": {
     "decl": "wide = Camera({\n  x: -25,\n  y: 76,\n  zoom: 4,\n})",
@@ -171,6 +173,10 @@
     "selection": [
      "box"
     ]
+   },
+   "toolMakesNone": {
+    "same": true,
+    "notice": "No camera at the playhead."
    },
    "made": {
     "decl": "camera = Camera({\n  x: 203,\n  y: 0,\n  zoom: 1,\n})",
@@ -185,7 +191,14 @@
    ]
   },
   "TOOL2": {
+   "fromEmpty": {
+    "decl": "wide = Camera({\n  x: 0,\n  y: 0,\n  zoom: 2,\n})",
+    "selection": []
+   },
    "moved": "wide = Camera({\n  x: 300,\n  y: 100,\n  zoom: 2,\n})",
+   "picked": [
+    "wide"
+   ],
    "zoomed": "wide = Camera({\n  x: 300,\n  y: 100,\n  zoom: 1,\n})",
    "byLine": [
     "wide"
@@ -295,9 +308,9 @@
     }
    ],
    "cut": {
-    "code": "wide = Camera({\n  x: 0,\n  y: 0,\n  zoom: 1,\n  until: 3,\n})\n\nwide2 = Camera({\n  x: 450,\n  y: 0,\n  zoom: 1,\n  at: 3,\n})\n\nwide.move({\n  x: 450,\n  at: 0,\n  duration: 3,\n  ease: Ease.part('linear', 0, 0.75),\n})\n\nwide2.move({\n  x: 600,\n  at: 3,\n  duration: 1,\n  ease: Ease.part('linear', 0.75, 1),\n})",
+    "code": "wide = Camera({\n  x: 0,\n  y: 0,\n  zoom: 1,\n  until: 3,\n})\n\nwide_shot2 = Camera({\n  x: 450,\n  y: 0,\n  zoom: 1,\n  at: 3,\n})\n\nwide.move({\n  x: 450,\n  at: 0,\n  duration: 3,\n  ease: Ease.part('linear', 0, 0.75),\n})\n\nwide_shot2.move({\n  x: 600,\n  at: 3,\n  duration: 1,\n  ease: Ease.part('linear', 0.75, 1),\n})",
     "selected": [
-     "wide2"
+     "wide_shot2"
     ],
     "time": 3,
     "clips": [
@@ -314,7 +327,7 @@
       ]
      },
      {
-      "name": "wide2",
+      "name": "wide_shot2",
       "start": 3,
       "end": 8,
       "level": 4,
@@ -328,8 +341,8 @@
     ],
     "who": [
      "wide",
-     "wide2",
-     "wide2"
+     "wide_shot2",
+     "wide_shot2"
     ]
    },
    "sideBySide": true,
@@ -339,7 +352,7 @@
     600,
     600
    ],
-   "shownName": "wide2",
+   "shownName": "wide_shot2",
    "atTheEdge": {
     "same": true,
     "notice": "A cut at the edge of a clip changes nothing."
@@ -374,13 +387,13 @@
     ]
    },
    "menu": [
-    "Attach to screen"
+    "Attach to camera"
    ],
    "attached": {
     "decl": "badge = Circle({\n  x: 600,\n  y: -2200,\n  radius: 50,\n  fill: '#ff0000',\n  attached: true,\n  rotation: -90,\n  scale: 2,\n})",
     "stays": true,
     "menu": [
-     "Detach from screen"
+     "Detach from camera"
     ]
    },
    "oneUndo": true,

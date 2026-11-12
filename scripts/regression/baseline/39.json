@@ -254,11 +254,9 @@
     "Shape▸",
     "Path▸",
     "Save preset",
-    "Classes",
     "Mask▸",
     "Hide",
-    "Attach to screen",
-    "Collision▸",
+    "Properties▸",
     "Duplicate",
     "Delete"
    ],
@@ -418,6 +416,7 @@
    "prefs": {
     "labels": [
      "Object default duration",
+     "Camera default duration",
      "Final frame hold",
      "Hidden objects",
      "Code pane",

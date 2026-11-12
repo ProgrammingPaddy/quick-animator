@@ -66,15 +66,15 @@ rowOf('badge').querySelector('.eye').click(); await tick(250);
 out.hidden = { badge: px(700, 400), hidden: S().hidden, row: rowOf('badge').className, clip: clip('badge').className, clipEye: !!clip('badge').querySelector('.oclip-eye'), selection: S().selection, source: S().source.includes('hidden') };
 // Hidden, it is not picked; what is beneath is.
 const g = geom(); await click(g, { x: 700, y: 400 }); out.pickThrough = S().selection;
-// The timeline's eye shows it again.
+// The timeline's eye unhides it.
 clip('badge').querySelector('.oclip-eye').click(); await tick(250);
 out.shown = { badge: px(700, 400), hidden: S().hidden, clip: clip('badge').className };
 // Right-click, Hide, in the timeline, the preview, and the pane.
 S().select([]); clip('logo').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: clip('logo').getBoundingClientRect().left + 30, clientY: clip('logo').getBoundingClientRect().top + 6, button: 2 })); await tick(150);
-out.timelineMenu = S().contextMenu.items.map(i => i.label).filter(l => l === 'Hide' || l === 'Show'); S().contextMenu.items.find(i => i.label === 'Hide').run(); S().closeMenu(); await tick(200);
+out.timelineMenu = S().contextMenu.items.map(i => i.label).filter(l => l === 'Hide' || l === 'Unhide' || l === 'Show'); S().contextMenu.items.find(i => i.label === 'Hide').run(); S().closeMenu(); await tick(200);
 out.afterTimelineHide = { hidden: S().hidden, logo: px(0, -290) };
 clip('logo').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: clip('logo').getBoundingClientRect().left + 30, clientY: clip('logo').getBoundingClientRect().top + 6, button: 2 })); await tick(150);
-out.timelineMenu2 = S().contextMenu.items.map(i => i.label).filter(l => l === 'Hide' || l === 'Show'); S().contextMenu.items.find(i => i.label === 'Show').run(); S().closeMenu(); await tick(200);
+out.timelineMenu2 = S().contextMenu.items.map(i => i.label).filter(l => l === 'Hide' || l === 'Unhide' || l === 'Show'); S().contextMenu.items.find(i => i.label === 'Unhide').run(); S().closeMenu(); await tick(200);
 g.el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: g.sx(700), clientY: g.sy(400), button: 2 })); await tick(150);
 out.previewMenu = S().contextMenu?.items.map(i => i.label) ?? null; S().contextMenu?.items.find(i => i.label === 'Hide')?.run(); S().closeMenu(); await tick(200);
 out.afterPreviewHide = { hidden: S().hidden, badge: px(700, 400) };

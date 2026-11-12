@@ -52,9 +52,9 @@ shape1 = Shape({
 })
 
 camera = Camera({
-  x: -332,
-  y: 204,
-  zoom: 1.6,
+  x: -280,
+  y: 230,
+  zoom: 1.86,
 })
 
 camera2 = Camera({

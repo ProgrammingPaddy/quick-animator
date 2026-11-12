@@ -171,12 +171,12 @@ function cameraBlock(name: string, view: View, at: number, until: number | null)
 }
 
 /**
- * The camera the Camera tool moves (D361): the one that has the picture at the playhead. A scene
- * with no camera gets one, framing the scene as it is, so nothing changes until it is moved.
- * Null, with a word why, when there are cameras and none is alive here, or the one that is comes
- * from code.
+ * The camera that has the picture at the playhead (D361, D369), for what moves it in its own
+ * view: the Camera tool's drag there, the wheel, the middle button. With `make`, a scene with no
+ * camera gets one for the whole scene, framing it as it is, so nothing changes until it is
+ * moved. Null, with a word why, when none is alive here, or the one that is comes from code.
  */
-export function cameraInHand(): string | null {
+export function cameraInHand(make = true): string | null {
   const { model, time } = state()
   if (!model) return null
   const live = cameraAt(model, time)
@@ -185,13 +185,52 @@ export function cameraInHand(): string | null {
     useStore.getState().setNotice(`${live.name} is made by code: edit it in the code pane.`)
     return null
   }
-  if (camerasOf(model).length > 0) {
+  if (!make || camerasOf(model).length > 0) {
     useStore.getState().setNotice('No camera at the playhead.')
     return null
   }
   const name = freeName('camera')
   applyEdits([insertDeclaration(model.lastDeclEnd, cameraBlock(name, NO_VIEW, 0, null))], objectsSelected([name]))
   return name
+}
+
+/** How a shot of a camera is named after it (D377): `wide_shot2` is another shot of `wide`. */
+const SHOT = /_shot\d+$/
+
+/** The camera a camera is a shot of, by its name (D377): its own name without the shot's number. */
+export function cameraOf(name: string): string {
+  return name.replace(SHOT, '')
+}
+
+/** Every shot of one camera, itself among them, in the order of the cast (D377). */
+function shotsOf(model: SceneModel, camera: string): SceneObject[] {
+  return camerasOf(model).filter((c) => cameraOf(c.name) === camera)
+}
+
+/** The name of a camera's next shot (D377): `wide_shot2`, then `wide_shot3`, the first that is free. */
+function nextShot(model: SceneModel, camera: string): string {
+  const taken = takenNames(model)
+  let n = 2
+  while (taken.has(`${camera}_shot${n}`)) n++
+  return `${camera}_shot${n}`
+}
+
+/**
+ * How a camera was last framed as a cut to it comes (D377): of its shots that have begun, the
+ * one that was there latest, as it is at the cut or as it ended; with none begun yet, the first
+ * to begin, as it begins.
+ */
+function lastFraming(model: SceneModel, camera: string, at: number): View {
+  const shots = shotsOf(model, camera)
+  let last: { shot: SceneObject; when: number } | null = null
+  for (const shot of shots) {
+    if (shot.at > at) continue
+    const when = Math.min(at, shot.until ?? at)
+    if (!last || when >= last.when) last = { shot, when }
+  }
+  if (last) return viewOf(model, last.shot, last.when)
+  const first = shots.reduce<SceneObject | null>((a, b) => (a && a.at <= b.at ? a : b), null)
+  return first ? viewOf(model, first, first.at) : NO_VIEW
 }
 
 /** The camera at the bottom at a time: the first declared of those alive there, which the shots over it come back to (D365). */
@@ -218,93 +257,106 @@ function endCameraEdit(source: string, camera: SceneObject, at: number): TextEdi
 }
 
 /**
- * The edit that ends the shot a cut is made away from (D365): the camera that has the picture at
- * the cut ends there, so the shots sit side by side in the timeline. The camera at the bottom is
- * left as it is: the shots are made over it, and the picture comes back to it.
+ * Where a new camera's clip ends (D365, D378): where the picture next changes hands, so the
+ * shots after it are as they were, and sooner when the preferences give a camera's clip a
+ * length. The length does not take it past the scene's end, which it would lengthen. Null when
+ * it lasts to the end.
  */
-function endShotEdit(model: SceneModel, source: string, at: number, slack: number): TextEdit | null {
-  const holder = cameraAt(model, at)
-  if (!holder || holder === bottomCamera(model, at) || at <= holder.at + slack) return null
-  return endCameraEdit(source, holder, at)
+function shotEnd(model: SceneModel, t: number, slack: number): number | null {
+  const next = pictureUntil(model, t)
+  const length = useStore.getState().prefs.cameraLength
+  if (length === null) return next
+  let own = roundSeconds(t + length)
+  if (model.contentEnd !== null && t < model.contentEnd - slack) own = Math.min(own, model.contentEnd)
+  return next === null ? own : Math.min(next, own)
 }
 
 /**
- * A camera written over every other from a time on (D365), with the picture until it next
- * changes hands, so the shots after it are as they were. The shot before it ends there. Returns
- * whether it was written; a cut that is there already is left alone, with a word.
+ * A camera's clip written over every other from a time on (D365): it has the picture until its
+ * end (D378). A shot it covers to that shot's own end is ended where it begins, so the two sit
+ * side by side; one that outlasts it runs on under it and has the picture again after it, and
+ * the camera at the bottom is never ended. Returns whether it was written; a cut that is there
+ * already is left alone, with a word.
  */
 function cutIn(name: string, view: View, t: number): boolean {
   const { model, source, fps } = state()
   if (!model) return false
   const slack = frameSeconds(fps) / 2
-  const until = pictureUntil(model, t)
-  if (until !== null && until <= t + slack) {
+  const next = pictureUntil(model, t)
+  if (next !== null && next <= t + slack) {
     useStore.getState().setNotice('A cut is there already.')
     return false
   }
+  const until = shotEnd(model, t, slack)
   const edits: TextEdit[] = [insertDeclaration(model.lastDeclEnd, cameraBlock(name, view, t, until))]
-  const end = endShotEdit(model, source, t, slack)
-  if (end) edits.push(end)
+  const holder = cameraAt(model, t)
+  if (holder && holder !== bottomCamera(model, t) && t > holder.at + slack) {
+    const holderEnd = holder.until ?? model.contentEnd ?? Infinity
+    if (until === null || until >= holderEnd - slack) {
+      const end = endCameraEdit(source, holder, t)
+      if (end) edits.push(end)
+    }
+  }
   applyEdits(edits, objectsSelected([name]))
   return true
 }
 
 /**
- * A new camera from a time on (D365): framed as the camera that has the picture as the cut
- * comes is at the cut, which for one that ends there is how it ended. The cut into it is
- * seamless, and nothing shows until it is reframed. Returns its name.
+ * A new camera (D376): one of its own, not a shot of another, begun at a time and looking at a
+ * place, the scene's middle unless one is given, as close as the scene's own size, as a new
+ * object is put where and when it is asked for. Its clip is as long as the preferences say and
+ * never past the next cut (D378). Returns its name.
  */
-export function addCamera(at = state().time): string | null {
-  const { model, fps } = state()
-  if (!model) return null
-  const t = roundSeconds(Math.max(0, at))
-  const before = cameraAt(model, Math.max(0, t - frameSeconds(fps) / 2))
+export function addCamera(at = state().time, place: Point = { x: 0, y: 0 }): string | null {
+  if (!state().model) return null
   const name = freeName('camera')
-  return cutIn(name, before ? viewOf(model, before, t) : NO_VIEW, t) ? name : null
+  return cutIn(name, { x: place.x, y: place.y, zoom: 1, rotation: 0 }, roundSeconds(Math.max(0, at))) ? name : null
 }
 
 /**
- * Cut to a camera at a time (D365). One that is still there, under others, has the picture
- * again as itself: the cameras over it end there. One that has ended, or has not begun, comes
- * back as a new camera framed as it was when it ended, or as it will be when it begins. Returns
- * the name of the camera that has the picture from then, or null, with a word why, when nothing
- * was done.
+ * Cut to a camera at a time (D377): to the camera a name is a shot of, whichever of its shots is
+ * named. Where one of its shots is the camera at the bottom there, still running under the
+ * rest, the clips over it are cut so it shows: they end there, and it has the picture as itself.
+ * Otherwise the cut is a new shot of it, named after it, framed as the camera was last framed,
+ * as long as the preferences say and never past the next cut (D378). Returns the name of the
+ * camera that has the picture from then, or null, with a word why, when nothing was done.
  */
 export function cutToCamera(name: string, at = state().time): string | null {
   const { model, source, fps } = state()
-  const target = model?.objects.find((o) => o.name === name && o.className === CAMERA)
-  if (!model || !target) return null
+  if (!model) return null
+  const camera = cameraOf(name)
+  if (shotsOf(model, camera).length === 0) return null
   const say = (text: string): null => {
     useStore.getState().setNotice(text)
     return null
   }
   const slack = frameSeconds(fps) / 2
   const t = roundSeconds(Math.max(0, at))
-  const all = camerasOf(model)
-  if (existsAt(model, target, t)) {
-    const over = all.slice(all.indexOf(target) + 1).filter((c) => existsAt(model, c, t))
-    if (over.length === 0) return say(`${name} has the picture there already.`)
+  const holder = cameraAt(model, t)
+  if (holder && cameraOf(holder.name) === camera) return say(`${camera} has the picture there already.`)
+  const bottom = bottomCamera(model, t)
+  if (bottom && cameraOf(bottom.name) === camera) {
     const edits: TextEdit[] = []
-    for (const camera of over) {
-      if (t <= camera.at + slack) return say(`${camera.name} begins there.`)
-      const end = endCameraEdit(source, camera, t)
-      if (!end) return say(`${camera.name} is over it, and its end is written as code.`)
+    for (const over of camerasOf(model)) {
+      if (over === bottom || !existsAt(model, over, t)) continue
+      if (t <= over.at + slack) return say(`${over.name} begins there.`)
+      const end = endCameraEdit(source, over, t)
+      if (!end) return say(`${over.name} is over it, and its end is written as code.`)
       edits.push(end)
     }
-    applyEdits(edits, objectsSelected([name]))
-    return name
+    applyEdits(edits, objectsSelected([bottom.name]))
+    return bottom.name
   }
-  const when = Math.min(Math.max(t, target.at), target.until ?? t)
-  const copy = numberedCopies(model, [name], 2)[name]!
-  return cutIn(copy, viewOf(model, target, when), t) ? copy : null
+  const shot = nextShot(model, camera)
+  return cutIn(shot, lastFraming(model, camera, t), t) ? shot : null
 }
 
 /**
  * Cut a camera's clip in two at a time, the razor's cut (D363, D365): the first ends there, and
- * a second, declared right after it, begins there, framed as the first is at that moment and
- * lasting as long as it did. An animation of its own that runs across the cut is cut there too
- * (D264), and what begins after it goes to the second, so the two run on as the one did.
- * Returns the second's name.
+ * a second, the camera's next shot by its name (D377), declared right after it, begins there,
+ * framed as the first is at that moment and lasting as long as it did. An animation of its own
+ * that runs across the cut is cut there too (D264), and what begins after it goes to the
+ * second, so the two run on as the one did. Returns the second's name.
  */
 export function cutCamera(name: string, at: number): string | null {
   const before = state()
@@ -335,7 +387,7 @@ export function cutCamera(name: string, at: number): string | null {
     const { model, source } = state()
     const camera = model?.objects.find((o) => o.name === name && o.className === CAMERA)
     if (!model || !camera?.decl) return null
-    const copy = numberedCopies(model, [name], 2)[name]!
+    const copy = nextShot(model, cameraOf(name))
     const declEnd = camera.decl.range.to
     const edits: TextEdit[] = [{ from: declEnd, to: declEnd, insert: `\n\n${cameraBlock(copy, viewOf(model, camera, at), at, camera.until)}` }, timeProp(source, camera.decl, 'until', roundSeconds(at))]
     for (const action of camera.actions) {
@@ -353,25 +405,77 @@ export function cutCamera(name: string, at: number): string | null {
   }
 }
 
-/** The cut to one camera at the playhead, for that camera's own menus (D365): there unless it has the picture already. */
+/** The cut to one camera at the playhead, for that camera's own menus (D377): there unless it, or another shot of it, has the picture already. */
 export function cutHereItems(name: string): MenuItem[] {
   const { model, time, fps } = state()
-  if (!model || cameraAt(model, time)?.name === name) return []
+  if (!model) return []
+  const holder = cameraAt(model, time)
+  if (holder && cameraOf(holder.name) === cameraOf(name)) return []
   return [{ label: 'Cut to', keyword: timecode(time, fps), run: () => void cutToCamera(name) }]
 }
 
-/** The cameras a cut can be made to at a time, the highest first, each as a menu item that cuts to it and then does `after` (D365): every camera but the one that has the picture there. */
+/** The cameras a cut can be made to at a time, in the order of the cast, each as a menu item that cuts to it and then does `after` (D377): each camera once, whatever its shots, and not the one that has the picture there. */
 export function cutToItems(at: number, after: (name: string) => void = () => undefined): MenuItem[] {
   const { model } = state()
   if (!model) return []
   const holder = cameraAt(model, Math.max(0, at))
-  return [...camerasOf(model)].reverse().filter((camera) => camera !== holder).map((camera) => ({
-    label: camera.name,
+  const active = holder ? cameraOf(holder.name) : null
+  return [...new Set(camerasOf(model).map((c) => cameraOf(c.name)))].filter((camera) => camera !== active).map((camera) => ({
+    label: camera,
     run: () => {
-      const now = cutToCamera(camera.name, at)
+      const now = cutToCamera(camera, at)
       if (now !== null) after(now)
     },
   }))
+}
+
+/**
+ * When a thing is there, one level down in its menus (D379): the playhead to where it begins or
+ * ends, and, for what the GUI may write, its beginning or its end put at a time, or its end
+ * taken away. A group has no life of its own to set.
+ */
+export function lifetimeMenu(name: string, at: number): MenuItem[] {
+  const s = useStore.getState()
+  const obj = s.model?.objects.find((o) => o.name === name)
+  if (!obj) return []
+  const fps = s.settings.fps
+  const end = obj.until ?? s.contentEnd
+  const writable = canEdit() && !!obj.decl && !obj.codeDriven && obj.className !== GROUP
+  return [
+    {
+      label: 'Lifetime',
+      children: [
+        { label: 'Go to start', keyword: timecode(obj.at, fps), run: () => useStore.getState().setTime(obj.at) },
+        ...(end !== null ? [{ label: 'Go to end', keyword: timecode(end, fps), run: () => useStore.getState().setTime(end) }] : []),
+        ...(writable
+          ? [
+              { label: 'Begin at', keyword: timecode(at, fps), run: () => setLifetime(name, { at }) },
+              { label: 'End at', keyword: timecode(at, fps), run: () => setLifetime(name, { until: at }) },
+              ...(obj.until !== null ? [{ label: 'No end', run: () => setLifetime(name, { until: null }) }] : []),
+            ]
+          : []),
+      ],
+    },
+  ]
+}
+
+/**
+ * What a thing is set to be, one level down in its menus (D379): its classes, its links, and
+ * whether it is attached to the camera, with whatever a pane adds of its own, as the preview
+ * adds how a thing takes a push.
+ */
+export function propertiesMenu(targets: string[], more: MenuItem[] = []): MenuItem[] {
+  const s = useStore.getState()
+  const objects = targets.map((n) => s.model?.objects.find((o) => o.name === n)).filter((o): o is SceneObject => !!o)
+  if (objects.length === 0) return []
+  const one = objects.length === 1 ? objects[0]! : null
+  const items: MenuItem[] = [
+    ...(objects.every((o) => o.className !== GROUP) ? [{ label: 'Classes', run: () => requestClasses(objects.map((o) => o.name)) }] : []),
+    ...(one && one.className !== GROUP && one.decl ? [{ label: 'Links', run: () => useStore.getState().openLinksDialog({ object: one.name }) }] : []),
+    ...attachMenuItems(targets),
+    ...more,
+  ]
+  return items.length > 0 ? [{ label: 'Properties', children: items }] : []
 }
 
 /**
@@ -3025,7 +3129,7 @@ export function setAttached(names: string[], on: boolean): void {
   if (own) endGesture()
 }
 
-/** The menu's item that holds things on the screen, or lets them go (D362). */
+/** The menu's item that holds things on the screen, or lets them go (D362), in the words the owner gave it (D375): attached to the camera, a thing goes where the camera goes. */
 export function attachMenuItems(targets: string[]): MenuItem[] {
   const { model } = state()
   const able = targets.filter((name) => {
@@ -3034,7 +3138,7 @@ export function attachMenuItems(targets: string[]): MenuItem[] {
   })
   if (able.length === 0) return []
   const all = able.every(attachedNow)
-  return [{ label: all ? 'Detach from screen' : 'Attach to screen', run: () => setAttached(able, !all) }]
+  return [{ label: all ? 'Detach from camera' : 'Attach to camera', run: () => setAttached(able, !all) }]
 }
 
 /** Unlink an object's attribute: what the link replaced comes back, or, when nothing is remembered, the default (D189). */
@@ -3911,12 +4015,12 @@ export function hiddenInView(model: SceneModel, hidden: readonly string[], obj: 
   return hidden.length > 0 && (hidden.includes(obj.name) || containers(model, obj).some((g) => hidden.includes(g.name)))
 }
 
-/** Hide in the view, or show again, what a right-click is on (D341): the view's alone, nothing written. */
+/** Hide in the view, or unhide, what a right-click is on (D341, D379): the view's alone, nothing written. */
 export function hideMenuItems(targets: string[]): MenuItem[] {
   const names = targets.filter((n) => useStore.getState().model?.objects.some((o) => o.name === n))
   if (names.length === 0) return []
   const hidden = names.every((n) => useStore.getState().hidden.includes(n))
-  return [{ label: hidden ? 'Show' : 'Hide', run: () => useStore.getState().setHidden(names, !hidden) }]
+  return [{ label: hidden ? 'Unhide' : 'Hide', run: () => useStore.getState().setHidden(names, !hidden) }]
 }
 
 /** The masks, each ticked where it hides all of what the names stand for, to take them in or let them out (D333). */

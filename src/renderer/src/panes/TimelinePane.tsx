@@ -22,6 +22,8 @@ import {
   appearClassHere,
   appearHere,
   addCamera,
+  lifetimeMenu,
+  propertiesMenu,
   canEdit,
   cutCamera,
   cutToItems,
@@ -42,7 +44,6 @@ import {
   overrideClassAction,
   ownAction,
   removeFromClass,
-  requestClasses,
   requestRename,
   retimeActions,
   roundSeconds,
@@ -61,7 +62,6 @@ import {
   ungroup,
   setAttrsAt,
   setAttrsAtMany,
-  setLifetime,
   classStartsOf,
   setLifetimes,
   shiftLives,
@@ -1260,11 +1260,10 @@ export function TimelinePane() {
     const isGroup = obj.className === GROUP
     const isCamera = obj.className === CAMERA
     const editableObject = !!obj.decl && !obj.codeDriven && canEdit()
+    // Several selected: what is set goes to all of them (D292).
+    const targets = s.selection.length > 1 && s.selection.includes(obj.name) ? s.selection : [obj.name]
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToObject(obj.name) },
-      // The playhead to where the object begins, or where it is removed, else the end of the content (D259).
-      { label: 'Go to start', keyword: timecode(obj.at, fps), run: () => useStore.getState().setTime(obj.at) },
-      ...(obj.until !== null || s.contentEnd !== null ? [{ label: 'Go to end', keyword: timecode(obj.until ?? s.contentEnd ?? 0, fps), run: () => useStore.getState().setTime(obj.until ?? s.contentEnd ?? 0) }] : []),
       { label: 'Rename', run: () => requestRename({ object: obj.name }) },
       // A camera's clip is cut from its menu as by the razor, and cut away from to another camera (D365).
       ...(isCamera && editableObject
@@ -1279,33 +1278,27 @@ export function TimelinePane() {
           ]
         : []),
       ...(isCamera ? cutTo(t) : []),
-      // Several selected: the classes go to all of them (D292).
-      ...(isGroup ? [] : [{ label: 'Classes', run: () => requestClasses(s.selection.length > 1 && s.selection.includes(obj.name) ? s.selection : [obj.name]) }]),
-      ...(isGroup || !editableObject
-        ? []
-        : [
-            { label: 'Begin at', keyword: timecode(t, fps), run: () => setLifetime(obj.name, { at: t }) },
-            { label: 'End at', keyword: timecode(t, fps), run: () => setLifetime(obj.name, { until: t }) },
-            ...(obj.until !== null ? [{ label: 'No end', run: () => setLifetime(obj.name, { until: null }) }] : []),
-            { label: 'Links', run: () => openLinksDialog({ object: obj.name }) },
-          ]),
-      // Hidden in the view alone (D341): its clip stays, grayed, with the eye that shows it again.
+      // Hidden in the view alone (D341): its clip stays, grayed, with the eye that unhides it.
       // A camera is not drawn, so there is nothing of it to hide (D357).
-      ...(isCamera ? [] : hideMenuItems(s.selection.length > 1 && s.selection.includes(obj.name) ? s.selection : [obj.name])),
+      ...(isCamera ? [] : hideMenuItems(targets)),
+      // When it is there, one level down (D379): the playhead to where it begins or is removed, else the end of the content (D259), and its beginning or its end put where the pointer is.
+      ...lifetimeMenu(obj.name, t),
+      // What it is set to be, one level down (D379): its classes, its links, and whether it is attached to the camera (D375).
+      ...(isGroup ? [] : propertiesMenu(targets)),
       { label: 'Duplicate', run: () => duplicateObjects([obj.name]) },
       ...(!editableObject || isCamera ? [] : [{ label: 'Save preset', run: () => requestSavePreset({ object: obj.name }) }]),
       isGroup ? { label: 'Ungroup', run: () => ungroup(obj.name), danger: true } : { label: 'Delete', run: () => deleteObjects([obj.name]), danger: true },
     ])
   }
 
-  /** A camera among what a right-click adds (D365): from that time on, framed as the picture is just before it, the playhead put on the cut so it is what is reframed next. */
+  /** A camera among what a right-click adds (D376): a new camera of its own from that time, the playhead put where it begins so it is what is framed next. */
   const cameraAdd = (t: number) => ({
     label: 'Camera',
     run: () => {
       if (addCamera(t) !== null) useStore.getState().setTime(t)
     },
   })
-  /** Cut to one of the cameras at a time (D365), the playhead put on the cut. */
+  /** Cut to one of the cameras at a time (D377), the playhead put on the cut. */
   const cutTo = (t: number) => {
     const items = cutToItems(t, () => useStore.getState().setTime(t))
     return items.length > 0 ? [{ label: 'Cut to', keyword: timecode(t, fps), children: items }] : []
@@ -1690,8 +1683,8 @@ export function TimelinePane() {
                 e.stopPropagation()
                 useStore.getState().setHidden([obj.name, ...containers(model, obj).map((g) => g.name)], false)
               }}
-              title="Hidden in the view: show"
-              aria-label="Show"
+              title="Hidden in the view: unhide"
+              aria-label="Unhide"
             >
               <Eye off />
             </button>

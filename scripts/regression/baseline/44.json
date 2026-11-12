@@ -45,11 +45,9 @@
     "Shape▸",
     "Path▸",
     "Save preset",
-    "Classes",
     "Mask▸",
     "Hide",
-    "Attach to screen",
-    "Collision▸",
+    "Properties▸",
     "Duplicate",
     "Delete"
    ],
@@ -75,11 +73,9 @@
     "Shape▸",
     "Path▸",
     "Save preset",
-    "Classes",
     "Mask▸",
     "Hide",
-    "Attach to screen",
-    "Collision▸",
+    "Properties▸",
     "Duplicate",
     "Delete"
    ],
@@ -102,11 +98,9 @@
      "Shape▸",
      "Path▸",
      "Save preset",
-     "Classes",
      "Mask▸",
      "Hide",
-     "Attach to screen",
-     "Collision▸",
+     "Properties▸",
      "Duplicate",
      "Delete"
     ]
@@ -193,8 +187,8 @@
    "overlap": false,
    "barRight": 340,
    "toolsLeft": 999,
-   "barBottom": 92,
-   "toolsTop": 92,
+   "barBottom": 90,
+   "toolsTop": 90,
    "err": null
   },
   "IMPORT3": {

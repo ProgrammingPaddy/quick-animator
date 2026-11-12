@@ -11,8 +11,8 @@ const VIEW_TIP: Record<PreviewView, string> = { preview: "The scene, with the ca
 
 /**
  * The preview's own choices, in its pane's header (D371): what a click picks, where a Shift-drag's
- * animation sits and whether they chain, snapping to the grid and to edges, the paths and the
- * masks shown, collision; then what the pane shows, Preview, Both, or Camera (D359). The tools and
+ * animation sits and whether they chain, snapping to the grid and to edges, the paths, the
+ * masks, and the cameras shown (D374), collision; then what the pane shows, Preview, Both, or Camera (D359). The tools and
  * what the tool in hand can do stay over the preview, with the zoom and Fit. A right-click on any
  * of it does nothing, as on the preview's own bars (D308).
  */
@@ -29,6 +29,8 @@ export function PreviewHeader() {
   const toggleShowPaths = useStore((s) => s.toggleShowPaths)
   const showMasks = useStore((s) => s.showMasks)
   const toggleShowMasks = useStore((s) => s.toggleShowMasks)
+  const showCameras = useStore((s) => s.showCameras)
+  const toggleShowCameras = useStore((s) => s.toggleShowCameras)
   const collide = useStore((s) => s.collide)
   const setCollide = useStore((s) => s.setCollide)
   const push = useStore((s) => s.push)
@@ -77,6 +79,9 @@ export function PreviewHeader() {
         </button>
         <button className={showMasks ? 'on' : ''} onClick={toggleShowMasks} title={showMasks ? 'Showing the edges of the masks on what is selected, or of every mask with nothing selected' : "Showing a mask's edge only while it is selected"} aria-pressed={showMasks}>
           Show Masks
+        </button>
+        <button className={showCameras ? 'on' : ''} onClick={toggleShowCameras} title={showCameras ? "Showing every camera's frame" : "Showing a camera's frame only while it is selected"} aria-pressed={showCameras}>
+          Show Cameras
         </button>
         <button className={previewSnap.edges ? 'on' : ''} onClick={() => setPreviewSnap({ edges: !previewSnap.edges })} title={previewSnap.edges ? 'Aligning to edges and centers' : 'Not aligning to other objects'} aria-pressed={previewSnap.edges}>
           Edges

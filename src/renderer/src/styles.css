@@ -341,25 +341,32 @@ button.small:hover {
   flex: 1;
 }
 
-/* The preview's header holds its options and its views (D371): it grows a second row where one will not hold them. */
+/* The preview's header holds its options and its views (D371): the title at its left and the views at its top right stay where they are, and the options between them take a second row where one will not hold them. */
 .pane.center > .pane-header {
   height: auto;
   min-height: var(--header-h);
-  flex-wrap: wrap;
-  row-gap: 3px;
+  align-items: flex-start;
   padding-top: 3px;
   padding-bottom: 3px;
 }
 
+.pane.center > .pane-header .title {
+  flex: none;
+  line-height: 20px;
+}
+
 /* The preview's options, in its pane's header (D371): the looks of the bar they came from, on the header's own ground. */
 .preview-options {
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 3px;
 }
 
-.preview-options button {
+.preview-options > button,
+.preview-options .preview-modes button {
   height: 20px;
   padding: 0 7px;
   border-radius: 4px;
@@ -369,12 +376,27 @@ button.small:hover {
   white-space: nowrap;
 }
 
-.preview-options button:hover {
+.preview-options > button:hover,
+.preview-options .preview-modes button:hover {
   color: var(--fg);
 }
 
-.preview-options button.on {
+.preview-options > button.on {
   color: var(--accent);
+}
+
+/* Snap's numbers are as tall as the buttons beside them, so the header keeps its height when they come (D374). */
+.preview-options .num-field,
+.preview-options .num-field .stepper {
+  height: 20px;
+}
+
+.preview-options .num-field input {
+  height: 18px;
+}
+
+.preview-options .num-field .stepper button {
+  height: 10px;
 }
 
 .preview-options .preview-modes,
@@ -393,6 +415,7 @@ button.small:hover {
 
 /* What the preview shows (D359), in its pane's header: three buttons as one, the one that is on lit. */
 .preview-views {
+  flex: none;
   display: flex;
   gap: 1px;
   border-radius: 4px;
@@ -915,7 +938,8 @@ button.icon:hover {
   color: #111827;
 }
 
-.preview.tool-select .camera-tag {
+.preview.tool-select .camera-tag,
+.preview.tool-camera .camera-tag {
   pointer-events: auto;
 }
 

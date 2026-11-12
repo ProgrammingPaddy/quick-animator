@@ -15,7 +15,7 @@ const view = (t) => { const v = smp.viewAt(S().model, t); return { x: r2(v.x), y
 const wgeom = () => { const el = document.querySelector('.preview'); const r = document.querySelector('.preview-world').getBoundingClientRect(); const zoom = Math.max(Math.min((r.width - 80) / 1920, (r.height - 80) / 1080), 0.02); return { el, r, zoom, sx: (wx) => r.left + r.width / 2 + wx * zoom, sy: (wy) => r.top + r.height / 2 - wy * zoom } };
 // The Camera view's picture: its middle, and how many of its pixels one of the project's is.
 const cgeom = () => { const r = document.querySelector('.preview-camera canvas').getBoundingClientRect(); return { el: document.querySelector('.preview'), panel: document.querySelector('.preview-camera'), r, k: r.width / 1920, cx: r.left + r.width / 2, cy: r.top + r.height / 2 } };
-const start = async (source, shown, tool) => { await setSource(source); S().setPreviewView(shown); S().setTool(tool); S().select([]); S().setTransformMode('all'); S().setAnchor('center'); if (S().collide) S().setCollide(false); S().setTime(0); await tick(500) };
+const start = async (source, shown, tool) => { await setSource(source); S().setPreviewView(shown); S().setTool(tool); S().select([]); if (!S().showCameras) S().toggleShowCameras(); S().setTransformMode('all'); S().setAnchor('center'); if (S().collide) S().setCollide(false); S().setTime(0); await tick(500) };
 // A drag between two places on the screen, begun on an element and carried on the pane.
 const pull = async (onEl, from, to, extra = {}) => { const el = document.querySelector('.preview'); pe(onEl, 'pointerdown', from.x, from.y, extra); for (let i = 1; i <= 6; i++) { pe(el, 'pointermove', from.x + ((to.x - from.x) * i) / 6, from.y + ((to.y - from.y) * i) / 6, extra); await tick(30) } pe(el, 'pointerup', to.x, to.y, extra); await tick(280) };
 const tail = (name) => S().source.slice(S().source.indexOf(name + ' = Camera'));
@@ -65,14 +65,14 @@ out.frame = QA.getRenderer().cameras();
 out.name = [...document.querySelectorAll('.camera-tag')].map((el) => ({ text: el.textContent.trim(), cls: el.className }));
 return out`,
 
-  // The Camera tool in the Camera view: a drag moves the picture, so the camera goes the other way by the picture's scale and its zoom; the wheel zooms, the place under the pointer staying under it, with another tool as with this one. In a scene with no camera the first press makes one, in one undo step with what the drag does.
+  // The Camera tool in the Camera view (D373): taken up, it selects nothing; a drag of the picture is a drag of the camera that has it, which goes the other way by the picture's scale and its zoom, and is selected; the wheel zooms, the place under the pointer staying under it, with another tool as with this one. In a scene with no camera the tool makes none and says so; the middle button makes one, in one undo step with what its drag does (D369).
   TOOL1: `${HELP}
 const out = {};
 await start(${JSON.stringify(SCENE + WIDE)}, 'both', 'camera');
 out.inHand = S().selection;
 const c = cgeom();
 await pull(c.panel, { x: c.cx, y: c.cy }, { x: c.cx + 60, y: c.cy + 30 });
-out.afterDrag = { decl: decl('wide'), expected: { x: Math.round(-60 / c.k / 2), y: Math.round(30 / c.k / 2) } };
+out.afterDrag = { decl: decl('wide'), expected: { x: Math.round(-60 / c.k / 2), y: Math.round(30 / c.k / 2) }, selected: S().selection };
 // The wheel, 100 px right of the picture's middle: twice as close, and that place still under the pointer.
 const before = view(0);
 const under = { x: before.x + 100 / c.k / before.zoom, y: before.y };
@@ -86,23 +86,30 @@ const zoomWas = view(0).zoom;
 document.querySelector('.preview-camera canvas').dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: c.cx, clientY: c.cy, deltaY: -Math.log(2) / 0.0015 }));
 await tick(700);
 out.wheelWithSelect = { twiceAsClose: r2(view(0).zoom / zoomWas), selection: S().selection };
-// No camera yet: the tool's first drag makes one and moves it; one undo takes both away.
+// No camera yet: the tool makes none. The middle button's drag makes one and moves it; one undo takes both away.
 await start(${JSON.stringify(SCENE)}, 'both', 'camera');
 const c2 = cgeom();
+const bare = S().source;
 await pull(c2.panel, { x: c2.cx, y: c2.cy }, { x: c2.cx - 40, y: c2.cy });
+out.toolMakesNone = { same: S().source === bare, notice: S().notice };
+await pull(c2.panel, { x: c2.cx, y: c2.cy }, { x: c2.cx - 40, y: c2.cy }, { button: 1, buttons: 4 });
 out.made = { decl: decl('camera'), selected: S().selection, expectedX: Math.round(40 / c2.k) };
 key('keydown', 'KeyZ', { ctrlKey: true }); await tick(400);
 out.undone = S().model.objects.map((o) => o.name);
 return out`,
 
-  // In the Preview view: the Camera tool drags the frame from anywhere, and a corner dragged out to twice as far halves the zoom, the middle kept. With Select the frame's line picks the camera, and so does its name; what is inside the frame does not.
+  // In the Preview view the Camera tool is Select for cameras (D373): a drag from empty space moves nothing; a press inside the frame picks the camera, over the box and the backdrop, and a drag from there moves it; a corner dragged out to twice as far halves the zoom, the middle kept. With Select, and the cameras shown (D374), the frame's line picks the camera, and so does its name; what is inside the frame does not.
   TOOL2: `${HELP}
 const out = {};
 await start(${JSON.stringify(SCENE + WIDE)}, 'both', 'camera');
 const g = wgeom();
-// From empty space outside the frame, 300 to the right and 100 up in the scene.
+// From empty space outside the frame, 300 to the right and 100 up in the scene: nothing moves, and nothing is picked.
 await pull(g.el, { x: g.sx(-800), y: g.sy(-450) }, { x: g.sx(-500), y: g.sy(-350) });
+out.fromEmpty = { decl: decl('wide'), selection: S().selection };
+// From inside the frame, the same way: the camera is picked and goes with the pointer.
+await pull(g.el, { x: g.sx(100), y: g.sy(50) }, { x: g.sx(400), y: g.sy(150) });
 out.moved = decl('wide');
+out.picked = S().selection;
 // The frame is 960 by 540 around 300, 100: its top right corner, out to twice as far from its middle.
 await pull(g.el, { x: g.sx(300 + 480), y: g.sy(100 + 270) }, { x: g.sx(300 + 960), y: g.sy(100 + 540) });
 out.zoomed = decl('wide');
@@ -142,8 +149,9 @@ out.later = { acts: acts('wide'), time: S().time };
 S().setTime(1); await tick(250);
 await pull(c.panel, { x: c.cx, y: c.cy }, { x: c.cx + 20, y: c.cy });
 out.atTheEnd = acts('wide');
-// A corner with Shift, in the Preview view, animates the zoom.
+// A corner of the selected camera with Shift, in the Preview view, animates the zoom.
 await start(${JSON.stringify(SCENE + WIDE)}, 'both', 'camera');
+S().select(['wide']); await tick(250);
 const g = wgeom();
 pe(g.el, 'pointermove', g.sx(480), g.sy(270));
 key('keydown', 'Shift', { shiftKey: true }); await tick(150);
@@ -168,7 +176,7 @@ pe(clip.querySelector('.oclip-title'), 'pointerdown', xAt(3), cr.top + 6); await
 S().setTimelineTool('select'); await tick(200);
 out.cut = { code: tail('wide').trim(), selected: S().selection, time: S().time, clips: clips(), who: [2, 3, 5].map(who) };
 // The two never share a moment, so they sit side by side on one level.
-out.sideBySide = out.cut.clips.find((c) => c.name === 'wide2').level === out.cut.clips.find((c) => c.name === 'wide').level;
+out.sideBySide = out.cut.clips.find((c) => c.name === 'wide_shot2').level === out.cut.clips.find((c) => c.name === 'wide').level;
 // Nothing shows until the new one is reframed: the picture at the cut is what it was, and the move runs on after it.
 out.sameAtTheCut = JSON.stringify(view(3)) === JSON.stringify({ x: 450, y: 0, zoom: 1, rotation: 0 });
 out.runsOn = [view(3.5).x, view(4).x, view(5).x];

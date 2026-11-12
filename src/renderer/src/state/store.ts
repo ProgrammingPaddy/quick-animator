@@ -157,6 +157,8 @@ const PREFS_KEY = 'quick-animator.prefs'
 export interface Prefs {
   /** Seconds a new object lasts from where it is added, or null to last to the end of the content. */
   objectLength: number | null
+  /** Seconds a new camera's clip lasts, a new camera's or a cut's (D378), or null to last until the picture next changes hands; never past that either way. */
+  cameraLength: number | null
   /** The keys given to hotkeys in place of their defaults, by the hotkey's id (D260). */
   hotkeys?: Readonly<Record<string, readonly string[]>>
   /** Whether the code pane shows every time as frames beside it, and frames as seconds (D276); on unless turned off. */
@@ -171,7 +173,7 @@ export interface Prefs {
   hideInExport?: boolean
 }
 
-export const DEFAULT_PREFS: Prefs = { objectLength: 2, timeHints: true, clipOpacity: true, recentColors: 4 }
+export const DEFAULT_PREFS: Prefs = { objectLength: 2, cameraLength: 2, timeHints: true, clipOpacity: true, recentColors: 4 }
 
 /** The most colors used lately that are kept, and the most that show beside a color (D309). */
 export const RECENT_COLORS_MAX = 12
@@ -225,11 +227,12 @@ function loadPrefs(): Prefs {
     if (!raw) return DEFAULT_PREFS
     const saved = JSON.parse(raw) as Partial<Prefs>
     const length = saved.objectLength
+    const shot = saved.cameraLength
     const hotkeys: Record<string, readonly string[]> = {}
     if (saved.hotkeys && typeof saved.hotkeys === 'object') {
       for (const [id, keys] of Object.entries(saved.hotkeys)) if (Array.isArray(keys) && keys.every((k) => typeof k === 'string')) hotkeys[id] = keys
     }
-    return { objectLength: length === null ? null : typeof length === 'number' && length > 0 ? length : DEFAULT_PREFS.objectLength, hotkeys, timeHints: saved.timeHints !== false, clipOpacity: saved.clipOpacity !== false, recentColors: typeof saved.recentColors === 'number' && Number.isFinite(saved.recentColors) ? Math.max(0, Math.min(RECENT_COLORS_MAX, Math.round(saved.recentColors))) : DEFAULT_PREFS.recentColors, ...(Array.isArray(saved.timelineOrder) ? { timelineOrder: sectionOrder(saved.timelineOrder) } : {}), hideInExport: saved.hideInExport === true }
+    return { objectLength: length === null ? null : typeof length === 'number' && length > 0 ? length : DEFAULT_PREFS.objectLength, cameraLength: shot === null ? null : typeof shot === 'number' && shot > 0 ? shot : DEFAULT_PREFS.cameraLength, hotkeys, timeHints: saved.timeHints !== false, clipOpacity: saved.clipOpacity !== false, recentColors: typeof saved.recentColors === 'number' && Number.isFinite(saved.recentColors) ? Math.max(0, Math.min(RECENT_COLORS_MAX, Math.round(saved.recentColors))) : DEFAULT_PREFS.recentColors, ...(Array.isArray(saved.timelineOrder) ? { timelineOrder: sectionOrder(saved.timelineOrder) } : {}), hideInExport: saved.hideInExport === true }
   } catch {
     return DEFAULT_PREFS
   }
@@ -312,6 +315,7 @@ const ANCHOR_KEY = 'quick-animator.anchor'
 const SHOW_PATHS_KEY = 'quick-animator.showPaths'
 const OBJECTS_VIEW_KEY = 'quick-animator.objectsView'
 const SHOW_MASKS_KEY = 'quick-animator.showMasks'
+const SHOW_CAMERAS_KEY = 'quick-animator.showCameras'
 const PREVIEW_VIEW_KEY = 'quick-animator.previewView'
 const PREVIEW_SPLIT_KEY = 'quick-animator.previewSplit'
 
@@ -499,6 +503,8 @@ interface State {
   hidden: string[]
   /** Whether the preview outlines the masks (D344, D350): those on what is selected, or with nothing selected every mask there is at the playhead; off unless turned on, and persisted. */
   showMasks: boolean
+  /** Whether the Preview view outlines the cameras alive at the playhead, each with its name (D374); off unless turned on, and persisted. A selected camera shows either way, and the Camera tool shows them all. */
+  showCameras: boolean
   /** The Objects pane's view (D338): the layers, top first, or the objects by type. */
   objectsView: 'layers' | 'type'
   /** What the preview shows (D359): Preview, Both, or Camera; kept between sessions. */
@@ -576,6 +582,7 @@ interface State {
   setPathHidden: (key: string, hidden: boolean) => void
   setHidden: (names: string[], hidden: boolean) => void
   toggleShowMasks: () => void
+  toggleShowCameras: () => void
   setObjectsView: (view: 'layers' | 'type') => void
   setPreviewView: (view: PreviewView) => void
   /** The next of Preview, Both, Camera (D359). */
@@ -665,6 +672,7 @@ function createAppStore() {
       hiddenPaths: [],
       hidden: [],
       showMasks: loadChoice<'on' | 'off'>(SHOW_MASKS_KEY, ['on', 'off'], 'off') === 'on',
+      showCameras: loadChoice<'on' | 'off'>(SHOW_CAMERAS_KEY, ['on', 'off'], 'off') === 'on',
       objectsView: loadChoice<'layers' | 'type'>(OBJECTS_VIEW_KEY, ['layers', 'type'], 'layers'),
       previewView: loadChoice<PreviewView>(PREVIEW_VIEW_KEY, PREVIEW_VIEWS, 'preview'),
       previewSplit: loadSplit(),
@@ -822,6 +830,11 @@ function createAppStore() {
         set((s) => {
           saveChoice(SHOW_MASKS_KEY, s.showMasks ? 'off' : 'on')
           return { showMasks: !s.showMasks }
+        }),
+      toggleShowCameras: () =>
+        set((s) => {
+          saveChoice(SHOW_CAMERAS_KEY, s.showCameras ? 'off' : 'on')
+          return { showCameras: !s.showCameras }
         }),
       setPreviewView: (previewView) => {
         saveChoice(PREVIEW_VIEW_KEY, previewView)

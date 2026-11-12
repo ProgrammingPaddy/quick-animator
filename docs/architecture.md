@@ -222,10 +222,15 @@ guides for one view's pixel size; the pane calls `layout` again with the Camera 
 draws that view, with the cameras' own frames left out, and once more for the view a press lands
 in, so the handles picked are the ones that view shows.
 
-Cuts (D365) are text edits like any other, in `project/operations.ts`: `addCamera` and
-`cutToCamera` write a camera declared last with the life the picture leaves it, and end the shot
-before it; `cutCamera` cuts a camera's clip in two, cutting the animations that cross the cut with
-the razor's own `sliceAction` and giving the later ones to the second camera.
+Cuts (D365, D376 to D378) are text edits like any other, in `project/operations.ts`. `addCamera`
+writes a new camera and `cutToCamera` a new shot of one, both through `cutIn`: a camera declared
+last, with the life the preferences and the next cut leave it, the shot it covers to its end
+ended where it begins. A camera's shots are told by name alone, `cameraOf('wide_shot2')` being
+`wide`; no model of them is kept. `cutCamera` cuts a camera's clip in two, cutting the animations
+that cross the cut with the razor's own `sliceAction` and giving the later ones to the second.
+The Camera tool (D373) is the preview's Select branch with what is under the pointer narrowed to
+cameras, found by `SceneRenderer.pickCamera` and `pickCameraInside`; the renderer draws and
+picks a camera's frame only when `setView` says the cameras show, or it is in hand (D374).
 
 ## Time (D41)
 

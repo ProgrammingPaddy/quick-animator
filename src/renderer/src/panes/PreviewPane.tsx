@@ -19,7 +19,7 @@ import { convertTextToShape } from '../project/textToShape'
 import { cameraAt, camerasOf, journeyOf, NO_VIEW, parseColor, textPadding, textStyleAt, valueAt, viewOf, worldPose } from '../model/sample'
 import { layoutOf, type TextStyle } from '../model/text'
 import { DEFAULT_EASE_FRACTION, easingFor, unease } from '../model/easing'
-import { addCamera, attachMenuItems, cameraInHand, cutHereItems, hideMenuItems, maskMenuItems, addMorph, addObject, addPath, beginFill, beginOutline, canEdit, paintFill, paintStroke, sketchLine, writeOnLine, setObjectProp, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, pathDragTarget, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestClasses, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, settleMorph, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphRunning, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
+import { addCamera, cameraInHand, cutHereItems, hideMenuItems, propertiesMenu, maskMenuItems, addMorph, addObject, addPath, beginFill, beginOutline, canEdit, paintFill, paintStroke, sketchLine, writeOnLine, setObjectProp, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, pathDragTarget, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, settleMorph, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphRunning, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
 import { addUserObject, requestSavePreset } from '../project/userPresets'
 import { makeMover, outlineOf, resetMover, walk, type Mover, type Polygon, type Pushing } from '../preview/collide'
 import { SceneRenderer, type ControlHandle, type Frame, type GuideLine, type Handle } from '../preview/SceneRenderer'
@@ -207,6 +207,8 @@ interface Drag {
 interface Boxed {
   has: (p: Point) => boolean
   objects: () => string[]
+  /** The cameras whose frames it touches, for the Camera tool (D373); none in the Camera view, which draws no camera. */
+  cameras: () => string[]
 }
 
 interface Marquee {
@@ -464,19 +466,21 @@ export function PreviewPane() {
       cameraView.fit(s.previewView !== 'preview', cameraPanel.getBoundingClientRect(), host.getBoundingClientRect(), s.settings, new THREE.Color(parseColor(s.settings.background) ? s.settings.background : '#1c1c1c'), s.previewView === 'camera' ? CAMERA_PAD : CAMERA_PAD_BESIDE)
     }
     cameraViewRef.current = { view: cameraView, fit: fitCamera }
-    /** What is drawn over the scene, as each view has it: the selection but for the Shape tool, whose own handles show it; every handle with the Camera tool; and in the Camera view no camera, that view being the camera's own. */
+    /** What is drawn over the scene, as each view has it: the selection but for the Shape tool, whose own handles show it; every handle of a camera with the Camera tool; and in the Camera view no camera, that view being the camera's own. */
     let laidOut: 'world' | 'camera' = 'world'
     const overlayFor = (which: 'world' | 'camera') => {
       const s = useStore.getState()
       const inHand = s.tool === 'shape' ? [] : s.selection
-      const cameras = which === 'camera' && s.model ? new Set(camerasOf(s.model).map((c) => c.name)) : null
+      const cameras = new Set(s.model ? camerasOf(s.model).map((c) => c.name) : [])
+      // The Camera tool has the handles of cameras alone (D373): with anything else selected it shows what is selected and moves none of it.
+      const camerasInHand = inHand.length > 0 && inHand.every((n) => cameras.has(n))
       return {
-        selection: cameras ? inHand.filter((n) => !cameras.has(n)) : inHand,
+        selection: which === 'camera' ? inHand.filter((n) => !cameras.has(n)) : inHand,
         mode: s.tool === 'camera' ? ('all' as const) : s.transformMode,
         pixel: 1 / (which === 'camera' ? cameraView.zoom : viewport.zoom),
         axes: axesRef.current,
         anchored: s.anchored,
-        handles: s.tool === 'select' || s.tool === 'camera',
+        handles: s.tool === 'select' || (s.tool === 'camera' && camerasInHand),
         cameras: which === 'world',
       }
     }
@@ -489,14 +493,14 @@ export function PreviewPane() {
     viewport.beforeRender = (gl, camera) => renderer.renderMasks(gl, camera)
     viewportRef.current = viewport
     rendererRef.current = renderer
-    if (import.meta.env.DEV) Object.assign((window as unknown as { __quickAnimator?: object }).__quickAnimator ?? {}, { getRenderer: () => renderer })
+    if (import.meta.env.DEV) Object.assign((window as unknown as { __quickAnimator?: object }).__quickAnimator ?? {}, { getRenderer: () => renderer, getViewport: () => viewport })
 
     const paint = () => {
       const s = useStore.getState()
       // While Shift looks ahead, whatever was alive where the gesture began stays drawn (D138).
       // The selection shows in every tool but the Shape tool, whose handles show it; the box's handles belong to Select alone (D208, D236, D247).
-      renderer.setView({ hidden: s.hidden, held: s.selection, showMasks: s.showMasks })
-      // The Camera tool has the camera's box in hand, with every handle (D361).
+      // The cameras' frames show when asked, and always with the Camera tool, which picks by them (D373, D374).
+      renderer.setView({ hidden: s.hidden, held: s.selection, showMasks: s.showMasks, showCameras: s.showCameras || s.tool === 'camera' })
       const over = overlayFor('world')
       renderer.update(s.model, s.time, over.selection, over.mode, over.pixel, over.axes, gestureRef.current?.restore, over.anchored, over.handles)
       laidOut = 'world'
@@ -594,7 +598,7 @@ export function PreviewPane() {
         const frames = new Map(renderer.cameras().map((c) => [c.name, c]))
         for (const el of Array.from(tags.children) as HTMLElement[]) {
           const c = frames.get(el.dataset['camera'] ?? '')
-          if (!c || !worldShown) {
+          if (!c || !c.shown || !worldShown) {
             el.classList.remove('shown')
             continue
           }
@@ -849,14 +853,6 @@ export function PreviewPane() {
     paintRef.current()
     viewportRef.current?.fit()
   }, [projectPath])
-
-  // The Camera tool has the camera that has the picture in hand as it is taken up (D361).
-  useEffect(() => {
-    if (tool !== 'camera') return
-    const s = useStore.getState()
-    const live = s.model ? cameraAt(s.model, s.time) : null
-    if (live && !(s.selection.length === 1 && s.selection[0] === live.name)) s.select([live.name])
-  }, [tool])
 
   /** The view a place on the screen is in (D366): the Camera view where it shows and the place is in its part of the pane, else the Preview view. */
   const surfaceAt = (clientX: number, clientY: number): Surface | null => {
@@ -1122,7 +1118,8 @@ export function PreviewPane() {
             // The Preview view is never turned: the box is one in the scene, its top left corner and its bottom right.
             const a = viewport.toWorld(pane.left, pane.top)
             const b = viewport.toWorld(pane.right, pane.bottom)
-            box = { has: (p) => p.x >= a.x && p.x <= b.x && p.y >= b.y && p.y <= a.y, objects: () => renderer.objectsIn({ left: a.x, right: b.x, top: a.y, bottom: b.y }) }
+            const inScene = { left: a.x, right: b.x, top: a.y, bottom: b.y }
+            box = { has: (p) => p.x >= a.x && p.x <= b.x && p.y >= b.y && p.y <= a.y, objects: () => renderer.objectsIn(inScene), cameras: () => renderer.camerasIn(inScene) }
           } else {
             // The Camera view may be turned: what the box holds is told on the pane itself.
             const onPane = (x: number, y: number) => viewport.toPane(x, y)
@@ -1132,6 +1129,7 @@ export function PreviewPane() {
                 return q.x >= pane.left && q.x <= pane.right && q.y >= pane.top && q.y <= pane.bottom
               },
               objects: () => renderer.objectsOnPane(pane, onPane),
+              cameras: () => [],
             }
           }
         }
@@ -1547,24 +1545,28 @@ export function PreviewPane() {
       })
       return
     }
-    // The Camera tool (D361): whatever is pressed, it is the camera that has the picture that is in hand, by its box's handles or from anywhere; a scene with no camera gets one first, in the same undo step as what is done to it.
-    let cameraTool: string | null = null
+    // The Camera tool is Select for cameras alone (D373): a press picks the camera under it, and nothing else is picked or moved. In the Camera view the picture is the camera's own, so a press there is a press on the camera that has the picture. The middle button there drags that camera with any tool, and a scene with no camera gets one first, in the same undo step (D369).
+    const camerasOnly = toolNow === 'camera' && !panCamera
+    /** The camera dragged as the picture, in its own view. */
+    let pictured: string | null = null
     let madeCamera = false
     if (toolNow === 'camera') {
       if (!store.model || !canEdit()) return
-      if (camerasOf(store.model).length === 0) {
-        beginGesture()
-        madeCamera = true
+      if (inCameraView) {
+        if (panCamera && camerasOf(store.model).length === 0) {
+          beginGesture()
+          madeCamera = true
+        }
+        pictured = cameraInHand(panCamera)
+        if (!pictured) {
+          if (madeCamera) endGesture()
+          return
+        }
+        // Pressed, it is selected, as whatever Select presses is; the middle button leaves what is selected as it is.
+        const now = useStore.getState()
+        if (!panCamera && !(now.selection.length === 1 && now.selection[0] === pictured)) now.select([pictured])
+        store = useStore.getState()
       }
-      cameraTool = cameraInHand()
-      if (!cameraTool) {
-        if (madeCamera) endGesture()
-        return
-      }
-      // The tool has the camera selected; the middle button moves it and leaves what is selected as it is (D369).
-      const now = useStore.getState()
-      if (!panCamera && !(now.selection.length === 1 && now.selection[0] === cameraTool)) now.select([cameraTool])
-      store = useStore.getState()
     }
     const model = store.model
     if (!model) return
@@ -1576,8 +1578,9 @@ export function PreviewPane() {
     }
 
     // A path under the pointer comes first (D194, D203, D208): a point of it or its line. With Select, only the selected path answers; with the Path tool, any path shown, which the press picks.
-    // A camera in hand is all the press is about: no path under the pointer comes before it.
-    const shown = cameraTool || (on && 'camera' in on) ? null : pathRef.current
+    // A camera in hand is all the press is about: no path under the pointer comes before it. The Camera tool works on a camera's own path, and no other.
+    const aCamera = (name: string | undefined): boolean => !!name && model.objects.find((o) => o.name === name)?.className === CAMERA
+    const shown = pictured || (on && 'camera' in on) || (camerasOnly && !aCamera(pathRef.current?.primary?.ref.object)) ? null : pathRef.current
     const pathAction = store.selectedActions.length === 1 ? store.selectedActions[0]! : null
     const pathTool = toolNow === 'path'
     const pixel = 1 / viewport.zoom
@@ -1680,19 +1683,19 @@ export function PreviewPane() {
       return
     }
 
-    const mode = cameraTool ? 'all' : store.transformMode
+    const mode = toolNow === 'camera' ? 'all' : store.transformMode
     const selection = store.selection
-    const ctrl = !cameraTool && (e.ctrlKey || e.metaKey)
+    const ctrl = !pictured && (e.ctrlKey || e.metaKey)
     // The handles are where this view has them, laid out here since the press may just have changed what is selected, and every drawing ends laid out for the Camera view.
     layoutRef.current(inCameraView ? 'camera' : 'world')
-    // A handle of the selection wins over whatever is drawn under it; the camera dragged in its own view has none there.
-    const handle = selection.length > 0 && !ctrl && !(cameraTool && inCameraView) ? renderer.pickHandle(located.world) : null
+    // A handle of the selection wins over whatever is drawn under it; the camera dragged in its own view has none there, and the Camera tool has the handles of cameras alone.
+    const handle = selection.length > 0 && !ctrl && !pictured && (!camerasOnly || selection.every(aCamera)) ? renderer.pickHandle(located.world) : null
     // A selected group is one thing: its members stand for it (D124).
     const selectedGroup = groupOf(model, selection)
     const members = selectedGroup ? groupMembers(model, selectedGroup.name) : []
-    // A camera is picked by its frame's line or by its name, before anything drawn under it, and never by what it frames (D361).
-    const cameraHit = cameraTool ?? (on && 'camera' in on ? on.camera : inCameraView ? null : renderer.pickCamera(located.world, CAMERA_REACH_PX * pixel))
-    const under = cameraHit ?? located.hit
+    // A camera is picked by its frame's line or by its name, before anything drawn under it, and with Select never by what it frames (D361). The Camera tool picks it by all of its frame, and picks nothing else (D373).
+    const cameraHit = pictured ?? (on && 'camera' in on ? on.camera : inCameraView ? null : (renderer.pickCamera(located.world, CAMERA_REACH_PX * pixel) ?? (camerasOnly ? renderer.pickCameraInside(located.world, selection) : null)))
+    const under = cameraHit ?? (camerasOnly ? null : located.hit)
     // What the press picks (D247): the object, its outermost group, or every object of its class; a camera is itself.
     const picked = cameraHit ? [cameraHit] : under ? pickTargets(model, under, store.pick) : []
     const hit = handle ? (selectedGroup ? selectedGroup.name : selection.includes(under ?? '') ? under! : selection[0]!) : under && store.pick === 'group' ? picked[0]! : under
@@ -1711,7 +1714,8 @@ export function PreviewPane() {
           const inside = pathRef.current!.primary!.frame.anchors.map((p, i) => (box.has(p) ? i : -1)).filter((i) => i >= 0)
           s.setPathPoints(extend ? [...new Set([...s.pathPoints, ...inside])] : inside)
         } else {
-          const names = box.objects()
+          // A box drawn with the Camera tool takes the cameras it touches (D373).
+          const names = camerasOnly ? box.cameras() : box.objects()
           s.select(extend ? [...s.selection, ...names.filter((n) => !s.selection.includes(n))] : names)
         }
       })
@@ -1742,7 +1746,7 @@ export function PreviewPane() {
     const selectedRef = store.selectedActions.find((r) => r.object === subject.name)
     const pathSelected = selectedRef && subject.actions[selectedRef.index]?.verb === 'path' ? selectedRef.index : null
     const making = !!gestureRef.current && !gestureRef.current.editing
-    if (op === 'move' && objects.length === 1 && !isGroup && !(cameraTool && inCameraView) && !(e.ctrlKey || e.metaKey) && (!e.shiftKey || (pathSelected !== null && !making))) {
+    if (op === 'move' && objects.length === 1 && !isGroup && !pictured && !(e.ctrlKey || e.metaKey) && (!e.shiftKey || (pathSelected !== null && !making))) {
       const target = pathDragTarget(subject.name, pathSelected, store.time)
       if (target) {
         if (target.showTime !== null) store.setTime(target.showTime)
@@ -1808,7 +1812,7 @@ export function PreviewPane() {
     }
     for (const o of targets) expand(o.name)
     // The picture dragged in the Camera view is framed by eye: nothing there to align the camera's frame to.
-    const box0Frame = op === 'move' && !(cameraTool && inCameraView) ? renderer.boxAround(targets.map((o) => o.name)) : null
+    const box0Frame = op === 'move' && !pictured ? renderer.boxAround(targets.map((o) => o.name)) : null
     const isCamera = subject.className === CAMERA
     const others: { name: string; box: Box }[] = []
     let movers: Drag['movers'] = null
@@ -1889,7 +1893,7 @@ export function PreviewPane() {
       pushedActions: new Map(),
       pushedShifts: new Map(),
     }
-    if (cameraTool && inCameraView) {
+    if (pictured) {
       // The camera itself dragged in the Camera view: the picture follows the pointer, so the camera goes the other way, by the picture's scale, its zoom, and its roll as the drag began (D361).
       const framed = renderer.frameOf(subject.name)
       const k = cameraViewRef.current?.view.scale || 1
@@ -2400,7 +2404,7 @@ export function PreviewPane() {
         showMenu(e, [
           { label: 'Add point', run: () => insertPathPoints(pathAction, anchors.length, [world]) },
           ...pathSub,
-          { label: 'Add', children: [...OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, world.x, world.y) })), { label: 'Camera', run: () => void addCamera() }] },
+          { label: 'Add', children: [...OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, world.x, world.y) })), { label: 'Camera', run: () => void addCamera(undefined, world) }] },
         ])
         return
       }
@@ -2432,8 +2436,9 @@ export function PreviewPane() {
         return
       }
     }
-    // A camera, by its frame's line (D361): what can be done to it from here.
-    const cameraHit = st.tool === 'select' && located.viewport === viewportRef.current ? located.renderer.pickCamera(world, CAMERA_REACH_PX * pixel) : null
+    // A camera (D361, D373): with Select by its frame's line, with the Camera tool by all of its frame; what can be done to it from here.
+    const byLine = located.viewport === viewportRef.current && (st.tool === 'select' || st.tool === 'camera') ? located.renderer.pickCamera(world, CAMERA_REACH_PX * pixel) : null
+    const cameraHit = byLine ?? (located.viewport === viewportRef.current && st.tool === 'camera' ? located.renderer.pickCameraInside(world, st.selection) : null)
     if (cameraHit) {
       if (!st.selection.includes(cameraHit)) st.select([cameraHit])
       showMenu(e, [
@@ -2445,7 +2450,8 @@ export function PreviewPane() {
       ])
       return
     }
-    if (hit) {
+    // The Camera tool is about cameras alone (D373): over anything else its menu is the empty space's.
+    if (hit && st.tool !== 'camera') {
       const s = useStore.getState()
       const group = s.model ? groupOf(s.model, s.selection) : null
       if (group && s.model && groupMembers(s.model, group.name).includes(hit)) {
@@ -2463,7 +2469,7 @@ export function PreviewPane() {
       const targets = s.selection.includes(hit) ? s.selection : [hit]
       if (!s.selection.includes(hit)) s.select([hit])
       const many = targets.length > 1
-      // The shape's, the path's, and the collision items each sit one level down (D256).
+      // The shape's and the path's items each sit one level down (D256), and so does what the thing is set to be (D379): its classes, its links, whether it is attached to the camera, and how it takes a push.
       const shapeSub = many ? [] : shapeItems(hit)
       const pathSub: MenuItems = [
         ...(many ? [] : pathItems(hit)),
@@ -2475,37 +2481,31 @@ export function PreviewPane() {
         ...(shapeSub.length > 0 ? [{ label: 'Shape', children: shapeSub }] : []),
         ...(pathSub.length > 0 ? [{ label: 'Path', children: pathSub }] : []),
         ...(many ? [] : [{ label: 'Save preset', run: () => requestSavePreset({ object: hit }) }]),
-        { label: 'Classes', run: () => requestClasses(targets) },
         // The mask items sit one level down, as the shape's and the path's do (D256, D333).
         ...(maskMenuItems(targets).length > 0 ? [{ label: 'Mask', children: maskMenuItems(targets) }] : []),
         // Hidden, a thing is out of the way in the view alone (D341); the panes bring it back.
         ...hideMenuItems(targets),
-        // Held on the screen, whatever the camera does (D362).
-        ...attachMenuItems(targets),
-        {
-          label: 'Collision',
-          children: [
-            {
-              label: targets.every((n) => s.anchored.includes(n)) ? 'Unanchor' : 'Anchor',
-              run: () => {
-                const anchored = !targets.every((n) => s.anchored.includes(n))
-                for (const n of targets) s.setAnchored(n, anchored)
-              },
+        ...propertiesMenu(targets, [
+          {
+            label: targets.every((n) => s.anchored.includes(n)) ? 'Unanchor' : 'Anchor',
+            run: () => {
+              const anchored = !targets.every((n) => s.anchored.includes(n))
+              for (const n of targets) s.setAnchored(n, anchored)
             },
-            {
-              label: targets.every((n) => s.soft.includes(n)) ? 'Disable passthrough' : 'Enable passthrough',
-              run: () => {
-                const soft = !targets.every((n) => s.soft.includes(n))
-                for (const n of targets) s.setSoft(n, soft)
-              },
+          },
+          {
+            label: targets.every((n) => s.soft.includes(n)) ? 'Disable passthrough' : 'Enable passthrough',
+            run: () => {
+              const soft = !targets.every((n) => s.soft.includes(n))
+              for (const n of targets) s.setSoft(n, soft)
             },
-          ],
-        },
+          },
+        ]),
         { label: many ? `Duplicate ${targets.length} objects` : 'Duplicate', run: () => duplicateObjects(targets) },
         { label: many ? `Delete ${targets.length} objects` : 'Delete', run: () => deleteObjects(targets), danger: true },
       ])
     } else {
-      showMenu(e, [{ label: 'Add', children: [...OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, world.x, world.y) })), { label: 'Camera', run: () => void addCamera() }] }])
+      showMenu(e, [{ label: 'Add', children: [...OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, world.x, world.y) })), { label: 'Camera', run: () => void addCamera(undefined, world) }] }])
     }
   }
 
@@ -2812,7 +2812,7 @@ export function PreviewPane() {
         {tool === 'object' && <span className="hint">Click to place</span>}
         {tool === 'paint' && <span className="hint">{dropping ? 'Click an object to take its color' : 'Click to paint; Shift-click for a color change; Alt-click takes a color'}</span>}
         {tool === 'pencil' && <span className="hint">Click for a dot, drag for a line; Shift animates</span>}
-        {tool === 'camera' && <span className="hint">Drag moves the camera; Shift animates</span>}
+        {tool === 'camera' && <span className="hint">Click a camera; Shift animates</span>}
         {tool === 'shape' && shapeMode === 'create' && <span className="hint">{drafting ? 'Click for corners, drag to draw; the first point closes and fills, Escape leaves a line' : 'Click to start a shape'}</span>}
         {tool === 'shape' && shapeMode === 'edit' && <span className="hint">{shapeRef.current?.editable ? 'Drag a point, or a box around several; right-click a point or the line for curves and corners' : 'Click a shape, or drag a box around one'}</span>}
         {tool === 'path' && pathMode === 'move' && <span className="hint">Drag any point or line of a path to move the whole path</span>}

@@ -47,15 +47,10 @@
   "MENU3": {
    "clip": [
     "Jump to code",
-    "Go to start",
-    "Go to end",
     "Rename",
-    "Classes",
-    "Begin at",
-    "End at",
-    "No end",
-    "Links",
     "Hide",
+    "Lifetime",
+    "Properties",
     "Duplicate",
     "Save preset",
     "Delete"
@@ -77,11 +72,9 @@
     "Shape",
     "Path",
     "Save preset",
-    "Classes",
     "Mask",
     "Hide",
-    "Attach to screen",
-    "Collision",
+    "Properties",
     "Duplicate",
     "Delete"
    ]

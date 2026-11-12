@@ -875,9 +875,23 @@ right = Camera({
 })
 ```
 
-Going back to an angle is another camera framed the same, with a later life: `left2`, from 6 to
-8, with `left`'s `x`, `y`, and `zoom`. A cut that nothing shows is a camera that begins framed as
-the one before it is at that moment.
+Going back to an angle is another shot of that camera: a camera named after it, `left_shot2`,
+then `left_shot3`, framed the same, with a later life:
+
+```js
+left_shot2 = Camera({
+  x: -400,
+  y: 0,
+  zoom: 2,
+  at: 6,
+  until: 8,
+})
+```
+
+To the language it is a camera like any other, framed and animated on its own. The name is what
+says it is `left` again: the GUI's Cut to offers `left` once, whatever its shots, and frames the
+next shot as the last one was. A cut that nothing shows is a camera that begins framed as the one
+before it is at that moment.
 
 Held on the screen: `attached: true` on any object, or on a group for everything it carries,
 places it by the picture instead of the scene. Its `x, y` are from the middle of the picture, in
@@ -903,35 +917,47 @@ In the GUI. The preview's header switches what the pane shows: Preview, the scen
 on, with the frame of the camera that has the picture drawn in it; Camera, what that camera sees;
 or Both, side by side; C goes to the next. Every tool works in the Camera view as in the Preview
 view, through the camera: what is selected, dragged, resized, drawn, or typed there is written as
-it would be in the Preview view. Fit shows the frame of the camera that has the picture. The
-Camera tool, the last in the palette, moves the camera that has the picture at the playhead, and
-makes one in a scene that has none: in the Camera view a drag moves the picture; in the Preview
-view a drag moves the frame, a corner zooms, the handle above rolls; Shift makes the change an
-animation, as with any object. With any tool, the wheel over the Camera view zooms the camera at
-the pointer and the middle button drags it. With Select, a camera is picked by its frame's line
-or by its name at the frame's corner.
+it would be in the Preview view. Fit shows the frame of the camera that has the picture. With
+any tool, the wheel over the Camera view zooms the camera at the pointer and the middle button
+drags it.
+
+The Camera tool, the last in the palette, is Select for cameras alone. Every camera alive shows
+its frame in the Preview view, and a click inside one picks it, the smallest where frames
+overlap; nothing else is picked or moved. Picked, a drag moves it, a corner zooms, the handle
+above rolls, and Shift makes the change an animation, as with any object; a click on empty space
+lets go. In the Camera view the picture is the camera that has it, so a drag there moves that
+camera. The tool makes no camera. Show Cameras, in the header, shows every camera's frame and
+name with the other tools too, where Select then picks one by its frame's line or its name;
+without it only a selected camera shows.
 
 Cuts. Add, in the right-click menus of the timeline, the Objects pane, and the preview, lists
-Camera, and the timeline's Cameras section has Add camera: a camera that begins there, declared
-last, framed as the picture is at that moment, with the picture until it next changes hands, so
-the shots after it are as they were. Cut to gives the picture to another camera from there: one
-still alive beneath has it back as itself, the cameras over it ending; one that has ended comes
-back as a copy framed as it ended. A cut ends the shot before it, which gets its `until` there;
-the camera at the bottom, the first declared of those alive, is left to run on under the shots.
-The razor on a camera's clip, or Cut at in its menu, cuts the clip in two: the first ends there,
-a second declared right after it begins there framed as the first is at that moment, an animation
-running across the cut is cut with it, and the later ones go to the second.
+Camera, and the timeline's Cameras section has Add camera: a new camera of its own, `camera`,
+then `camera2`, declared last, that begins there and looks at the scene's middle, or in the
+preview at the place under the pointer, as an object added there is put there. Cut to gives the
+picture to a camera that is there already, from that time: where it is the camera at the bottom,
+the first declared of those alive, still running under the rest, the clips over it get their
+`until` there and it shows as itself; otherwise the cut is a new shot of it, `wide_shot2` for
+`wide`, declared last, framed as that camera was last framed. Each camera is offered once,
+whatever its shots, and not the one that has the picture. A new clip, a new camera's or a
+shot's, lasts as long as the preferences say, 2 seconds unless changed, and never past where the
+picture next changes hands, so the shots after it are as they were; with no length set it lasts
+until then. A shot the new clip covers to its end gets its `until` where the new one begins; one
+that outlasts it runs on under it and has the picture again after. The razor on a camera's clip,
+or Cut at in its menu, cuts the clip in two: the first ends there, the camera's next shot,
+declared right after it, begins there framed as the first is at that moment, an animation running
+across the cut is cut with it, and the later ones go to the second.
 
 The timeline's Cameras section stacks the clips as the cast has them and lights each where it
 has the picture. In the Objects pane the cameras are under Type, and the Layers end in the
-Background, with the project's color. Right-click an object for Attach to screen.
+Background, with the project's color. Right-click an object, Properties, for Attach to camera,
+which writes `attached: true`.
 
 ## Links
 
 An attribute can follow another object's attribute with a function: `x: () => box.x + 20`. It is
 evaluated at every frame with the other object's animated value. The GUI shows every link, a time
 reference or a value link, as a small chain mark on the clip and the row, with the words beside it
-on the clip, and marks what is referred to. Right-click an animation or an object for Edit links,
+on the clip, and marks what is referred to. Right-click an animation for Links, or an object for Properties, Links:
 a searchable list of the objects, groups, classes, and animations, each opening to what it offers;
 picking one writes a time reference or a value link, `() => box.x`, and names the target if it has
 no name. The Selected pane takes code in any field and shows what a link comes to. **Coming:** `link` actions with a start and an end.
@@ -943,7 +969,7 @@ then what the class adds under its name; a mask has a Mask section too, its list
 The Objects pane lists the objects as layers, in drawing order with the top first, where a row
 dragged up or down moves its declaration, or by type, with the groups, the classes, and the masks
 and the cameras after the kinds, and the Background at the foot of the layers; see Masks and The
-camera for what it shows of them. The eye on a row, and Hide in a right-click,
+camera for what it shows of them. The eye on a row, and Hide and Unhide in a right-click,
 hide an object in the view alone: nothing of it is in the file, and an export shows everything,
 unless the preferences leave hidden objects out of exports.
 

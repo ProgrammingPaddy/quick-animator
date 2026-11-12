@@ -8,7 +8,7 @@ import { maskDrawnBy, maskFor, maskNamed, masksOn } from '../model/masks'
 import { CAMERA, GROUP, PIVOT_PARAMS, VERB_COLORS } from '../model/registry'
 import { cameraAt, containers, isVisibleAt } from '../model/sample'
 import type { Action, Mask, SceneObject } from '../model/types'
-import { addCamera, addObject, attachMenuItems, canEdit, classMaskItems, cutHereItems, createGroup, prospectiveGroup, deleteAction, deleteClass, deleteClassAction, deleteObjects, duplicateObjects, hideMenuItems, jumpToAction, jumpToClass, jumpToObject, maskedShare, maskListEditable, maskMenuItems, materializeClassAction, moveDeclaration, overrideClassAction, removeFromClass, requestClasses, requestRename, selectClass, selectClassAction, setMasked, ungroup, setLifetime } from '../project/operations'
+import { addCamera, addObject, lifetimeMenu, propertiesMenu, canEdit, classMaskItems, cutHereItems, createGroup, prospectiveGroup, deleteAction, deleteClass, deleteClassAction, deleteObjects, duplicateObjects, hideMenuItems, jumpToAction, jumpToClass, jumpToObject, maskedShare, maskListEditable, maskMenuItems, materializeClassAction, moveDeclaration, overrideClassAction, removeFromClass, requestRename, selectClass, selectClassAction, setMasked, ungroup } from '../project/operations'
 import { requestSavePreset } from '../project/userPresets'
 import { updateSettings } from '../project/controller'
 import { ColorPicker } from '../components/ColorPicker'
@@ -232,10 +232,10 @@ export function ObjectPane() {
       showMenu(e, [
         { label: 'Jump to code', run: () => jumpToObject(obj.name) },
         { label: 'Rename', run: () => requestRename({ object: obj.name }) },
-        { label: 'Classes', run: () => requestClasses(targets) },
-        { label: 'Links', run: () => useStore.getState().openLinksDialog({ object: obj.name }) },
-        // Cut to it at the playhead (D365).
+        // Cut to it at the playhead (D377).
         ...cutHereItems(obj.name),
+        ...lifetimeMenu(obj.name, s.time),
+        ...propertiesMenu(targets),
         { label: 'Duplicate', run: () => duplicateObjects(targets) },
         { label: 'Delete', run: () => deleteObjects(targets), danger: true },
       ])
@@ -255,13 +255,12 @@ export function ObjectPane() {
     showMenu(e, [
       { label: 'Jump to code', run: () => jumpToObject(obj.name) },
       ...(many ? [] : [{ label: 'Rename', run: () => requestRename({ object: obj.name }) }]),
-      { label: 'Classes', run: () => requestClasses(targets) },
-      ...(many ? [] : [{ label: 'Links', run: () => useStore.getState().openLinksDialog({ object: obj.name }) }]),
       ...maskSub,
       ...hideMenuItems(targets),
-      ...attachMenuItems(targets),
+      // When it is there, and what it is set to be, each one level down (D379).
+      ...(many ? [] : lifetimeMenu(obj.name, s.time)),
+      ...propertiesMenu(targets),
       { label: many ? `Duplicate ${targets.length} objects` : 'Duplicate', run: () => duplicateObjects(targets) },
-      ...(many ? [] : [{ label: 'End at', keyword: timecode(s.time, s.settings.fps), run: () => setLifetime(obj.name, { until: useStore.getState().time }) }]),
       ...(many || !obj.decl ? [] : [{ label: 'Save preset', run: () => requestSavePreset({ object: obj.name }) }]),
       { label: many ? `Delete ${targets.length} objects` : 'Delete', run: () => deleteObjects(targets), danger: true },
     ])
@@ -443,8 +442,8 @@ export function ObjectPane() {
                 setHidden([obj.name], !off)
               }}
               onDoubleClick={(e) => e.stopPropagation()}
-              title={off ? 'Show' : 'Hide'}
-              aria-label={off ? 'Show' : 'Hide'}
+              title={off ? 'Unhide' : 'Hide'}
+              aria-label={off ? 'Unhide' : 'Hide'}
               aria-pressed={!off}
             >
               <Eye off={off} />

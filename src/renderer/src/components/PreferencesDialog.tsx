@@ -78,6 +78,9 @@ function GeneralTab() {
   /** The length kept while "to the end" is ticked, so unticking brings it back. */
   const [length, setLength] = useState(prefs.objectLength ?? DEFAULT_PREFS.objectLength ?? 2)
   const toEnd = prefs.objectLength === null
+  /** The same for a camera's clip (D378). */
+  const [shot, setShot] = useState(prefs.cameraLength ?? DEFAULT_PREFS.cameraLength ?? 2)
+  const toCut = prefs.cameraLength === null
   return (
     <div className="prefs-grid">
       <span className="dim">Object default duration</span>
@@ -96,6 +99,24 @@ function GeneralTab() {
         <label className="check" title="To the end of the content">
           <input type="checkbox" checked={toEnd} onChange={(e) => setPrefs({ objectLength: e.target.checked ? null : roundSeconds(length) })} />
           to the end
+        </label>
+      </div>
+      <span className="dim">Camera default duration</span>
+      <div className="row">
+        <NumberField
+          label="Seconds"
+          value={shot}
+          unit="s"
+          min={0.1}
+          step={0.1}
+          onChange={(v) => {
+            setShot(v)
+            if (!toCut) setPrefs({ cameraLength: v })
+          }}
+        />
+        <label className="check" title="Until the next cut, or the end">
+          <input type="checkbox" checked={toCut} onChange={(e) => setPrefs({ cameraLength: e.target.checked ? null : roundSeconds(shot) })} />
+          to the next cut
         </label>
       </div>
       <span className="dim">Final frame hold</span>
