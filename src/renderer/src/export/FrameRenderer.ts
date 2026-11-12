@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { NO_VIEW, viewAt } from '../model/sample'
 import type { SceneModel } from '../model/types'
 import { SceneRenderer } from '../preview/SceneRenderer'
 
@@ -8,6 +9,8 @@ import { SceneRenderer } from '../preview/SceneRenderer'
  * project's background; a frame with alpha leaves the background out and composites premultiplied,
  * so edges and fades come out right, then returns straight alpha as video formats expect. `hidden`
  * names what is left out, as the view hides it, when the preferences say Hide reaches exports (D349).
+ * The frame is taken through the camera that has the picture at that time, the background behind
+ * it whatever the camera does (D357, D358).
  */
 export class FrameRenderer {
   private readonly canvas = document.createElement('canvas')
@@ -27,6 +30,7 @@ export class FrameRenderer {
     hidden: readonly string[] = [],
   ) {
     if (hidden.length > 0) this.content.setView({ hidden, held: [], showMasks: false })
+    this.content.setComposition(width, height)
     this.canvas.width = width
     this.canvas.height = height
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true, premultipliedAlpha: alpha, preserveDrawingBuffer: true })
@@ -46,6 +50,16 @@ export class FrameRenderer {
   /** The frame at a time: rows of RGBA from the top down, straight alpha. */
   draw(model: SceneModel, time: number): Uint8Array {
     this.content.update(model, time, [], 'all', 1)
+    // Through the camera that has the picture (D357): where it is, how close, and its roll; the background fills the picture behind everything, a little past its edges.
+    const view = viewAt(model, time)
+    this.camera.position.set(view.x, view.y, 100)
+    this.camera.rotation.z = (view.rotation * Math.PI) / 180
+    this.camera.zoom = view.zoom
+    this.camera.updateProjectionMatrix()
+    this.backdrop.position.set(view.x, view.y, -10)
+    this.backdrop.rotation.z = this.camera.rotation.z
+    const cover = view === NO_VIEW ? 1 : 1.01 / view.zoom
+    this.backdrop.scale.set(cover, cover, 1)
     if (this.alpha) this.premultiply()
     // The masks' pictures, through the same camera, as the view draws them (D337).
     this.content.renderMasks(this.renderer, this.camera)

@@ -1,0 +1,185 @@
+{
+ "results": {
+  "PLACE1": {
+   "sidewaysFirst": {
+    "declX": -300,
+    "declY": 0,
+    "acts": [
+     [
+      "move",
+      0,
+      1,
+      {
+       "y": 100
+      }
+     ],
+     [
+      "move",
+      1,
+      2,
+      {
+       "x": -100,
+       "y": 200
+      }
+     ]
+    ],
+    "shown": [
+     -100,
+     200
+    ],
+    "err": null
+   },
+   "bothFromTheStart": {
+    "declX": -300,
+    "declY": 0,
+    "acts": [
+     [
+      "move",
+      0,
+      1,
+      {
+       "y": 100
+      }
+     ],
+     [
+      "move",
+      1,
+      2,
+      {
+       "x": -100,
+       "y": 200
+      }
+     ]
+    ],
+    "shown": [
+     -100,
+     200
+    ],
+    "err": null
+   },
+   "sidewaysOnly": {
+    "declX": -300,
+    "declY": 0,
+    "acts": [
+     [
+      "move",
+      0,
+      1,
+      {
+       "y": 100
+      }
+     ],
+     [
+      "move",
+      1,
+      2,
+      {
+       "x": -100
+      }
+     ]
+    ],
+    "shown": [
+     -100,
+     100
+    ],
+    "err": null,
+    "yLineInNew": false
+   }
+  },
+  "PLACE2": {
+   "sidewaysFirst": {
+    "declX": -300,
+    "declY": 0,
+    "acts": [
+     [
+      "move",
+      0,
+      1,
+      {
+       "y": 100
+      }
+     ],
+     [
+      "move",
+      0,
+      0.5,
+      {
+       "x": -100,
+       "y": 130
+      }
+     ]
+    ],
+    "shown": [
+     -100,
+     130
+    ],
+    "err": null,
+    "target": [
+     -100,
+     130
+    ]
+   },
+   "sidewaysOnly": {
+    "declX": -300,
+    "declY": 0,
+    "acts": [
+     [
+      "move",
+      0,
+      1,
+      {
+       "y": 100
+      }
+     ],
+     [
+      "move",
+      0,
+      0.5,
+      {
+       "x": -100
+      }
+     ]
+    ],
+    "shown": [
+     -100,
+     50
+    ],
+    "err": null
+   }
+  },
+  "PLACE3": {
+   "bare": {
+    "declX": -100,
+    "declY": 0,
+    "acts": [],
+    "shown": [
+     -100,
+     0
+    ],
+    "err": null,
+    "yLine": true
+   },
+   "atTheEnd": {
+    "declX": -300,
+    "declY": 0,
+    "acts": [
+     [
+      "move",
+      0,
+      1,
+      {
+       "y": 200,
+       "x": -100
+      }
+     ]
+    ],
+    "shown": [
+     -100,
+     200
+    ],
+    "err": null
+   }
+  }
+ },
+ "volatile": {}
+}

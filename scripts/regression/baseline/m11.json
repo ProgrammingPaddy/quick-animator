@@ -1,0 +1,12 @@
+{
+ "results": {
+  "BREAK1": {
+   "besideTheLetter": 0,
+   "onTheLetter": true,
+   "units": 3,
+   "running": 1,
+   "err": null
+  }
+ },
+ "volatile": {}
+}

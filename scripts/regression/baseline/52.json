@@ -1,0 +1,197 @@
+{
+ "results": {
+  "AT1": {
+   "before": {
+    "s": [
+     [
+      56.7,
+      25
+     ],
+     [
+      143.3,
+      75
+     ],
+     [
+      300,
+      200
+     ]
+    ],
+    "l": [
+     [
+      -50,
+      0
+     ],
+     [
+      50,
+      0
+     ],
+     [
+      300,
+      200
+     ]
+    ]
+   },
+   "turned": [
+    [
+     100,
+     0
+    ],
+    [
+     100,
+     100
+    ],
+    [
+     300,
+     200
+    ]
+   ],
+   "written": {
+    "src": true,
+    "third": [
+     400,
+     250
+    ],
+    "first": [
+     100,
+     0
+    ]
+   },
+   "follows": [
+    500,
+    200
+   ],
+   "warnings": 0,
+   "err": null
+  },
+  "TEXT1": {
+   "style": {
+    "align": "right",
+    "lineHeight": 1.5,
+    "letterSpacing": 4,
+    "lines": 2
+   },
+   "bounds": {
+    "w": 349,
+    "h": 182
+   },
+   "lefts": [
+    0,
+    157
+   ],
+   "widths": [
+    337,
+    180
+   ],
+   "rightAligned": true,
+   "spacingWider": true,
+   "lineGap": 90,
+   "counts": {
+    "char": 17,
+    "word": 3,
+    "line": 2
+   },
+   "chars": 17,
+   "words": 3,
+   "err": null
+  },
+  "UNITS1": {
+   "span": [
+    1,
+    1.9
+   ],
+   "objOpacity": 1,
+   "before": [
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "at125": [
+    0.5,
+    0.214,
+    0.024,
+    0,
+    0
+   ],
+   "at2": [
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   "defining": null,
+   "label": "fade by char",
+   "slice": false,
+   "warnings": [],
+   "err": null
+  },
+  "FONTS1": {
+   "check": true,
+   "fonts": [
+    "Testfont"
+   ],
+   "widths": [
+    145,
+    138
+   ],
+   "differ": true,
+   "list": "combobox",
+   "hasTestfont": true,
+   "systemCount": 124,
+   "err": null
+  },
+  "PRESETTEXT1": {
+   "tActs": 1,
+   "rActs": 0,
+   "by": "word",
+   "stagger": 0.08,
+   "span": [
+    0,
+    0.64
+   ],
+   "words": 4,
+   "src": true,
+   "rows": [
+    "Type on",
+    "Rise by word",
+    "Letters drop",
+    "Lines in",
+    "Fade out by word",
+    "Code typing",
+    "Enchanted",
+    "Slot machine"
+   ],
+   "demo": {
+    "kind": "Text",
+    "length": 1.28,
+    "end": 0.8800000000000001,
+    "warnings": []
+   },
+   "err": null
+  },
+  "NOWBY1": {
+   "area": true,
+   "rows": 1,
+   "alignOptions": [
+    "left",
+    "center",
+    "right"
+   ],
+   "fontList": "combobox",
+   "byValue": "char",
+   "staggerRow": true,
+   "after": {
+    "by": "word",
+    "src": true,
+    "span": [
+     1,
+     1.6
+    ]
+   },
+   "err": null
+  }
+ },
+ "volatile": {}
+}

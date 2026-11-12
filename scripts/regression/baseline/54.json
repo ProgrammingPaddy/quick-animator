@@ -1,0 +1,180 @@
+{
+ "results": {
+  "KERN1": {
+   "plain": {
+    "slotEnds": [
+     53.67,
+     106.99,
+     160.66,
+     238.71
+    ],
+    "prefixEnds": [
+     53.67,
+     106.99,
+     160.66,
+     238.71
+    ],
+    "kerned": false,
+    "vLeft": 53.67,
+    "vLeftExpected": 53.67
+   },
+   "spaced": {
+    "slotEnds": [
+     59.67,
+     118.99,
+     178.66,
+     262.71
+    ],
+    "prefixEnds": [
+     59.67,
+     118.99,
+     178.66,
+     262.71
+    ],
+    "kerned": false,
+    "vLeft": 59.67,
+    "vLeftExpected": 59.67
+   },
+   "err": null
+  },
+  "TOL1": {
+   "atFrame1": true,
+   "atFrame0": false,
+   "atFrame2": true,
+   "atFrame3": false,
+   "gone": false,
+   "moveBegun": null,
+   "xAtFrame1": 300,
+   "xAtFrame2": 303.33,
+   "err": null
+  },
+  "FRAMES1": {
+   "spans": {
+    "start": 0.5,
+    "end": 1.5,
+    "until": 4
+   },
+   "retimed": {
+    "src": [
+     "frames(60)",
+     "frames(45)"
+    ],
+    "start": 1,
+    "end": 1.75
+   },
+   "odd": "frames(42.3)",
+   "pane": "frames(120)",
+   "life": "frames(300)",
+   "warnings": [],
+   "err": null
+  },
+  "HINTS1": {
+   "on": [
+    "4 s",
+    "0.5 s",
+    "1 s"
+   ],
+   "off": [],
+   "back": 3,
+   "err": null
+  },
+  "ENVELOPE1": {
+   "ramps": [
+    0,
+    50,
+    100,
+    100,
+    100,
+    100
+   ],
+   "linear": [
+    400,
+    400,
+    400,
+    400
+   ],
+   "fills": {
+    "at115": [
+     "#ff8080",
+     "#ff8080"
+    ],
+    "at15": [
+     "#ff0000",
+     "#ff0000"
+    ],
+    "at2": [
+     "#ff0000",
+     "#ff0000"
+    ],
+    "at3": [
+     "#ff0000",
+     "#ff0000"
+    ]
+   },
+   "err": null
+  },
+  "SLOT2": {
+   "at12": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "at16": [
+    false,
+    true,
+    true,
+    true
+   ],
+   "at22": [
+    false,
+    false,
+    true,
+    true
+   ],
+   "at28": [
+    false,
+    false,
+    false,
+    false
+   ],
+   "at35": [
+    false,
+    false,
+    false,
+    false
+   ],
+   "scrambleSteady": true,
+   "end": 4,
+   "err": null
+  },
+  "FAMILIES1": {
+   "moves": [
+    "Slide in",
+    "Bounce in",
+    "Snap in",
+    "Shake"
+   ],
+   "fades": [
+    "Fade in",
+    "Fade out",
+    "Pop in",
+    "Pop out",
+    "Blink"
+   ],
+   "resizes": [
+    "Pulse",
+    "Grow",
+    "Shrink"
+   ],
+   "misc": [
+    "Color change"
+   ],
+   "rainbow": true,
+   "enchanted": true,
+   "slot": true,
+   "err": null
+  }
+ },
+ "volatile": {}
+}

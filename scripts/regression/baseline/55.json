@@ -1,0 +1,112 @@
+{
+ "results": {
+  "TRIM1": {
+   "trimmed": {
+    "at": 2,
+    "until": 5,
+    "moveAt": 2,
+    "fadeAt": 4,
+    "src": [
+     "2",
+     "5"
+    ]
+   },
+   "moved": {
+    "at": 3,
+    "until": 6,
+    "moveAt": 3,
+    "fadeAt": 5
+   },
+   "err": null
+  },
+  "EDGE1": {
+   "barEnd": 1,
+   "overBar": true,
+   "barIsEdge": false,
+   "titleIsEdge": true,
+   "err": null
+  },
+  "RETURN1": {
+   "relative": [
+    100,
+    100,
+    0,
+    0,
+    50
+   ],
+   "fill": [
+    "#ff0000",
+    "#ff0000",
+    "#ffffff"
+   ],
+   "blink": [
+    1,
+    0,
+    1
+   ],
+   "unit": {
+    "mid": [
+     "#ff0000",
+     "#ff0000"
+    ],
+    "after": null,
+    "own": "#ffffff"
+   },
+   "err": null
+  },
+  "LANE1": {
+   "count": 267,
+   "worst": 0.003,
+   "editMs": 8.6,
+   "err": null
+  },
+  "CYCLE1": {
+   "first": "all",
+   "second": "all",
+   "selected": [
+    "b"
+   ],
+   "err": null
+  },
+  "EDIT1": {
+   "opened": true,
+   "value": "Edit me\nTwice",
+   "centerDx": 0,
+   "centerDy": 0,
+   "boxW": 97,
+   "blockW": 97,
+   "color": "rgb(255, 204, 0)",
+   "lineHeight": "32.94px",
+   "background": "rgba(0, 0, 0, 0)",
+   "hidden": true,
+   "selected": [
+    "t"
+   ],
+   "closed": true,
+   "shownAgain": true
+  },
+  "PRESET1": {
+   "enchanted": true,
+   "rainbow": true,
+   "slot": true,
+   "shake": true,
+   "blink": true,
+   "typing": true,
+   "err": null
+  },
+  "PERF1": {
+   "stepMs": 5.26,
+   "editMs": 8.46,
+   "err": null
+  }
+ },
+ "volatile": {
+  "LANE1": [
+   "editMs"
+  ],
+  "PERF1": [
+   "stepMs",
+   "editMs"
+  ]
+ }
+}

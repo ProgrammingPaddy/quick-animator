@@ -1,0 +1,92 @@
+{
+ "results": {
+  "SHIFTFILL1": {
+   "ahead": 3,
+   "made": [
+    {
+     "verb": "to",
+     "fill": "#4f8cff",
+     "start": 2,
+     "end": 3
+    }
+   ],
+   "shown": 3,
+   "restored": 2,
+   "chained": [
+    [
+     4,
+     5
+    ],
+    [
+     5,
+     6
+    ]
+   ],
+   "rest": 6,
+   "ending": [
+    [
+     6,
+     7
+    ]
+   ],
+   "err": null
+  },
+  "DROP1": {
+   "alt": "#10b981",
+   "dropping": true,
+   "picked": "#4f8cff",
+   "stillDropping": false,
+   "swatches": [
+    "#10b981",
+    "#4f8cff"
+   ],
+   "lists": [
+    [
+     "Recent",
+     "#10b981",
+     "#4f8cff"
+    ],
+    [
+     "Project",
+     "#4f8cff",
+     "#10b981"
+    ]
+   ],
+   "active": [
+    "#4f8cff",
+    "#4f8cff",
+    "#4f8cff"
+   ],
+   "swatch": {
+    "width": "16px",
+    "height": "16px"
+   },
+   "gap": "6px",
+   "err": null
+  },
+  "CLASSES1": {
+   "applied": {
+    "b": [
+     "bars"
+    ],
+    "c": [
+     "bars"
+    ],
+    "open": false
+   },
+   "afterEnter": {
+    "open": true,
+    "listed": [
+     "bars",
+     "tall"
+    ]
+   },
+   "b": [
+    "bars",
+    "tall"
+   ],
+   "err": null
+  }
+ },
+ "volatile": {}
+}

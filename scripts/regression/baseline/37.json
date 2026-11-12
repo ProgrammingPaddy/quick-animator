@@ -1,0 +1,302 @@
+{
+ "results": {
+  "ORBITPATH1": {
+   "shownBefore": [
+    -700,
+    0
+   ],
+   "after": {
+    "acts": [
+     "path",
+     "path"
+    ],
+    "shown": [
+     -700,
+     0
+    ],
+    "raw": [
+     [
+      -300,
+      0
+     ]
+    ],
+    "selected": [
+     {
+      "object": "b",
+      "index": 1
+     }
+    ]
+   },
+   "onLine": {
+    "anchor0": [
+     -700,
+     0
+    ],
+    "curve0": [
+     -700,
+     0
+    ],
+    "same": true
+   },
+   "inserted": {
+    "count": 2,
+    "raw": [
+     [
+      -300,
+      0
+     ],
+     [
+      -100,
+      350
+     ]
+    ],
+    "anchor1": [
+     -200,
+     177
+    ],
+    "objectThere": [
+     -200,
+     177
+    ],
+    "onCurve": true
+   },
+   "dragged": {
+    "anchor1": [
+     -140,
+     137
+    ],
+    "wanted": [
+     -140,
+     137
+    ],
+    "raw": [
+     [
+      -300,
+      0
+     ],
+     [
+      -40,
+      310
+     ]
+    ]
+   },
+   "lines": 2,
+   "err": null
+  },
+  "FROMHOLD1": {
+   "held": {
+    "c": [
+     0,
+     0,
+     0,
+     1
+    ],
+    "b": [
+     -500,
+     -500,
+     -500,
+     -300
+    ],
+    "d": [
+     0,
+     0.3,
+     0.6,
+     0,
+     1
+    ],
+    "definer": "fade",
+    "dDefiner": 0.5
+   },
+   "wrote": {
+    "src": true,
+    "decl": 0.4
+   },
+   "relWrote": {
+    "decl": -400,
+    "from": -200
+   },
+   "status": "fade, holds its start",
+   "demos": {
+    "fadeIn": {
+     "opacity0": 0,
+     "x0": 0,
+     "xMid": 0,
+     "end": 0,
+     "opacityEnd": 1
+    },
+    "popIn": {
+     "opacity0": 0,
+     "x0": 0,
+     "xMid": 0,
+     "end": 0,
+     "opacityEnd": 1
+    },
+    "snapIn": {
+     "opacity0": 1,
+     "x0": -200,
+     "xMid": -6,
+     "end": 0,
+     "opacityEnd": 1
+    },
+    "slideIn": {
+     "opacity0": 1,
+     "x0": -1360,
+     "xMid": -827,
+     "end": 0,
+     "opacityEnd": 1
+    }
+   },
+   "err": null
+  },
+  "CODEMARK1": {
+   "marks": {
+    "orbit": [
+     [
+      "code",
+      "ƒ shape"
+     ]
+    ],
+    "pulse": [
+     [
+      "code",
+      "ƒ ease"
+     ]
+    ],
+    "literalPath": [],
+    "linked": [
+     [
+      "value",
+      "x = b.x + 20"
+     ]
+    ],
+    "rows": 2,
+    "titles": [
+     "ease: (p) => Math.sin(p * Math.PI)",
+     "shape: (p) => [Math.cos(p * 2 * Math.PI) * 100, Math.sin(p * 2 * Math.PI) * 100]"
+    ]
+   },
+   "hint": [
+    "Shape is code: edit it in the code pane"
+   ],
+   "dashed": {
+    "pieces": 161,
+    "ratio": 0.65
+   },
+   "solid": {
+    "pieces": 62,
+    "ratio": 1
+   },
+   "others": [
+    161
+   ],
+   "err": null
+  },
+  "USERPRESET1": {
+   "menuItems": [
+    "Jump to code",
+    "Go to start 0:00:30",
+    "Go to end 0:01:06",
+    "Rename",
+    "Ease snap▸",
+    "Return",
+    "Links",
+    "Save preset",
+    "Delete"
+   ],
+   "dlg": {
+    "title": "Save preset",
+    "value": "snap",
+    "empty": "Give it a name"
+   },
+   "savedInfo": {
+    "count": 1,
+    "kind": "animation",
+    "verb": "move",
+    "duration": 0.6,
+    "lines": [
+     "x: [-400, 0],",
+     "relative: true,",
+     "duration: 0.6,",
+     "ease: 'snap',"
+    ],
+    "stored": 1
+   },
+   "yours": [
+    [
+     "My snap",
+     "My snap"
+    ]
+   ],
+   "applied": {
+    "acts": [
+     [
+      "mySnap",
+      "move",
+      1,
+      1.6,
+      {
+       "x": -400
+      },
+      "snap",
+      true
+     ]
+    ],
+    "src": true
+   },
+   "dupe": "One of your presets has this name",
+   "dotInfo": {
+    "kind": "object",
+    "className": "Circle",
+    "lines": [
+     "radius: 40,"
+    ],
+    "look": {
+     "radius": 40
+    }
+   },
+   "picture": {
+    "round": "50%",
+    "size": "12px",
+    "fill": "rgb(245, 158, 11)"
+   },
+   "added": {
+    "count": 1,
+    "last": [
+     "dot",
+     "Circle",
+     40,
+     2,
+     4,
+     0
+    ],
+    "selected": [
+     "dot"
+    ]
+   },
+   "ghostInfo": {
+    "cls": "preset-ghost object over-preview",
+    "image": true
+   },
+   "dropped": [
+    "dot",
+    "Circle",
+    200,
+    -100
+   ],
+   "found": [
+    "Dot"
+   ],
+   "rowMenu": [
+    "Delete Dot"
+   ],
+   "afterDelete": [
+    "My snap"
+   ],
+   "err": null
+  },
+  "OFF": {
+   "tool": "select"
+  }
+ },
+ "volatile": {}
+}

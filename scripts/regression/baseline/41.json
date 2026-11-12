@@ -1,0 +1,234 @@
+{
+ "results": {
+  "DRIFT1": {
+   "points": {
+    "othersMoved": 0,
+    "moved": 244,
+    "list": [
+     [
+      240,
+      106
+     ],
+     [
+      -60,
+      -40
+     ],
+     [
+      60,
+      -40
+     ]
+    ],
+    "x": 390,
+    "y": 23,
+    "othersText": true
+   },
+   "line": {
+    "othersMoved": 0,
+    "moved": 57,
+    "othersText": true
+   },
+   "curves": {
+    "anchors": 2,
+    "othersMoved": 0.007,
+    "moved": 244,
+    "anchor0Text": true,
+    "x": -165.94,
+    "y": 26.54,
+    "changed": true
+   },
+   "err": null
+  },
+  "CREATE2": {
+   "drawing": {
+    "handles": 3,
+    "count": 3,
+    "closed": false
+   },
+   "dragged": {
+    "moved": [
+     50,
+     -40
+    ],
+    "count": 3,
+    "stillOpen": true,
+    "othersKept": true
+   },
+   "closed": {
+    "closed": true,
+    "count": 3,
+    "handles": 3
+   },
+   "err": null
+  },
+  "CORNER1": {
+   "converted": {
+    "cubics": 3,
+    "closed": true,
+    "anchors": 3,
+    "twin": 3,
+    "handles": 3,
+    "round": 3
+   },
+   "picked": {
+    "controls": 2,
+    "kind": "smooth"
+   },
+   "smoothDrag": {
+    "stillSmooth": true,
+    "inMoved": 7,
+    "inLength": 19,
+    "inLengthBefore": 19
+   },
+   "altDrag": {
+    "corner": true,
+    "inKept": true
+   },
+   "menu": [
+    "Smooth point",
+    "Straighten point",
+    "Delete point"
+   ],
+   "cornerDrag": {
+    "kind": "corner",
+    "outMoved": 42,
+    "inKept": true,
+    "round": 2
+   },
+   "straightened": {
+    "kind": "straight",
+    "controls": 0,
+    "lines": 2,
+    "cubics": 1
+   },
+   "err": null
+  },
+  "PATHCURVES1": {
+   "lineBefore": true,
+   "before": {
+    "anchors": [
+     [
+      -300,
+      0
+     ],
+     [
+      0,
+      200
+     ],
+     [
+      300,
+      0
+     ]
+    ],
+    "mid": [
+     0,
+     200
+    ],
+    "kind": "points"
+   },
+   "lineMenu": [
+    "Add point",
+    "Straighten segment",
+    "Path▸"
+   ],
+   "after": {
+    "isString": true,
+    "cubics": 2,
+    "kind": "curves",
+    "anchors": [
+     [
+      -300,
+      0
+     ],
+     [
+      0,
+      200
+     ],
+     [
+      300,
+      0
+     ]
+    ],
+    "mid": [
+     0,
+     200
+    ],
+    "controls": 0,
+    "status": "3 anchors"
+   },
+   "picked": {
+    "points": [
+     1
+    ],
+    "controls": 2
+   },
+   "bent": {
+    "outMoved": 60,
+    "inMoved": 0,
+    "anchorsKept": true,
+    "changed": true
+   },
+   "inserted": {
+    "anchors": 4,
+    "picked": [
+     1
+    ],
+    "sameWay": true
+   },
+   "deleted": {
+    "anchors": 3
+   },
+   "timing": {
+    "t1": 0.99,
+    "atAnchor": true
+   },
+   "err": null
+  },
+  "IMPORT2": {
+   "tiny": {
+    "count": 1,
+    "name": "tinyShape1",
+    "className": "Shape",
+    "points": [
+     [
+      0,
+      90
+     ],
+     [
+      90,
+      -90
+     ],
+     [
+      -90,
+      -90
+     ]
+    ],
+    "x": 0,
+    "y": -200,
+    "notice": "Imported 1 object at 9×.",
+    "banner": "Imported 1 object at 9×.",
+    "tool": "select",
+    "selected": [
+     "tinyShape1"
+    ]
+   },
+   "bad": {
+    "notice": "Not an SVG file.",
+    "count": 1
+   },
+   "dropped": {
+    "count": 2,
+    "notice": "Imported 1 object at 9×.",
+    "last": "droppedShape1"
+   },
+   "other": {
+    "notice": "Only .svg files can be imported.",
+    "count": 2
+   },
+   "err": null
+  },
+  "OFF": {
+   "tool": "select"
+  }
+ },
+ "volatile": {}
+}

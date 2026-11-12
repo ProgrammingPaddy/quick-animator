@@ -1,0 +1,142 @@
+{
+ "results": {
+  "SNAP2": {
+   "pps": 100,
+   "snapped": {
+    "start": 2,
+    "lineLeft": 644,
+    "clipLeft": 645
+   },
+   "free": {
+    "start": 2.3333,
+    "line": false
+   },
+   "nearPlayhead": {
+    "start": 2.5
+   },
+   "err": null
+  },
+  "PUSHC1": {
+   "ms": 250,
+   "untouched": {
+    "c": {
+     "x": 300,
+     "y": 0
+    },
+    "p": {
+     "x": 600,
+     "y": 250
+    }
+   },
+   "pushed": {
+    "c": {
+     "x": 300,
+     "y": -70
+    },
+    "p": {
+     "x": 300,
+     "y": 40
+    }
+   },
+   "err": null
+  },
+  "PIN1": {
+   "atEnd": {
+    "pin": "end",
+    "time": 2
+   },
+   "dragged": {
+    "dest": 100,
+    "decl": -300,
+    "time": 2
+   },
+   "back": {
+    "pin": "start",
+    "time": 1
+   },
+   "err": null
+  },
+  "SHIFTANY1": {
+   "jumped": 2,
+   "acts": [
+    {
+     "verb": "to",
+     "start": 1,
+     "end": 2,
+     "changes": {
+      "rotation": 90,
+      "x": -150
+     }
+    }
+   ],
+   "src": true,
+   "err": null
+  },
+  "BAKE1": {
+   "baked": {
+    "x": -280,
+    "src": true
+   },
+   "restored": {
+    "x": -280,
+    "src": true
+   },
+   "def": {
+    "src": false
+   },
+   "err": null
+  },
+  "FREE2": {
+   "word": {
+    "text": "a",
+    "src": true
+   },
+   "nonsense": {
+    "same": true,
+    "err": null
+   },
+   "linked": {
+    "src": true,
+    "shown": "= -600"
+   },
+   "err": null
+  },
+  "PATH1": {
+   "start": [
+    -300,
+    0
+   ],
+   "mid": [
+    0,
+    200
+   ],
+   "end": [
+    300,
+    0
+   ],
+   "angleEarly": 34,
+   "angleLate": -34,
+   "line": {
+    "visible": true,
+    "segments": 123
+   },
+   "lineAfter": false,
+   "pane": {
+    "head": "p.path0:00:00 to 0:02:00, 2 s",
+    "pathRow": "[[-300, 0], [0, 200], [300, 0]]",
+    "orient": true
+   },
+   "clipLabel": "path",
+   "warnings": [],
+   "err": null
+  },
+  "OFF": {
+   "collide": false
+  }
+ },
+ "volatile": {
+  "PUSHC1": [
+   "ms"
+  ]
+ }
+}

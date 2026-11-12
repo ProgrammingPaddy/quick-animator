@@ -5,7 +5,7 @@ import { CodePane } from './panes/CodePane'
 import { NowPane } from './panes/NowPane'
 import { ObjectPane } from './panes/ObjectPane'
 import { PresetsPane } from './panes/PresetsPane'
-import { PreviewPane } from './panes/PreviewPane'
+import { PreviewPane, PreviewViews } from './panes/PreviewPane'
 import { TimelinePane } from './panes/TimelinePane'
 
 /** The resizable edges: the left column, the right column, the timeline, the Now pane, and the presets under the objects (D217). */
@@ -169,7 +169,7 @@ export function Layout() {
       )}
       <div className={gutterClass('v', 'left')} onPointerDown={beginDrag('left')} />
       <div className="column center">
-        <Pane title="Preview" side="center" collapsed={false}>
+        <Pane title="Preview" side="center" collapsed={false} extra={<PreviewViews />}>
           <PreviewPane />
         </Pane>
         <div className={gutterClass('h', 'bottom')} onPointerDown={beginDrag('bottom')} />

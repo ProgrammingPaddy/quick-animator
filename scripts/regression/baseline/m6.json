@@ -1,0 +1,86 @@
+{
+ "results": {
+  "CODE1": {
+   "statement": [
+    "Mask"
+   ],
+   "acceptedMask": true,
+   "afterMask": {
+    "tail": "mask = Rect({|  x: 0,|  y: 0,|  width: 960,|  height: 540,|  masks: 'below',|  at: 0,|  until: 2,|})",
+    "masks": [
+     "spot -> 4",
+     "mask -> 6"
+    ],
+    "err": null
+   },
+   "attr": [
+    "masks"
+   ],
+   "acceptedAttr": true,
+   "afterAttr": {
+    "badge": "badge = Rect({\n  x: 700,\n  y: 400,\n  width: 200,\n  height: 100,\n  fill: '#10b981',\n  masks: 'below',\n})",
+    "masks": [
+     "spot",
+     "badge"
+    ],
+    "err": null
+   },
+   "inList": {
+    "words": [
+     "above",
+     "below",
+     "except",
+     "none"
+    ],
+    "names": [
+     "badge",
+     "bar",
+     "bar1",
+     "logo",
+     "title"
+    ]
+   },
+   "narrowed": [
+    "title"
+   ],
+   "acceptedName": true,
+   "afterName": {
+    "scope": "below except backdrop title",
+    "targets": [
+     "bar1",
+     "bar2",
+     "logo"
+    ],
+    "err": null
+   },
+   "afterEquals": [
+    "Mask"
+   ],
+   "acceptedAfterEquals": true,
+   "afterEqualsCode": {
+    "tail": "wipe = Rect({|  x: 0,|  y: 0,|  width: 960,|  height: 540,|  masks: 'below',|  at: 0,|  until: 2,|})",
+    "masks": [
+     "spot",
+     "wipe"
+    ],
+    "err": null
+   }
+  },
+  "GHOST1": {
+   "blocks": 8,
+   "withMasks": 6,
+   "withInverted": 1,
+   "sample": [
+    "masks: '',"
+   ],
+   "objects": 7,
+   "masks": 1,
+   "afterClick": {
+    "written": true,
+    "masks": 1,
+    "err": null
+   }
+  }
+ },
+ "volatile": {}
+}

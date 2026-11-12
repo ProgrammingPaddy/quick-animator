@@ -38,14 +38,27 @@ node scripts/inspect.mjs eval "window.__quickAnimator.openProject('C:/path/to/ex
 
 Use forward slashes in paths passed through the shell. In development the page exposes
 `window.__quickAnimator` with `useStore`, `openProject`, `getEditor`, and `getRenderer`.
+A second instance started only for testing takes `--user-data-dir=C:/path/to/a/scratch/folder`
+after the port: it then keeps its own settings, so the project it opens is not the one the
+owner's instance opens next.
 `node scripts/test-drags.mjs` runs the drag matrix (D224) against that instance, on a temporary
 copy of `examples/first`: every drag of an object with an animation placed on it must land where
 the pointer is. Run it after touching the sampler, the solver, paths, or the preview's drags.
 
-Two traps: the editor is created once, so after editing anything it uses (`src/renderer/src/code/`)
-reload the window (`node scripts/inspect.mjs eval "location.reload()"`) before testing; and Vite's
+`node scripts/regression/run.mjs` runs the regression chain (D355) against that instance, in a
+scratch project in the temp folder: every suite in `scripts/regression/suites`, each check's
+result compared with what `scripts/regression/baseline` holds for it. Name suites to run only
+those, `node scripts/regression/run.mjs 47 m8`. A difference is a regression to fix, or a change
+that was meant, kept with `--update` once it has been read. A round adds its checks as a suite
+there, and runs the suites for what it touched; the whole chain runs when the renderer or the
+preview changes under everything.
+
+Three traps: the editor is created once, so after editing anything it uses (`src/renderer/src/code/`)
+reload the window (`node scripts/inspect.mjs eval "location.reload()"`) before testing; Vite's
 watcher can miss the second of two quick writes to one file, so if the served module looks stale,
-`touch` the file.
+`touch` the file; and the preview's viewport and scene renderer are objects made once, so a method
+added to either is not on the one a running window holds: a pane that calls it after a hot update
+goes blank until the window is reloaded.
 
 ## Layout
 

@@ -1,0 +1,249 @@
+{
+ "results": {
+  "MODEL1": {
+   "base": [
+    "spot [spot] -> title bar1 bar2 logo"
+   ],
+   "below": [
+    "spot [spot] -> backdrop title bar1 bar2 logo"
+   ],
+   "above": [
+    "spot [spot] -> badge"
+   ],
+   "names": [
+    "spot [spot] -> title bar1 bar2"
+   ],
+   "type": [
+    "spot [spot] -> backdrop bar2 badge"
+   ],
+   "both": [
+    "spot [spot] -> backdrop title logo badge"
+   ],
+   "unknown": {
+    "m": [
+     "spot [spot] -> "
+    ],
+    "warnings": [
+     "spot masks nothing named \"nothing\"",
+     "spot masks nothing named \"here\""
+    ]
+   },
+   "empty": [],
+   "inverted": [
+    "spot! [spot] -> backdrop title bar1 bar2 logo"
+   ]
+  },
+  "DRAW1": {
+   "inside": "#f59e0b",
+   "outside": "#24324a",
+   "outside2": "#24324a",
+   "badge": "#10b981",
+   "backdrop": "#24324a",
+   "logoIn": "#ec4899",
+   "logoOut": "#24324a",
+   "inv": {
+    "inside": "#24324a",
+    "outside": "#f59e0b",
+    "logoOut": "#ec4899"
+   },
+   "two": {
+    "both": "#f59e0b",
+    "spotOnly": "#24324a",
+    "stripOnly": "#24324a",
+    "bar2": "#24324a",
+    "masks": [
+     "spot -> title bar1 bar2 logo",
+     "strip -> bar1 bar2"
+    ]
+   },
+   "off": {
+    "stripOnly": "#f59e0b",
+    "outsideBoth": "#24324a",
+    "bar2far": "#24324a"
+   }
+  },
+  "DRAW2": {
+   "union": {
+    "masks": [
+     {
+      "name": "spots",
+      "shapes": [
+       "spot",
+       "spot2"
+      ],
+      "targets": [
+       "title",
+       "bar1",
+       "bar2",
+       "logo"
+      ],
+      "inverted": false
+     }
+    ],
+    "left": "#f59e0b",
+    "right": "#4f8cff",
+    "between": "#24324a",
+    "err": null,
+    "warnings": []
+   },
+   "moved": {
+    "left": "#f59e0b",
+    "oldLeft": "#24324a",
+    "right": "#4f8cff"
+   },
+   "half": "#8c682b",
+   "before": "#f59e0b",
+   "during": "#24324a",
+   "after": "#f59e0b"
+  },
+  "OPS1": {
+   "added": {
+    "name": "mask1",
+    "decl": "mask1 = Rect({\n  x: 100,\n  y: 50,\n  width: 960,\n  height: 540,\n  masks: 'below',\n  until: 2,\n})",
+    "selected": [
+     "mask1"
+    ],
+    "targets": [
+     "backdrop",
+     "title",
+     "bar1",
+     "bar2",
+     "logo",
+     "badge"
+    ]
+   },
+   "forBars": {
+    "name": "mask1",
+    "decl": "mask1 = Rect({\n  x: 0,\n  y: -150,\n  width: 1000,\n  height: 80,\n  masks: 'bar1 bar2',\n})",
+    "order": [
+     "backdrop",
+     "title",
+     "bar1",
+     "bar2",
+     "mask1",
+     "logo",
+     "spot",
+     "badge"
+    ],
+    "targets": [
+     "bar1",
+     "bar2"
+    ]
+   },
+   "use": {
+    "name": "logo",
+    "decl": "logo = Circle({\n  x: 0,\n  y: -350,\n  radius: 90,\n  fill: '#ec4899',\n  masks: 'below',\n})",
+    "targets": [
+     "backdrop",
+     "title",
+     "bar1",
+     "bar2"
+    ]
+   },
+   "released": "logo = Circle({\n  x: 0,\n  y: -350,\n  radius: 90,\n  fill: '#ec4899',\n})",
+   "merged": {
+    "name": "mask1",
+    "decl": "mask1 = Group({\n  members: 'logo badge',\n  masks: 'below',\n})",
+    "masks": [
+     "spot [spot] -> title bar1 bar2",
+     "mask1 [logo badge] -> backdrop title bar1 bar2"
+    ],
+    "order": [
+     "backdrop",
+     "title",
+     "bar1",
+     "bar2",
+     "logo",
+     "spot",
+     "badge",
+     "mask1"
+    ]
+   },
+   "mergeMasks": {
+    "name": "mask1",
+    "decl": "mask1 = Group({\n  members: 'logo spot',\n  masks: 'below except backdrop',\n})",
+    "logo": "logo = Circle({\n  x: 0,\n  y: -350,\n  radius: 90,\n  fill: '#ec4899',\n})",
+    "spot": "spot = Circle({\n  x: 0,\n  y: 0,\n  radius: 300,\n})",
+    "masks": [
+     "mask1 [logo spot] -> title bar1 bar2"
+    ]
+   }
+  },
+  "TICK1": {
+   "offTitle": "below except backdrop title",
+   "onBackdrop": "below except title",
+   "onTitle": "below",
+   "onAbove": "below badge",
+   "offAbove": "below",
+   "offClass": "below except bar",
+   "onMember": "below except bar2",
+   "onClass": "below",
+   "namesOff": "title",
+   "namesEmpty": {
+    "scope": "none",
+    "isMask": true,
+    "decl": "spot = Circle({\n  x: 0,\n  y: 0,\n  radius: 300,\n  masks: 'none',\n})"
+   },
+   "namesOn": "bar2",
+   "selection": []
+  },
+  "NAMES1": {
+   "renamed": {
+    "scope": "headline bar1 except bar1",
+    "has": true,
+    "err": null
+   },
+   "deleted": {
+    "scope": "headline",
+    "err": null
+   },
+   "copies": {
+    "names": [
+     "backdrop2",
+     "title2",
+     "spot2"
+    ],
+    "decl": "backdrop2 = Rect({\n  width: 1920,\n  height: 1080,\n  fill: '#24324a',\n})"
+   },
+   "maskGroupDeleted": {
+    "objects": [
+     "backdrop",
+     "title",
+     "bar1",
+     "bar2",
+     "spot"
+    ],
+    "masks": [
+     "spot"
+    ],
+    "err": null
+   }
+  },
+  "EXPORT1": {
+   "opaque": {
+    "inside": "#f59e0b",
+    "outside": "#24324a",
+    "badge": "#10b981",
+    "backdrop": "#24324a",
+    "logoOut": "#24324a"
+   },
+   "opaqueMoved": {
+    "bar2": "#4f8cff",
+    "bar1": "#24324a"
+   },
+   "alpha": {
+    "inside": "#f59e0b",
+    "outside": "#24324a",
+    "badge": "#10b981",
+    "backdrop": "#24324a",
+    "logoOut": "#24324a"
+   },
+   "alphaMoved": {
+    "bar2": "#4f8cff",
+    "bar1": "#24324a"
+   },
+   "offInView": "#24324a"
+  }
+ },
+ "volatile": {}
+}

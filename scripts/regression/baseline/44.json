@@ -1,0 +1,214 @@
+{
+ "results": {
+  "DRAWC1": {
+   "open": {
+    "curves": "M 0 0 L 200 0 L 200 200",
+    "kind": "curves",
+    "handles": 3,
+    "strokeWidth": 3
+   },
+   "closed": {
+    "curves": "M -100 -100 L 100 -100 L 100 100 Z",
+    "x": 200,
+    "y": 200,
+    "stroke": "#ffffff",
+    "tool": "shape",
+    "closed": true
+   },
+   "drawn": {
+    "cubics": 2,
+    "anchors": 3,
+    "smoothMiddle": true
+   },
+   "line": {
+    "closed": false,
+    "strokeWidth": 3,
+    "tool": "select",
+    "src": true
+   },
+   "err": null
+  },
+  "MENU4": {
+   "circle": {
+    "kind": null,
+    "frame": [
+     300,
+     0,
+     120,
+     120
+    ],
+    "anchors": 4
+   },
+   "triMenu": [
+    "Jump to code",
+    "Rename",
+    "Shape▸",
+    "Path▸",
+    "Save preset",
+    "Classes",
+    "Mask▸",
+    "Hide",
+    "Attach to screen",
+    "Collision▸",
+    "Duplicate",
+    "Delete"
+   ],
+   "smoothed": {
+    "kind": "curves",
+    "cubics": 3,
+    "closed": true,
+    "frame": [
+     -300,
+     -6,
+     122,
+     113
+    ],
+    "allSmooth": [
+     true,
+     true,
+     true
+    ]
+   },
+   "curvesMenu": [
+    "Jump to code",
+    "Rename",
+    "Shape▸",
+    "Path▸",
+    "Save preset",
+    "Classes",
+    "Mask▸",
+    "Hide",
+    "Attach to screen",
+    "Collision▸",
+    "Duplicate",
+    "Delete"
+   ],
+   "straight": {
+    "lines": 2,
+    "cubics": 0,
+    "frame": [
+     -300,
+     0,
+     120,
+     100
+    ]
+   },
+   "opened": {
+    "closed": false,
+    "fill": "#4f8cff",
+    "menu": [
+     "Jump to code",
+     "Rename",
+     "Shape▸",
+     "Path▸",
+     "Save preset",
+     "Classes",
+     "Mask▸",
+     "Hide",
+     "Attach to screen",
+     "Collision▸",
+     "Duplicate",
+     "Delete"
+    ]
+   },
+   "reclosed": {
+    "closed": true,
+    "fill": "#4f8cff"
+   },
+   "err": null
+  },
+  "PATHSMOOTH1": {
+   "menu": [
+    "Add point",
+    "Curve segment",
+    "Path▸"
+   ],
+   "smoothed": {
+    "kind": "curves",
+    "cubics": 2,
+    "mid": [
+     0,
+     200
+    ]
+   },
+   "straight": {
+    "lines": 2,
+    "mid": [
+     0,
+     200
+    ]
+   },
+   "err": null
+  },
+  "COMPLETE1": {
+   "length": 2,
+   "rect": [
+    "x=0",
+    "y=0",
+    "width=200",
+    "height=120",
+    "fill='#ffffff'",
+    "at=0",
+    "until=2"
+   ],
+   "shape": [
+    "x",
+    "y",
+    "points",
+    "fill",
+    "at",
+    "until"
+   ],
+   "group": [
+    "members"
+   ],
+   "text": [
+    "x",
+    "y",
+    "text",
+    "fontSize",
+    "fill",
+    "at",
+    "until"
+   ],
+   "noRotation": true
+  },
+  "ANCHOR2": {
+   "first": "rect1",
+   "anchoredBefore": [
+    "rect1"
+   ],
+   "afterDelete": [],
+   "again": "rect1",
+   "anchoredNow": [],
+   "marks": 0,
+   "err": null
+  },
+  "TOOLBAR1": {
+   "picks": [
+    "Object",
+    "Group",
+    "Class"
+   ],
+   "overlap": false,
+   "barRight": 340,
+   "toolsLeft": 340,
+   "barBottom": 68,
+   "toolsTop": 72,
+   "err": null
+  },
+  "IMPORT3": {
+   "names": [
+    "inkscapeRect1:Rect",
+    "inkscapeCircle1:Circle",
+    "inkscapeGroup1:Group"
+   ],
+   "notice": null,
+   "err": null
+  },
+  "OFF": {
+   "tool": "select"
+  }
+ },
+ "volatile": {}
+}

@@ -1,0 +1,317 @@
+{
+ "results": {
+  "PANE1": {
+   "tools": [
+    [
+     "search"
+    ],
+    [
+     "Show All*",
+     "Show Only Active"
+    ],
+    [
+     "Layers*",
+     "Type",
+     "Objects(off)",
+     "Animations"
+    ]
+   ],
+   "layers": {
+    "rows": [
+     "badge",
+     "spot",
+     "logo",
+     "bar2",
+     "bar1",
+     "title",
+     "backdrop"
+    ],
+    "heads": [],
+    "slots": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "first": "tick-slot",
+    "icons": 8,
+    "eyes": 7
+   },
+   "held": {
+    "ticks": {
+     "badge": false,
+     "logo": true,
+     "bar2": true,
+     "bar1": true,
+     "title": true,
+     "backdrop": false
+    },
+    "tickLeftOfName": true,
+    "slot": 13,
+    "maskRow": "spotmaskbelow except backdropCircle",
+    "maskIcon": "rgb(34, 211, 238)",
+    "line": true
+   },
+   "type": {
+    "tools": [
+     [
+      "search"
+     ],
+     [
+      "Show All*",
+      "Show Only Active"
+     ],
+     [
+      "Layers",
+      "Type*",
+      "Objects",
+      "Animations"
+     ]
+    ],
+    "heads": [
+     "Rect 4",
+     "Circle 1",
+     "Text 1",
+     "Class 1",
+     "Mask 1"
+    ],
+    "ticks": {
+     "backdrop": false,
+     "bar1": true,
+     "bar2": true,
+     "badge": false,
+     "logo": true,
+     "title": true,
+     "bar": true
+    }
+   },
+   "untickClass": {
+    "scope": "below except backdrop bar",
+    "ticks": {
+     "backdrop": false,
+     "bar1": false,
+     "bar2": false,
+     "badge": false,
+     "logo": true,
+     "title": true,
+     "bar": false
+    }
+   },
+   "filterOn": [
+    "Show All",
+    "Show Only Active*"
+   ],
+   "filterOff": [
+    "Show All*",
+    "Show Only Active"
+   ],
+   "noAnimations": [
+    "Layers*",
+    "Type",
+    "Objects(off)",
+    "Animations(off)"
+   ]
+  },
+  "ACTIVE1": {
+   "err": null,
+   "at0": {
+    "late": "inactive / Not on screen at the playhead",
+    "badge": "active"
+   },
+   "at35": {
+    "late": "active",
+    "badge": "active"
+   },
+   "groupAt35": "active",
+   "groupAt1": "inactive / Not on screen at the playhead",
+   "groupBack": "active"
+  },
+  "HIDE1": {
+   "before": {
+    "badge": "#10b981",
+    "eyes": 7,
+    "rows": 7
+   },
+   "hidden": {
+    "badge": "#24324a",
+    "hidden": [
+     "badge"
+    ],
+    "row": "object is-hidden",
+    "clip": "oclip is-hidden",
+    "clipEye": true,
+    "selection": [],
+    "source": false
+   },
+   "pickThrough": [
+    "backdrop"
+   ],
+   "shown": {
+    "badge": "#10b981",
+    "hidden": [],
+    "clip": "oclip"
+   },
+   "timelineMenu": [
+    "Hide"
+   ],
+   "afterTimelineHide": {
+    "hidden": [
+     "logo"
+    ],
+    "logo": "#24324a"
+   },
+   "timelineMenu2": [
+    "Show"
+   ],
+   "previewMenu": [
+    "Jump to code",
+    "Rename",
+    "Shape",
+    "Path",
+    "Save preset",
+    "Classes",
+    "Mask",
+    "Hide",
+    "Attach to screen",
+    "Collision",
+    "Duplicate",
+    "Delete"
+   ],
+   "afterPreviewHide": {
+    "hidden": [
+     "badge"
+    ],
+    "badge": "#24324a"
+   },
+   "maskHidden": {
+    "outside": "#f59e0b",
+    "hidden": [
+     "spot"
+    ]
+   },
+   "export": {
+    "badge": "#10b981",
+    "outside": "#24324a"
+   },
+   "groupHidden": {
+    "bar1": "#24324a",
+    "rows": [
+     true,
+     true
+    ],
+    "clip": true
+   },
+   "groupShown": {
+    "bar1": "#f59e0b",
+    "hidden": []
+   }
+  },
+  "SHOW1": {
+   "button": {
+    "there": true,
+    "on": true,
+    "besidePaths": true
+   },
+   "none": 1,
+   "maskedSelected": 1,
+   "unmaskedSelected": 0,
+   "maskSelected": 1,
+   "twoMasksAt0": 1,
+   "twoMasksAt15": 2,
+   "bar1": 2,
+   "title": 1,
+   "oneHidden": 1,
+   "off": {
+    "on": false,
+    "none": 0,
+    "stored": "off"
+   },
+   "offButInHand": 1,
+   "onAgain": {
+    "edges": 2,
+    "stored": "on"
+   }
+  },
+  "PICK2": {
+   "unselected": [
+    "backdrop"
+   ],
+   "dragged": {
+    "selection": [
+     "bar1"
+    ],
+    "y": -50,
+    "x": -300,
+    "err": null
+   }
+  },
+  "NONE1": {
+   "empty": {
+    "masks": 0,
+    "warnings": 0
+   },
+   "lastOut": {
+    "scope": "none",
+    "isMask": [
+     "spot -> "
+    ],
+    "warnings": 0
+   },
+   "backIn": "logo",
+   "deletedLast": {
+    "scope": "none",
+    "isMask": 1,
+    "err": null
+   },
+   "cleared": {
+    "decl": "spot = Circle({\n  x: 0,\n  y: 0,\n  radius: 300,\n})",
+    "masks": 0,
+    "sections": [
+     "Lifetime",
+     "Position",
+     "Size",
+     "Color",
+     "Classes"
+    ]
+   }
+  },
+  "CLASS1": {
+   "menu": {
+    "items": [
+     "Jump to code",
+     "Select members",
+     "Save preset",
+     "Mask",
+     "Delete"
+    ],
+    "mask": [
+     "Add mask",
+     "Masked by > spot✓"
+    ]
+   },
+   "letOut": "below except backdrop bar",
+   "added": {
+    "selection": [
+     "mask1"
+    ],
+    "decl": "mask1 = Rect({\n  x: 0,\n  y: -150,\n  width: 1000,\n  height: 80,\n  masks: 'bar',\n})",
+    "targets": [
+     "bar1",
+     "bar2"
+    ]
+   },
+   "sections": [
+    "Lifetime",
+    "Position",
+    "Size",
+    "Color",
+    "Classes"
+   ]
+  }
+ },
+ "volatile": {}
+}

@@ -195,6 +195,21 @@ orbiting while editing, and draws the scene camera's frustum so the shot is alwa
 "Look through camera" returns the preview to the exact render view. A 2D camera move, such as a
 slow push-in, is an animation of the scene camera.
 
+The camera as built for the flat scene (D357 to D364). `Camera` is a class in the registry for
+which the scene renderer makes no mesh. `model/sample.ts` finds the camera that has the picture at
+a time, `cameraAt`, the highest in the cast among those alive, and what it frames, `viewAt`: the
+point of the scene at the picture's middle, the zoom, and the roll; with none alive, the scene's
+middle. A thing with `attached` is carried through that view as it is through its groups, in
+`worldPose`, so the renderer, the frames, the paths, and the solver behind every drag place it by
+the picture with no code of their own. The Preview view draws the world through its own view
+camera, the frame placed where the camera's view puts it; the Camera view is a second canvas and
+WebGL renderer drawing the same scene graph through an orthographic camera set from that view,
+with everything drawn for the one working on the scene, kept in one group, switched off for that
+drawing, and the masks' pictures made for each renderer. An export sets its camera from the view
+the same way. To the gizmo a camera's frame is a frame like any object's, so a camera's drags are
+an object's drags, its zoom standing where the size would; on the Camera view a drag is mapped the
+other way, the picture following the pointer.
+
 ## Time (D41)
 
 - Time in code is seconds. The timeline shows seconds and frames and snaps to frames.
@@ -259,7 +274,7 @@ changes between the two modes.
 
 The renderer side draws each frame through a second `SceneRenderer` on an offscreen canvas at
 project resolution, one world pixel per output pixel, with an orthographic camera framing the
-project exactly and no gizmo. Opaque formats draw the project's background behind the scene;
+project exactly, or what the scene's camera frames at that moment (D357), and no gizmo. Opaque formats draw the project's background behind the scene;
 formats with alpha draw on nothing, composite premultiplied so edges and fades keep their color,
 and hand back straight alpha. Each frame is read back as RGBA rows and sent to the main process,
 which pipes it into the bundled ffmpeg's stdin, one export at a time, waiting for ffmpeg to take

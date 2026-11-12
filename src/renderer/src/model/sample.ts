@@ -1,4 +1,4 @@
-import { attrSchema, defaultFor, GROUP, SHAPE, type AttrType, type AttrValue } from './registry'
+import { attrSchema, CAMERA, defaultFor, GROUP, SHAPE, type AttrType, type AttrValue } from './registry'
 import { DEFAULT_EASE_FRACTION, easingFor, namedEasings, unease, type Easing } from './easing'
 import { boundsOf, flattenPathData, hasPathData, parsePathData, pathAnchors, placeBetween, polygonPathData, serializePathData, smoothPathData, translatePathData, type Anchor, type Seg, type Subpath } from './pathData'
 import { blendMorph, morphPairs, type MorphPair } from './morph'
@@ -81,6 +81,12 @@ interface Cache {
   morphs: Map<number, { from: Seg[]; to: Seg[]; pairs: MorphPair[] }>
   /** Where each action begins from, the state at its first frame, by `${action}:${attr}` (D258). */
   froms: Map<string, AttrValue>
+  /** The cameras, in the order of the cast (D358). */
+  cameras?: SceneObject[]
+  /** What the picture is taken through at the time last asked for (D357). */
+  view?: { time: number; view: View }
+  /** Whether each thing is held on the screen, by object id (D362). */
+  attached: Map<number, boolean>
 }
 
 const cache = new WeakMap<SceneModel, Cache>()
@@ -88,7 +94,7 @@ const cache = new WeakMap<SceneModel, Cache>()
 function cacheFor(model: SceneModel): Cache {
   let c = cache.get(model)
   if (!c) {
-    c = { segments: new Map(), containers: new Map(), pivots: new Map(), basePivots: new Map(), starts: new Map(), motions: new Map(), travels: new Map(), morphs: new Map(), froms: new Map() }
+    c = { segments: new Map(), containers: new Map(), pivots: new Map(), basePivots: new Map(), starts: new Map(), motions: new Map(), travels: new Map(), morphs: new Map(), froms: new Map(), attached: new Map() }
     cache.set(model, c)
   }
   return c
@@ -722,16 +728,17 @@ function underPath(model: SceneModel, obj: SceneObject, action: Action, time: nu
   return at ? { x: own.x - at.point.x, y: own.y - at.point.y } : own
 }
 
-/** A point of an object's own space carried through its groups to where it is drawn, at a time (D124). */
+/** A point of an object's own space carried through its groups to where it is drawn, at a time (D124); held on the screen, through the camera too (D362). */
 function carried(model: SceneModel, obj: SceneObject, time: number, point: Point): Point {
   let pose: Pose = { x: point.x, y: point.y, rotation: 0, scale: 1 }
   for (const g of containers(model, obj)) pose = carry(model, g, time, pose)
+  if (isAttached(model, obj)) pose = throughView(viewAt(model, time), pose)
   return { x: pose.x, y: pose.y }
 }
 
 /** A drawn point taken back through an object's groups into its own space, at a time: the inverse of `carried`. */
 function uncarried(model: SceneModel, obj: SceneObject, time: number, point: Point): Point {
-  let p = point
+  let p = isAttached(model, obj) ? intoView(viewAt(model, time), point) : point
   for (const g of [...containers(model, obj)].reverse()) {
     const { motion, shift } = groupMotion(model, g, time)
     const x = p.x - shift.x - motion.dx
@@ -1764,7 +1771,8 @@ export function memberBox(model: SceneModel, group: SceneObject, time: number, s
   }
   for (const name of model.groups.get(group.name) ?? []) {
     const member = model.objects.find((o) => o.name === name)
-    if (!member || seen.has(member.name)) continue
+    // A camera draws nothing, so it adds nothing to the box (D357).
+    if (!member || seen.has(member.name) || member.className === CAMERA) continue
     let frame: BoxFrame
     if (member.className === GROUP) {
       const inner = memberBox(model, member, time, seen)
@@ -1829,11 +1837,11 @@ export function ownPose(model: SceneModel, obj: SceneObject, time: number): Pose
   return { x: p.x, y: p.y, rotation: typeof rotation === 'number' ? rotation : 0, scale: typeof scale === 'number' ? scale : 1 }
 }
 
-/** Where an object is drawn: its own pose carried through every group it belongs to (D124). */
+/** Where an object is drawn: its own pose carried through every group it belongs to (D124), and, held on the screen, through the camera that has the picture (D362). */
 export function worldPose(model: SceneModel, obj: SceneObject, time: number): Pose {
   let pose = ownPose(model, obj, time)
   for (const g of containers(model, obj)) pose = carry(model, g, time, pose)
-  return pose
+  return isAttached(model, obj) ? throughView(viewAt(model, time), pose) : pose
 }
 
 /** A group's drawn box: the box around its members as the group's motion and the groups above it place it, so it turns with the group (D116). */
@@ -1842,12 +1850,106 @@ export function groupBox(model: SceneModel, group: SceneObject, time: number): B
   if (!box) return null
   let pose: Pose = { x: box.x, y: box.y, rotation: box.rotation, scale: 1 }
   for (const g of [group, ...containers(model, group)]) pose = carry(model, g, time, pose)
+  if (isAttached(model, group)) pose = throughView(viewAt(model, time), pose)
   return { x: pose.x, y: pose.y, rotation: pose.rotation, width: box.width * pose.scale, height: box.height * pose.scale }
 }
 
-/** The value of an attribute as it shows: the position, rotation, and scale through the object's groups, and a group's own box; anything else as is. */
+/**
+ * What the picture is taken through at a moment (D357): the point of the scene at its middle,
+ * how close, and the roll in degrees. With no camera, the scene's middle as it is.
+ */
+export interface View {
+  x: number
+  y: number
+  zoom: number
+  rotation: number
+}
+
+export const NO_VIEW: View = { x: 0, y: 0, zoom: 1, rotation: 0 }
+
+/** The closest and the widest a camera frames: a zoom outside these is taken as the nearer one, so nothing divides by nothing. */
+const MIN_CAMERA_ZOOM = 0.001
+
+/** The cameras, in the order of the cast: a later one is over an earlier one (D358). */
+export function camerasOf(model: SceneModel): SceneObject[] {
+  const c = cacheFor(model)
+  if (!c.cameras) c.cameras = model.objects.filter((o) => o.className === CAMERA)
+  return c.cameras
+}
+
+/**
+ * The camera that has the picture at a time (D358): of those alive then, the one declared last,
+ * as the top layer covers the ones beneath; null when none is alive, and the picture is the
+ * scene's middle as it is with no camera. With `keepAliveFrom`, one alive there counts too, as
+ * what a Shift gesture looks ahead from stays drawn (D146).
+ */
+export function cameraAt(model: SceneModel, time: number, keepAliveFrom?: number): SceneObject | null {
+  const all = camerasOf(model)
+  for (let i = all.length - 1; i >= 0; i--) {
+    const camera = all[i]!
+    if (existsAt(model, camera, time) || (keepAliveFrom !== undefined && existsAt(model, camera, keepAliveFrom))) return camera
+  }
+  return null
+}
+
+/** What one camera frames at a time, whether or not it has the picture: its place and roll through the groups that carry it, and its zoom. */
+export function viewOf(model: SceneModel, camera: SceneObject, time: number): View {
+  const at = positionAt(model, camera, time)
+  let pose: Pose = { x: at.x, y: at.y, rotation: numValue(valueAt(model, camera, 'rotation', time)), scale: 1 }
+  for (const g of containers(model, camera)) pose = carry(model, g, time, pose)
+  const zoom = valueAt(model, camera, 'zoom', time)
+  // A group that scales what it carries scales the frame, which is the zoom the other way.
+  const carriedScale = pose.scale > 0 ? pose.scale : 1
+  return { x: pose.x, y: pose.y, zoom: Math.max(MIN_CAMERA_ZOOM, (typeof zoom === 'number' && Number.isFinite(zoom) ? zoom : 1) / carriedScale), rotation: pose.rotation }
+}
+
+/** What the picture is taken through at a time (D357, D358): the view of the camera that has it, or the scene's middle. Kept for the time last asked, since every thing held on the screen asks. */
+export function viewAt(model: SceneModel, time: number): View {
+  const c = cacheFor(model)
+  if (c.view && c.view.time === time) return c.view.view
+  // While it is being found, anything that asks gets the scene's middle: a camera that follows what is held on the screen would otherwise ask for itself.
+  c.view = { time, view: NO_VIEW }
+  const camera = cameraAt(model, time)
+  const view = camera ? viewOf(model, camera, time) : NO_VIEW
+  c.view = { time, view }
+  return view
+}
+
+/** Whether a thing is held on the screen (D362): it says `attached: true`, or a group that carries it does. A camera never is. */
+export function isAttached(model: SceneModel, obj: SceneObject): boolean {
+  if (obj.className === CAMERA) return false
+  const c = cacheFor(model)
+  let held = c.attached.get(obj.id)
+  if (held === undefined) {
+    held = obj.attrs['attached'] === true || containers(model, obj).some((g) => g.attrs['attached'] === true)
+    c.attached.set(obj.id, held)
+  }
+  return held
+}
+
+/** A pose in the picture, from its middle in the project's pixels, as the scene has it: where the camera puts it. */
+export function throughView(view: View, pose: Pose): Pose {
+  if (view === NO_VIEW) return pose
+  const a = (view.rotation * Math.PI) / 180
+  const cos = Math.cos(a)
+  const sin = Math.sin(a)
+  return { x: view.x + (cos * pose.x - sin * pose.y) / view.zoom, y: view.y + (sin * pose.x + cos * pose.y) / view.zoom, rotation: pose.rotation + view.rotation, scale: pose.scale / view.zoom }
+}
+
+/** A point of the scene as the picture has it, from its middle in the project's pixels: the inverse of `throughView`. */
+export function intoView(view: View, point: Point): Point {
+  if (view === NO_VIEW) return point
+  const a = (view.rotation * Math.PI) / 180
+  const cos = Math.cos(a)
+  const sin = Math.sin(a)
+  const dx = point.x - view.x
+  const dy = point.y - view.y
+  return { x: (cos * dx + sin * dy) * view.zoom, y: (-sin * dx + cos * dy) * view.zoom }
+}
+
+/** The value of an attribute as it shows: the position, rotation, and scale through the object's groups and, held on the screen, through the camera; a group's own box; anything else as is. */
 export function shownValue(model: SceneModel, obj: SceneObject, attr: string, time: number): AttrValue {
-  if ((attr === 'x' || attr === 'y' || attr === 'rotation' || attr === 'scale') && (obj.groups.length > 0 || obj.className === GROUP)) return worldPose(model, obj, time)[attr]
+  if ((attr === 'x' || attr === 'y' || attr === 'rotation' || attr === 'scale') && (obj.groups.length > 0 || obj.className === GROUP || isAttached(model, obj))) return worldPose(model, obj, time)[attr]
   return valueAt(model, obj, attr, time)
 }
 
@@ -1978,6 +2080,8 @@ export function opacityAt(model: SceneModel, obj: SceneObject, time: number): nu
 
 /** An object exists within its lifetime wherever it shows with an opacity above zero (D52, D138, D150). */
 export function isVisibleAt(model: SceneModel, obj: SceneObject, time: number): boolean {
+  // A camera is never seen; it counts while it exists (D357).
+  if (obj.className === CAMERA) return existsAt(model, obj, time)
   if (!attrSchema(obj.className, 'opacity')) return true
   if (!existsAt(model, obj, time)) return false
   return opacityAt(model, obj, time) > 0.0005

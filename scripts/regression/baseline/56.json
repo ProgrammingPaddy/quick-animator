@@ -1,0 +1,125 @@
+{
+ "results": {
+  "CLICK1": {
+   "onBody": {
+    "selection": [
+     "b"
+    ],
+    "actions": 0,
+    "time": 0,
+    "at": 1
+   },
+   "onLane": {
+    "selection": [
+     "b"
+    ],
+    "time": 0
+   },
+   "onBar": {
+    "selection": [
+     "b"
+    ],
+    "actions": [
+     {
+      "object": "b",
+      "index": 0
+     }
+    ],
+    "time": 0
+   },
+   "err": null
+  },
+  "DBL1": {
+   "onBody": {
+    "selection": [
+     "b"
+    ],
+    "time": 1
+   },
+   "onTitle": {
+    "selection": [
+     "b"
+    ],
+    "time": 1
+   },
+   "onBar": {
+    "selection": [
+     "b"
+    ],
+    "actions": [
+     {
+      "object": "b",
+      "index": 0
+     }
+    ],
+    "time": 2
+   },
+   "onLane": {
+    "time": 1,
+    "until": 5,
+    "at": 1
+   },
+   "err": null
+  },
+  "HANDLE1": {
+   "fade": {
+    "end": 4.5,
+    "at": 1,
+    "selection": [
+     "b"
+    ]
+   },
+   "moved": {
+    "start": 2.5,
+    "at": 1
+   },
+   "dragged": {
+    "at": 2,
+    "until": 6.0333,
+    "start": 3.5
+   },
+   "err": null
+  },
+  "PREF1": {
+   "before": {
+    "lanes": 2,
+    "height": 60
+   },
+   "off": {
+    "lanes": 0,
+    "height": 42,
+    "handles": 0,
+    "clips": 2
+   },
+   "on": {
+    "lanes": 2,
+    "height": 60
+   },
+   "saved": [
+    [
+     "quick-animator.prefs",
+     true
+    ]
+   ],
+   "err": null
+  },
+  "CLASS1": {
+   "clicked": {
+    "selection": [
+     "a",
+     "b"
+    ],
+    "time": 0
+   },
+   "dbl": {
+    "selection": [
+     "a",
+     "b"
+    ],
+    "time": 0
+   },
+   "err": null
+  }
+ },
+ "volatile": {}
+}

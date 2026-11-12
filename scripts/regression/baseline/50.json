@@ -1,0 +1,495 @@
+{
+ "results": {
+  "SLICE1": {
+   "ok": true,
+   "count": 2,
+   "first": {
+    "verb": "move",
+    "start": 1,
+    "end": 2,
+    "changes": {
+     "x": 150
+    },
+    "easeIn": 0.6,
+    "easeOut": 0
+   },
+   "second": {
+    "verb": "move",
+    "start": 2,
+    "end": 3,
+    "changes": {
+     "x": 300
+    },
+    "easeIn": 0,
+    "easeOut": 0.6
+   },
+   "maxDiff": 5.684341886080802e-14,
+   "codeEase": false,
+   "selected": [
+    {
+     "object": "b",
+     "index": 1
+    }
+   ],
+   "time": 0,
+   "warnings": 0,
+   "err": null
+  },
+  "SLICE2": {
+   "count": 2,
+   "eases": [
+    "Ease.part('bounce', 0, 0.4)",
+    "Ease.part('bounce', 0.4, 1)"
+   ],
+   "maxDiff": 7.105427357601002e-14,
+   "warnings": 0,
+   "err": null
+  },
+  "SLICE3": {
+   "ok": [
+    true,
+    true,
+    true
+   ],
+   "b": {
+    "count": 2,
+    "first": {
+     "x": 136
+    },
+    "second": {
+     "x": 64
+    },
+    "relative": [
+     true,
+     true
+    ],
+    "diff": 0.10256410256408799
+   },
+   "d": {
+    "count": 2,
+    "first": {
+     "x": "fn"
+    },
+    "second": {
+     "x": "fn"
+    },
+    "diff": 2.842170943040401e-14,
+    "follows": 150
+   },
+   "e": {
+    "count": 2,
+    "firstFrom": -200,
+    "first": {
+     "x": 0
+    },
+    "second": {
+     "x": 200
+    },
+    "diff": 5.684341886080802e-14
+   },
+   "eases": [
+    "Ease.part(Ease.ramps(0.2, 1.2, 2), 0, 0.5)",
+    "Ease.share(Ease.ramps(0.6, 0.6, 2), 0, 0.5)",
+    "Ease.part(Ease.ramps(0.6, 0.6, 2), 0.5, 1)"
+   ],
+   "warnings": 0,
+   "err": null
+  },
+  "SLICE4": {
+   "ok": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "counts": [
+    2,
+    2,
+    2,
+    2
+   ],
+   "diffs": {
+    "px": 0,
+    "py": 0,
+    "protation": 67.38,
+    "qx": 0.032,
+    "qy": 0.119,
+    "qrotation": 0,
+    "rx": 0.036,
+    "ry": 0.034,
+    "rrotation": 0,
+    "ux": 0,
+    "uy": 0,
+    "urotation": 0
+   },
+   "shapes": {
+    "p": [
+     "[[-300,0],[0,200]]",
+     "[[0,200],[300,0]]"
+    ],
+    "q": [
+     "curves:M -300 -300 C -200 -233.33 -100 -100 0 -100",
+     "curves:M 0 -100 C 100 -100 200 -233.33 300 -300"
+    ],
+    "r": [
+     "curves:M -300 300 C -250 400 -125 450 0 450",
+     "curves:M 0 450 C 125 450 250 400 300 300"
+    ],
+    "u": [
+     "[[0,0],[100,100]]",
+     "[[0,0],[100,-100]]"
+    ]
+   },
+   "smooth": [
+    null,
+    null
+   ],
+   "rel": [
+    true,
+    true
+   ],
+   "warnings": 0,
+   "err": null
+  },
+  "SLICE5": {
+   "ok": true,
+   "count": 2,
+   "firstTo": "string",
+   "secondTo": true,
+   "diff": 0.005,
+   "firstAnchors": 12,
+   "folded": true,
+   "warnings": 0,
+   "err": null
+  },
+  "SLICE6": {
+   "on": "razor",
+   "pressed": [
+    [
+     "Pointer",
+     "false"
+    ],
+    [
+     "Razor",
+     "true"
+    ]
+   ],
+   "edgesOn": 0,
+   "guide": true,
+   "cuts": [
+    [
+     1,
+     2.0167
+    ],
+    [
+     2.0167,
+     3
+    ]
+   ],
+   "off": "select",
+   "edgesOff": 4,
+   "clicked": "razor",
+   "back": "select",
+   "err": null
+  },
+  "MIDEDIT1": {
+   "was": {
+    "at2": 150,
+    "at25": 255.35714285714286
+   },
+   "count": 2,
+   "original": {
+    "verb": "move",
+    "start": 1,
+    "end": 3,
+    "changes": {
+     "x": 300
+    }
+   },
+   "piece": {
+    "verb": "move",
+    "start": 1,
+    "end": 2,
+    "changes": {
+     "x": 250
+    }
+   },
+   "time": 2,
+   "selected": [
+    {
+     "object": "b",
+     "index": 1
+    }
+   ],
+   "shown": {
+    "at15": 125,
+    "at2": 250,
+    "at25": 255
+   },
+   "err": null
+  },
+  "MIDEDIT2": {
+   "one": [
+    {
+     "verb": "move",
+     "start": 1,
+     "end": 3,
+     "changes": {
+      "x": 300
+     }
+    },
+    {
+     "verb": "move",
+     "start": 1,
+     "end": 2,
+     "changes": {
+      "x": 151,
+      "y": 0
+     }
+    }
+   ],
+   "two": [
+    {
+     "verb": "move",
+     "start": 1,
+     "end": 3,
+     "changes": {
+      "x": 300
+     }
+    },
+    {
+     "verb": "move",
+     "start": 1,
+     "end": 2,
+     "changes": {
+      "x": 152,
+      "y": 0
+     }
+    }
+   ],
+   "decl": {
+    "y": 0,
+    "count": 2
+   },
+   "three": [
+    {
+     "verb": "move",
+     "start": 1,
+     "end": 3,
+     "changes": {
+      "x": 300
+     }
+    },
+    {
+     "verb": "move",
+     "start": 1,
+     "end": 2,
+     "changes": {
+      "x": 152,
+      "y": 50
+     }
+    },
+    {
+     "verb": "move",
+     "start": 1,
+     "end": 2.5,
+     "changes": {
+      "x": 100
+     }
+    }
+   ],
+   "time": 2.5,
+   "shown": 100,
+   "err": null
+  },
+  "MIDMORPH1": {
+   "settled": true,
+   "count": 2,
+   "piece": [
+    1,
+    2
+   ],
+   "pieceTo": "string",
+   "originalTo": true,
+   "outsideSame": 0.005,
+   "at2Changed": true,
+   "at3Same": true,
+   "moved": [
+    6,
+    22
+   ],
+   "from": [
+    -74,
+    -58
+   ],
+   "time": 2,
+   "err": null
+  },
+  "SCROLLJUMP1": {
+   "buttons": [
+    "Scroll to the start",
+    "Scroll to the end"
+   ],
+   "start0": 0,
+   "atEnd": 54,
+   "endInView": true,
+   "atStart": 0,
+   "time": 1,
+   "inLine": true,
+   "err": null
+  },
+  "PREFS2": {
+   "vertical": "vertical",
+   "stacked": true,
+   "left": true,
+   "general": [
+    620,
+    498
+   ],
+   "hotkeys": [
+    620,
+    498
+   ],
+   "err": null
+  },
+  "TITLEBAR2": {
+   "flushRight": 8,
+   "gapFromHelp": 1217,
+   "barWidth": 1463,
+   "err": null
+  },
+  "EASEAPI1": {
+   "part": [
+    185.2,
+    300,
+    300
+   ],
+   "ramps": [
+    150,
+    300
+   ],
+   "share": [
+    75,
+    150,
+    150
+   ],
+   "warnings": [],
+   "err": null
+  },
+  "SMOOTH3": {
+   "report": [
+    {
+     "name": "a",
+     "attr": "x",
+     "range": 800,
+     "worstPct": 0.3,
+     "where": 1.1583333333333334,
+     "final": 400
+    },
+    {
+     "name": "a",
+     "attr": "rotation",
+     "range": 180,
+     "worstPct": 1.14,
+     "where": 1.725,
+     "final": 180
+    },
+    {
+     "name": "a",
+     "attr": "width",
+     "range": 100,
+     "worstPct": 0.28,
+     "where": 2.504166666666667,
+     "final": 200
+    },
+    {
+     "name": "a",
+     "attr": "height",
+     "range": 60,
+     "worstPct": 0.28,
+     "where": 2.1083333333333334,
+     "final": 120
+    },
+    {
+     "name": "c",
+     "attr": "opacity",
+     "range": 1,
+     "worstPct": 0.14,
+     "where": 1.1583333333333334,
+     "final": 0.2
+    },
+    {
+     "name": "c",
+     "attr": "x",
+     "range": 200,
+     "worstPct": 0.2,
+     "where": 2.8333333333333335,
+     "final": 200
+    },
+    {
+     "name": "c",
+     "attr": "radius",
+     "range": 40,
+     "worstPct": 0.3,
+     "where": 2.8958333333333335,
+     "final": 80
+    },
+    {
+     "name": "t",
+     "attr": "fontSize",
+     "range": 40,
+     "worstPct": 1.43,
+     "where": 1.0041666666666667,
+     "final": 80
+    },
+    {
+     "name": "t",
+     "attr": "x",
+     "range": 400,
+     "worstPct": 1.43,
+     "where": 1.0041666666666667,
+     "final": 500
+    },
+    {
+     "name": "p",
+     "attr": "x",
+     "range": 600,
+     "worstPct": 0.65,
+     "where": 0.5041666666666667,
+     "final": 300
+    },
+    {
+     "name": "p",
+     "attr": "y",
+     "range": 200,
+     "worstPct": 1.46,
+     "where": 0.575,
+     "final": -300
+    },
+    {
+     "name": "p",
+     "attr": "rotation",
+     "range": 83,
+     "worstPct": 41.75,
+     "where": 0.5,
+     "final": -34.73
+    }
+   ],
+   "bad": [
+    {
+     "name": "p",
+     "attr": "rotation",
+     "range": 83,
+     "worstPct": 41.75,
+     "where": 0.5,
+     "final": -34.73
+    }
+   ],
+   "colorSteps": 255,
+   "worstOutline": 2.29,
+   "warnings": [],
+   "err": null
+  }
+ },
+ "volatile": {}
+}

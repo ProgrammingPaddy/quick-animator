@@ -221,3 +221,22 @@ export function withCarried(model: SceneModel, names: readonly string[]): string
   for (const name of carriedBy(model, names)) wanted.add(name)
   return model.objects.filter((o) => wanted.has(o.name)).map((o) => o.name)
 }
+
+/**
+ * What a move in time takes (D353, D354): the named things with what their groups carry, every
+ * other group whose objects all move, and every class whose members all move, so that a group's
+ * or a class's own animations go with it whenever the whole of it goes. A group or a class with
+ * a part left behind stays. What code writes stays where the code puts it, so nothing holding
+ * such a thing is ever whole. The names come in the order of the cast.
+ */
+export function movedInTime(model: SceneModel, names: readonly string[]): { names: string[]; classes: string[] } {
+  const movable = new Set(model.objects.filter((o) => !!o.decl && !o.codeDriven).map((o) => o.name))
+  const moved = new Set(withCarried(model, names).filter((n) => movable.has(n)))
+  for (const obj of model.objects) {
+    if (obj.className !== GROUP || moved.has(obj.name) || !movable.has(obj.name)) continue
+    const carried = groupMembers(model, obj.name)
+    if (carried.length > 0 && carried.every((n) => moved.has(n))) moved.add(obj.name)
+  }
+  const whole = [...model.classes.entries()].filter(([, members]) => members.length > 0 && members.every((n) => moved.has(n)))
+  return { names: model.objects.filter((o) => moved.has(o.name)).map((o) => o.name), classes: whole.map(([className]) => className) }
+}

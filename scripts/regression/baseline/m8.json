@@ -1,0 +1,527 @@
+{
+ "results": {
+  "SEL1": {
+   "err": null,
+   "members": {
+    "selection": [
+     "bar1",
+     "bar2"
+    ],
+    "pane": [
+     "bar1",
+     "bar2",
+     "bar1",
+     "bar2"
+    ],
+    "clips": [
+     "bar1",
+     "bar2",
+     "class bar"
+    ],
+    "head": "cardsGroupvisible",
+    "prospective": false
+   },
+   "group": {
+    "selection": [
+     "cards"
+    ],
+    "pane": [
+     "bar1",
+     "bar2",
+     "cards",
+     "bar1",
+     "bar2"
+    ],
+    "clips": [
+     "bar1",
+     "bar2",
+     "cards"
+    ]
+   },
+   "groupInLayers": [
+    "bar2",
+    "bar1"
+   ],
+   "loose": {
+    "selection": [
+     "bar1",
+     "title"
+    ],
+    "prospective": "group1Groupbar1 · title",
+    "head": "group1Groupbar1 · title"
+   },
+   "groupAndMember": [
+    "cards"
+   ],
+   "made": {
+    "name": "cards",
+    "groups": [
+     "cards"
+    ],
+    "selection": [
+     "cards"
+    ]
+   },
+   "marquee": [
+    "bar1",
+    "bar2"
+   ]
+  },
+  "COPY1": {
+   "copied": true,
+   "clip": [
+    "bar1*",
+    "bar2*",
+    "cards"
+   ],
+   "pasted": {
+    "err": null,
+    "groups": {
+     "cards": [
+      "bar1",
+      "bar2"
+     ],
+     "cards2": [
+      "bar3",
+      "bar4"
+     ]
+    },
+    "selection": [
+     "cards2"
+    ],
+    "objects": [
+     "backdrop",
+     "title",
+     "bar1",
+     "bar2",
+     "badge",
+     "cards",
+     "bar3",
+     "bar4",
+     "cards2"
+    ],
+    "actions": [
+     "cards2:move"
+    ],
+    "classBar": [
+     "bar1",
+     "bar2",
+     "bar3",
+     "bar4"
+    ]
+   },
+   "duplicated": {
+    "names": [
+     "cards2"
+    ],
+    "groups": {
+     "cards": [
+      "bar1",
+      "bar2"
+     ],
+     "cards2": [
+      "bar3",
+      "bar4"
+     ]
+    },
+    "selection": [
+     "cards2"
+    ]
+   },
+   "cut": {
+    "err": null,
+    "objects": [
+     "backdrop",
+     "title",
+     "badge"
+    ]
+   },
+   "cutPasted": {
+    "err": null,
+    "objects": [
+     "backdrop",
+     "title",
+     "badge",
+     "bar1",
+     "bar2",
+     "cards"
+    ],
+    "groups": {
+     "cards": [
+      "bar1",
+      "bar2"
+     ]
+    }
+   }
+  },
+  "EDGE1": {
+   "pps": 100,
+   "before": {
+    "title": [
+     0,
+     2
+    ],
+    "bar1": [
+     0,
+     2
+    ],
+    "bar2": [
+     1,
+     3
+    ],
+    "badge": [
+     0,
+     4
+    ]
+   },
+   "endTogether": {
+    "lives": {
+     "title": [
+      0,
+      3
+     ],
+     "bar1": [
+      0,
+      3
+     ],
+     "bar2": [
+      1,
+      3
+     ],
+     "badge": [
+      0,
+      4
+     ]
+    },
+    "selection": [
+     "title",
+     "bar1"
+    ]
+   },
+   "startTogether": {
+    "lives": {
+     "title": [
+      0.5,
+      3
+     ],
+     "bar1": [
+      0.5,
+      3
+     ],
+     "bar2": [
+      1,
+      3
+     ],
+     "badge": [
+      0,
+      4
+     ]
+    },
+    "bar1Move": [
+     0.5
+    ]
+   },
+   "alone": {
+    "lives": {
+     "title": [
+      0.5,
+      3
+     ],
+     "bar1": [
+      0.5,
+      3
+     ],
+     "badge": [
+      0,
+      3
+     ]
+    },
+    "selection": [
+     "badge"
+    ]
+   },
+   "undo": {
+    "after": {
+     "title": [
+      0.5,
+      4
+     ],
+     "bar1": [
+      0.5,
+      4
+     ]
+    },
+    "undone": {
+     "title": [
+      0.5,
+      3
+     ],
+     "bar1": [
+      0.5,
+      3
+     ]
+    }
+   }
+  },
+  "GROUP1": {
+   "before": {
+    "lives": {
+     "bar1": [
+      0,
+      2
+     ],
+     "bar2": [
+      1,
+      3
+     ],
+     "title": [
+      0,
+      2
+     ]
+    },
+    "group": [
+     0.5
+    ],
+    "bar1Move": [
+     0.5
+    ],
+    "span": [
+     "0",
+     "3"
+    ],
+    "edges": 2
+   },
+   "moved": {
+    "lives": {
+     "bar1": [
+      1,
+      3
+     ],
+     "bar2": [
+      2,
+      4
+     ],
+     "title": [
+      0,
+      2
+     ]
+    },
+    "group": [
+     1.5
+    ],
+    "bar1Move": [
+     1.5
+    ],
+    "fade": [
+     2,
+     2
+    ],
+    "selection": [
+     "cards"
+    ],
+    "err": null
+   },
+   "trimStart": {
+    "bar1": [
+     1.5,
+     3
+    ],
+    "bar2": [
+     2.5,
+     4
+    ]
+   },
+   "trimEnd": {
+    "bar1": [
+     1.5,
+     2.5
+    ],
+    "bar2": [
+     2.5,
+     3.5
+    ]
+   },
+   "byMember": {
+    "lives": {
+     "bar1": [
+      0.5,
+      1.5
+     ],
+     "bar2": [
+      1.5,
+      2.5
+     ]
+    },
+    "group": [
+     0.5
+    ],
+    "selection": [
+     "cards"
+    ]
+   },
+   "tapMember": [
+    "bar2"
+   ],
+   "nudged": {
+    "lives": {
+     "bar1": [
+      1.5,
+      2.5
+     ],
+     "bar2": [
+      2.5,
+      3.5
+     ]
+    },
+    "group": [
+     1.5
+    ]
+   },
+   "clamped": {
+    "lives": {
+     "bar1": [
+      0,
+      1
+     ],
+     "bar2": [
+      1,
+      2
+     ]
+    },
+    "group": [
+     0
+    ]
+   }
+  },
+  "CLASS1": {
+   "there": true,
+   "edges": 2,
+   "before": {
+    "lives": {
+     "bar1": [
+      0,
+      2
+     ],
+     "bar2": [
+      1,
+      3
+     ]
+    },
+    "fade": [
+     1,
+     1
+    ]
+   },
+   "moved": {
+    "lives": {
+     "bar1": [
+      1,
+      3
+     ],
+     "bar2": [
+      2,
+      4
+     ]
+    },
+    "fade": [
+     2,
+     2
+    ],
+    "bar1Move": [
+     1.5
+    ],
+    "group": [
+     1.5
+    ],
+    "selection": [
+     "bar1",
+     "bar2"
+    ],
+    "clips": [
+     "bar1",
+     "bar2",
+     "class bar"
+    ],
+    "err": null
+   },
+   "trimEnd": {
+    "bar1": [
+     1,
+     4
+    ],
+    "bar2": [
+     2,
+     5
+    ]
+   },
+   "trimStart": {
+    "bar1": [
+     1.5,
+     4
+    ],
+    "bar2": [
+     2.5,
+     5
+    ]
+   }
+  },
+  "ALONE1": {
+   "moved": {
+    "life": [
+     1,
+     3
+    ],
+    "move": [
+     1.5
+    ],
+    "others": {
+     "bar2": [
+      1,
+      3
+     ],
+     "title": [
+      0,
+      2
+     ]
+    },
+    "group": [
+     0.5
+    ],
+    "selection": [
+     "bar1"
+    ]
+   },
+   "trimStart": {
+    "life": [
+     1.5,
+     3
+    ],
+    "move": [
+     1.5
+    ]
+   },
+   "badge": [
+    0.5,
+    4.5
+   ],
+   "together": {
+    "title": [
+     1,
+     3
+    ],
+    "badge": [
+     1.5,
+     5.5
+    ],
+    "bar2": [
+     1,
+     3
+    ]
+   },
+   "tapOne": [
+    "badge"
+   ]
+  }
+ },
+ "volatile": {}
+}

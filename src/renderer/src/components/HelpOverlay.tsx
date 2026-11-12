@@ -46,7 +46,11 @@ const TOPICS: Topic[] = [
       ['Paths', 'Among the tools on the right: shows the selected object\'s paths without one being selected. The Path tool shows every path; right-click one to hide it for now.'],
       ['Show Masks', 'Beside it: the edges of the masks on what is selected, or of every mask when nothing is. A selected mask shows its edge either way. What a mask hides is not picked where it is hidden, unless it is selected.'],
       ['Right-click', 'On an object: jump to code, rename, Shape (smooth, straighten, close or open a line, convert a Rect or a Circle), Path (edit, add, show), save as preset, classes, Collision (anchor, passthrough), duplicate, delete. On empty space: Add.'],
-      ['100%, Fit', 'Actual size; fit the frame.'],
+      ['100%, Fit', 'Actual size; fit the scene and the camera\'s frame.'],
+      ['Preview, Both, Camera', 'In the pane\'s header, or C for the next: the scene as it is worked on, with the frame of the camera that has the picture drawn in it; what that camera sees, which is what an export is; or the two side by side, the line between them dragging. Each view wears its name, the Camera view the camera\'s too.'],
+      ['Camera', 'The last of the tools. It moves the camera that has the picture at the playhead and nothing else; a scene with no camera gets one. In the Camera view, drag the picture and the camera goes the other way; the wheel zooms at the pointer. In the Preview view, drag from anywhere to move the frame, a corner to zoom, the handle above to roll. Shift animates, as with anything.'],
+      ['A camera in the Preview view', 'Every camera alive shows its frame, a solid line for the one that has the picture, dashed for the others, with its name at the corner. In Select, the line or the name picks it; nothing inside the frame does. Picked, it has the box and handles of any object.'],
+      ['Attach to screen', 'Right-click an object, or attached in the Selected pane: it is placed by the picture, not the scene, so no camera moves, zooms, or turns it, and it stays where it shows when attached or let go. Low in the layers it is a backdrop, on top an overlay.'],
     ],
   },
   {
@@ -66,9 +70,10 @@ const TOPICS: Topic[] = [
   {
     title: 'Timeline',
     entries: [
-      ['Lanes', 'Objects, Groups, Classes, and Masks, in the order Preferences gives. Each object is a clip from when it begins to when it is removed, its animations and opacity inside. Clips stack by drawing order: higher up draws on top.'],
+      ['Cameras', 'A lane of their own. The highest camera alive has the picture, its clip lit along the top where it does; one with nothing over it has it for its whole clip. With no camera alive the picture is the scene\'s middle. The razor on a camera\'s clip is a cut: a second camera from there, framed as the first was at that moment, to reframe.'],
+      ['Lanes', 'Objects, Groups, Classes, Masks, and Cameras, in the order Preferences gives. Each object is a clip from when it begins to when it is removed, its animations and opacity inside. Clips stack by drawing order: higher up draws on top.'],
       ['Click a clip', 'Anywhere on it selects the object; a double-click also puts the playhead where the clip begins. Dragging it sideways moves the object in time, its animations with it; up or down changes the drawing order. The clip\'s edges trim when it begins and is removed, the animations staying where they are. An animation at the edge is above it: grab the edge on the title row or beside the animations. The arrow in its corner collapses it.'],
-      ['Several clips, a group, a class', 'With several clips selected, dragging one moves them all, and an edge of one moves that edge of each. A group\'s clip moves and trims everything it carries, its own animations going with them; a class\'s clip does the same for its members. A selected group shows its members selected too; selecting all its members selects them, not the group.'],
+      ['Several clips, a group, a class', 'With several clips selected, dragging one moves them all, and an edge of one moves that edge of each. A group\'s clip moves and trims everything it carries, its own animations going with them; a class\'s clip does the same for its members. Whatever is moved, a group or a class whose members all move goes with them. A selected group shows its members selected too; selecting all its members selects them, not the group.'],
       ['Click an animation', 'Select it; a double-click also puts the playhead at its start. Drag it to retime it, its edges to change its length. Ctrl + click selects several; a drag then retimes them together.'],
       ['Razor', 'The blade beside Frames, or R. A click on an animation slices it there: the first piece goes to the state reached and holds it, the second continues from there, and the two run together as the whole did. One by character, word, or line is cut between its units; a class animation is cut for every member. A hold or a return is not cut; what is not cut says why. The pointer, or Escape, puts it away.'],
       ['Scroll bar', 'The arrows at its ends scroll the view to the start and to the end of the content.'],
@@ -101,7 +106,7 @@ const TOPICS: Topic[] = [
     title: 'Objects',
     entries: [
       ['Search, Show All, Show Only Active', 'Filter by name. Show Only Active lists what is on screen at the playhead and, under it, the animations running then.'],
-      ['Layers, Type', 'Layers: every object once, in drawing order, top first; drag a row up or down to change that order. Type: by kind, then the groups, the classes with their members, and the masks.'],
+      ['Layers, Type', 'Layers: every object once, in drawing order, top first; drag a row up or down to change that order; at the foot, the Background, whose color is the project\'s. Type: by kind, then the groups, the classes with their members, the masks, and the cameras, the one that has the picture lit.'],
       ['Objects, Animations', 'Each folds or unfolds its kind with one press: the animations under their objects; by type, the objects under their headings.'],
       ['Rows', 'Click selects, Ctrl + click extends, double-click jumps to the code; a click on empty space selects nothing. Types and groups fold.'],
       ['The eye, Hide', 'Hides an object in the view, and shows it again: its clip stays in the timeline, grayed. A group hides what it carries; a hidden mask does not mask. Nothing is written, and an export shows everything unless Preferences leaves hidden objects out of exports.'],

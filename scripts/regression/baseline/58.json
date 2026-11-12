@@ -1,0 +1,186 @@
+{
+ "results": {
+  "PREVIEW1": {
+   "start": "#4f8cff",
+   "mid": "#ee5f6a",
+   "rainbow": "#8ef53d",
+   "err": null
+  },
+  "SPACES1": {
+   "chars": [
+    "Q",
+    "u",
+    "i",
+    "c",
+    "k",
+    " ",
+    "f",
+    "o",
+    "x"
+   ],
+   "count": 5,
+   "end0": 2,
+   "spaceAt5": true,
+   "spaceFill": "#ff5b5b",
+   "fAt6": null,
+   "share": 0.5,
+   "warnings": [],
+   "err": null
+  },
+  "CLASSCUT1": {
+   "cut": true,
+   "same": true,
+   "before": [
+    [
+     -285.12,
+     314.88
+    ],
+    [
+     -250,
+     350
+    ],
+    [
+     -214.88,
+     385.12
+    ],
+    [
+     -200,
+     400
+    ],
+    [
+     -200,
+     400
+    ]
+   ],
+   "after": [
+    [
+     -285.12,
+     314.88
+    ],
+    [
+     -250,
+     350
+    ],
+    [
+     -214.88,
+     385.12
+    ],
+    [
+     -200,
+     400
+    ],
+    [
+     -200,
+     400
+    ]
+   ],
+   "classActions": 2,
+   "heads": 2,
+   "named": true,
+   "viaRazor": {
+    "classActions": 2,
+    "spans": [
+     [
+      1,
+      1.5
+     ],
+     [
+      1.5,
+      2
+     ]
+    ]
+   },
+   "err": null
+  },
+  "FPATH1": {
+   "cut": true,
+   "same": true,
+   "before": [
+    [
+     44.64,
+     38.94
+    ],
+    [
+     150,
+     7.06
+    ],
+    [
+     255.36,
+     -46.15
+    ],
+    [
+     300,
+     -13.97
+    ]
+   ],
+   "after": [
+    [
+     44.64,
+     38.94
+    ],
+    [
+     150,
+     7.06
+    ],
+    [
+     255.36,
+     -46.15
+    ],
+    [
+     300,
+     -13.97
+    ]
+   ],
+   "pieces": [
+    [
+     1,
+     2
+    ],
+    [
+     2,
+     3
+    ]
+   ],
+   "atEdge": false,
+   "edgeNote": "Cut inside the animation",
+   "inHold": false,
+   "holdNote": "A hold or a return is not cut",
+   "err": null
+  },
+  "PAINT1": {
+   "decl": "#ff0000",
+   "change": "#0000ff",
+   "declStill": "#ff0000",
+   "added": {
+    "fill": "#123456",
+    "start": 4,
+    "end": 5,
+    "selected": [
+     {
+      "object": "b",
+      "index": 1
+     }
+    ]
+   },
+   "bar": true,
+   "well": "#4f8cff",
+   "clicked": "#4f8cff",
+   "swatches": 1,
+   "hint": "Click to paint; Shift-click for a color change; Alt-click takes a color",
+   "err": null
+  },
+  "PLACES1": {
+   "pin": "Starts at playhead",
+   "inToolbar": false,
+   "kwStyle": {
+    "weight": "400",
+    "color": "rgb(140, 140, 140)"
+   },
+   "pathTitle": "Path",
+   "paintTitle": "Paint",
+   "razorTitle": "Razor (R)",
+   "err": null
+  }
+ },
+ "volatile": {}
+}

@@ -1,0 +1,37 @@
+{
+ "results": {
+  "RULES1": {
+   "reveal": {
+    "err": null,
+    "warnings": [],
+    "at0": 0,
+    "masks": [
+     "reveal -> title"
+    ],
+    "half": {
+     "left": 13,
+     "right": 0
+    },
+    "at1": 34
+   },
+   "eyes": {
+    "err": null,
+    "warnings": [],
+    "left": "#24324a",
+    "right": "#24324a",
+    "between": "#1c1c1c",
+    "masks": [
+     "eyes [left right] -> backdrop"
+    ]
+   },
+   "spot": {
+    "err": null,
+    "warnings": [],
+    "inside": "#f59e0b",
+    "cardOutside": "#24324a",
+    "backdrop": "#24324a"
+   }
+  }
+ },
+ "volatile": {}
+}

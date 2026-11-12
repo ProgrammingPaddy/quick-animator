@@ -1,0 +1,246 @@
+{
+ "results": {
+  "CHAIN1": {
+   "held": [
+    190,
+    181
+   ],
+   "atSecondStart": 0,
+   "offTheCircle": 40,
+   "mid": [
+    195,
+    150
+   ],
+   "end": [
+    200,
+    120
+   ],
+   "err": null
+  },
+  "ADDMID1": {
+   "count": 2,
+   "second": [
+    0.5,
+    1.5
+   ],
+   "gap": 0,
+   "holds": 0,
+   "time": 1.5,
+   "err": null
+  },
+  "SHIFTMULTI1": {
+   "verb": "morph",
+   "anchors": [
+    [
+     100,
+     0
+    ],
+    [
+     40,
+     60
+    ],
+    [
+     -60,
+     0
+    ],
+    [
+     0,
+     -60
+    ]
+   ],
+   "picked": [
+    0,
+    1
+   ],
+   "err": null
+  },
+  "MORPHSHOW1": {
+   "before": {
+    "n": 4,
+    "a0": [
+     60,
+     0
+    ],
+    "withControls": 4,
+    "editable": "curves"
+   },
+   "mid": {
+    "n": 4,
+    "a0": [
+     80,
+     -30
+    ],
+    "withControls": 4,
+    "editable": "curves"
+   },
+   "after": {
+    "n": 4,
+    "a0": [
+     -100,
+     -60
+    ],
+    "withControls": 0,
+    "editable": "curves"
+   },
+   "err": null
+  },
+  "NOSNAP1": {
+   "gap": 0,
+   "startGap": 0,
+   "endPoints": 5,
+   "quarterPoints": 91,
+   "err": null
+  },
+  "WORD1": {
+   "before": {
+    "editable": "points",
+    "handles": 4,
+    "mode": "edit"
+   },
+   "atEnd": {
+    "editable": "curves",
+    "handles": 10,
+    "anchors": 10,
+    "a0": [
+     0,
+     100
+    ]
+   },
+   "edited": {
+    "toIsCurves": true,
+    "src": true,
+    "anchors": 10,
+    "a0": [
+     30,
+     100
+    ],
+    "pointsKept": true,
+    "folded": 2
+   },
+   "err": null
+  },
+  "MORPH1": {
+   "start": {
+    "pieces": 1,
+    "points": 89,
+    "bounds": [
+     120,
+     120
+    ],
+    "verb": "morph",
+    "end": 1,
+    "warnings": 0
+   },
+   "mid": {
+    "points": 95,
+    "bounds": [
+     160,
+     120
+    ],
+    "closed": true,
+    "filled": true
+   },
+   "done": {
+    "points": 5,
+    "bounds": [
+     200,
+     120
+    ],
+    "first": {
+     "x": -100,
+     "y": -60
+    },
+    "closed": true
+   },
+   "after": {
+    "bounds": [
+     200,
+     120
+    ],
+    "points": 5
+   },
+   "clip": true,
+   "err": null
+  },
+  "MORPH2": {
+   "n": 85,
+   "toCircle": 9.3,
+   "toSquare": 11.8,
+   "err": null
+  },
+  "MORPHGUI1": {
+   "added": {
+    "verb": "morph",
+    "selected": [
+     {
+      "object": "blob",
+      "index": 0
+     }
+    ],
+    "time": 1,
+    "src": true,
+    "folded": 2,
+    "status": "4 anchors"
+   },
+   "shown": {
+    "mode": "edit",
+    "handles": 4,
+    "editable": "curves"
+   },
+   "edited": {
+    "targetMoved": true,
+    "baseKept": true,
+    "x": 0,
+    "y": 0,
+    "folded": 2,
+    "anchors": 4,
+    "drawnEnd": 160
+   },
+   "err": null
+  },
+  "MORPHSHIFT1": {
+   "before": {
+    "mode": "edit",
+    "handles": 4
+   },
+   "written": {
+    "verb": "morph",
+    "start": 0,
+    "end": 1,
+    "selected": 1,
+    "targetMoved": true,
+    "baseKept": true,
+    "handles": 4
+   },
+   "err": null
+  },
+  "MORPHRESIZE1": {
+   "base": {
+    "handles": 8,
+    "corner": [
+     60,
+     60
+    ]
+   },
+   "written": {
+    "verb": "morph",
+    "start": 0,
+    "end": 1,
+    "at0": [
+     120,
+     120
+    ],
+    "atEnd": [
+     180,
+     160
+    ],
+    "baseKept": true,
+    "x": 0,
+    "y": 0,
+    "selected": 1
+   },
+   "err": null
+  }
+ },
+ "volatile": {}
+}

@@ -1,0 +1,250 @@
+{
+ "results": {
+  "UNITS2": {
+   "spans": [
+    [
+     1,
+     1.7
+    ],
+    [
+     2,
+     2.5
+    ],
+    [
+     3,
+     3.7
+    ]
+   ],
+   "at05": [
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "at18": [
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   "at22": [
+    0.262,
+    0.262,
+    1,
+    1,
+    1
+   ],
+   "at28": [
+    0,
+    0,
+    1,
+    0,
+    0
+   ],
+   "at32": [
+    0.738,
+    0.262,
+    0,
+    0,
+    0
+   ],
+   "at4": [
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   "shares": [
+    0,
+    1,
+    0,
+    1
+   ],
+   "warnings": [],
+   "err": null
+  },
+  "UNITFN1": {
+   "span": [
+    1,
+    3
+   ],
+   "pathSpan": [
+    4,
+    5.4
+   ],
+   "at15": [
+    [
+     50,
+     "#f53d3d",
+     "x"
+    ],
+    [
+     50,
+     "#99f53d",
+     "x"
+    ],
+    [
+     40,
+     "#3df5f5",
+     "x"
+    ],
+    [
+     0,
+     null,
+     null
+    ],
+    [
+     0,
+     null,
+     null
+    ]
+   ],
+   "at29text": [
+    "a",
+    "b",
+    " ",
+    "c",
+    "x"
+   ],
+   "scramble": [
+    1
+   ],
+   "path45": [
+    [
+     0,
+     45,
+     90
+    ],
+    [
+     0,
+     36,
+     90
+    ],
+    [
+     0,
+     27,
+     90
+    ],
+    [
+     0,
+     18,
+     90
+    ],
+    [
+     0,
+     9,
+     90
+    ]
+   ],
+   "warnings": [],
+   "err": null
+  },
+  "PROGFN1": {
+   "bx": [
+    0,
+    100,
+    0,
+    0
+   ],
+   "co": [
+    0,
+    1,
+    1
+   ],
+   "warnings": [],
+   "err": null
+  },
+  "FONTFIELD1": {
+   "items": [
+    "Testfont"
+   ],
+   "first": "Testfont",
+   "chosen": {
+    "font": "Testfont",
+    "src": true,
+    "listGone": true
+   },
+   "afterEscape": "Testfont",
+   "err": null
+  },
+  "TEXTBAR1": {
+   "buttons": [
+    null,
+    null,
+    "Bold",
+    "Italic",
+    "Align left",
+    "Align center",
+    "Align right"
+   ],
+   "weights": [
+    700,
+    700
+   ],
+   "aligns": [
+    "right",
+    "right"
+   ],
+   "sizes": [
+    90,
+    90
+   ],
+   "fonts": [
+    "Testfont",
+    "Testfont"
+   ],
+   "boldOn": "true",
+   "err": null
+  },
+  "EDITTEXT1": {
+   "opened": {
+    "present": true,
+    "value": "Hello",
+    "selected": [
+     "t"
+    ]
+   },
+   "closed": true,
+   "text": "Hello\nWorld",
+   "lines": 2,
+   "src": true,
+   "err": null
+  },
+  "CONVERT1": {
+   "dlg": {
+    "title": "Convert to shape",
+    "items": [
+     "t.fade by char"
+    ]
+   },
+   "tDone": {
+    "className": "Shape",
+    "curves": 111,
+    "acts": [
+     "move"
+    ],
+    "hasText": false,
+    "x": 0,
+    "y": 100
+   },
+   "bounds": {
+    "w": 124,
+    "h": 89
+   },
+   "u": {
+    "className": "Shape",
+    "curves": 978,
+    "waited": 0
+   },
+   "err": null
+  }
+ },
+ "volatile": {
+  "CONVERT1": [
+   "u.waited"
+  ]
+ }
+}

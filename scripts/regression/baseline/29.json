@@ -1,0 +1,222 @@
+{
+ "results": {
+  "PATHFN1": {
+   "x0": 300,
+   "xEnd": -300,
+   "mid": [
+    0,
+    200
+   ],
+   "line": {
+    "visible": true,
+    "segments": 170
+   },
+   "cells": [
+    "shape",
+    "",
+    "",
+    "function"
+   ],
+   "draw": false,
+   "visibleParts": 173,
+   "warnings": [],
+   "err": null
+  },
+  "POINTS1": {
+   "cells": [
+    "shape",
+    "",
+    "",
+    "3 points"
+   ],
+   "input": "[ [-300, 0], [0, 200], [300, 0], ]",
+   "orient": true,
+   "draw": false,
+   "clipLabel": "path",
+   "visibleParts": 126,
+   "start": [
+    -300,
+    0
+   ],
+   "end": [
+    300,
+    0
+   ],
+   "angleEarly": 34,
+   "angleLate": -34,
+   "err": null
+  },
+  "GHOST1": {
+   "ghosts": [
+    "offset: [0, 0],",
+    "relative: false,",
+    "orient: false,",
+    "offset: [0, 0],",
+    "relative: false,"
+   ],
+   "written": true,
+   "writtenWhere": true,
+   "afterUndo": false,
+   "err": null
+  },
+  "EDIT1": {
+   "moved": {
+    "src": true,
+    "picked": [
+     1
+    ],
+    "count": 3
+   },
+   "inserted": {
+    "src": true,
+    "picked": [
+     1
+    ],
+    "count": 4
+   },
+   "deleted": {
+    "count": 3,
+    "picked": [],
+    "gone": true
+   },
+   "items": [
+    "Path▸",
+    "Delete point"
+   ],
+   "afterMenu": {
+    "count": 2,
+    "gone": true
+   },
+   "restored": true,
+   "err": null
+  },
+  "MENU1": {
+   "pLabels": [
+    "Jump to code",
+    "Rename",
+    "Shape▸",
+    "Path▸",
+    "Save preset",
+    "Classes",
+    "Mask▸",
+    "Hide",
+    "Attach to screen",
+    "Collision▸",
+    "Duplicate",
+    "Delete"
+   ],
+   "edited": {
+    "selected": [
+     {
+      "object": "p",
+      "index": 0
+     }
+    ],
+    "time": 0,
+    "tool": "select"
+   },
+   "rLabels": [
+    "Jump to code",
+    "Rename",
+    "Shape▸",
+    "Path▸",
+    "Save preset",
+    "Classes",
+    "Mask▸",
+    "Hide",
+    "Attach to screen",
+    "Collision▸",
+    "Duplicate",
+    "Delete"
+   ],
+   "added": {
+    "src": true,
+    "tool": "path",
+    "selected": [
+     {
+      "object": "r",
+      "index": 0
+     }
+    ],
+    "draw": false,
+    "count": 1
+   },
+   "clicked": {
+    "count": 3,
+    "picked": [
+     2
+    ],
+    "src": true
+   },
+   "drawn": {
+    "count": 3,
+    "sketchSeen": false,
+    "sketchGone": true,
+    "lastIs200": true
+   },
+   "toolAfterEscape": "select",
+   "err": null
+  },
+  "HELP1": {
+   "all": [
+    "Getting around",
+    "Preview",
+    "Paths",
+    "Timeline",
+    "Selected",
+    "Objects",
+    "Presets",
+    "Links",
+    "Code",
+    "The project",
+    "The scene file",
+    "Coordinates and units",
+    "Classes and attributes",
+    "Shapes",
+    "Lifetime and visibility",
+    "Actions",
+    "Paths",
+    "Text",
+    "Relative and overlapping actions",
+    "Keyframes",
+    "Time references",
+    "States",
+    "Classes",
+    "Groups",
+    "Masks",
+    "The camera",
+    "Links",
+    "What the GUI can edit",
+    "Rendering",
+    "Complete example",
+    "Coming"
+   ],
+   "focused": true,
+   "draw": [
+    "Preview",
+    "Paths",
+    "Timeline",
+    "Objects",
+    "Coordinates and units",
+    "Classes and attributes",
+    "Shapes",
+    "Lifetime and visibility",
+    "Actions",
+    "Paths",
+    "Text",
+    "States",
+    "Masks",
+    "The camera",
+    "What the GUI can edit"
+   ],
+   "empty": true,
+   "bake": [
+    "Selected"
+   ],
+   "marks": 2,
+   "back": 31,
+   "err": null
+  }
+ },
+ "volatile": {}
+}

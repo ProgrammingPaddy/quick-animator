@@ -1,0 +1,312 @@
+{
+ "results": {
+  "MARKEDIT1": {
+   "hit": true,
+   "opened": {
+    "input": true,
+    "focused": true,
+    "dialog": false,
+    "value": "",
+    "edit": 1
+   },
+   "renamed": {
+    "src": true,
+    "closed": true,
+    "flags": [
+     "1 Intro",
+     "2 Beat"
+    ]
+   },
+   "escaped": {
+    "had": "Intro",
+    "kept": true,
+    "closed": true
+   },
+   "named": {
+    "input": false,
+    "focused": false,
+    "dialog": false
+   },
+   "after": [
+    [
+     2,
+     "Intro"
+    ],
+    [
+     4,
+     "Beat"
+    ]
+   ],
+   "blurred": {
+    "src": true,
+    "closed": true
+   },
+   "menuEdit": {
+    "item": true,
+    "input": true,
+    "focused": true
+   },
+   "err": null
+  },
+  "NOMENU1": {
+   "palette": {
+    "menu": false,
+    "prevented": true
+   },
+   "toolbar": {
+    "menu": false,
+    "prevented": true
+   },
+   "color": {
+    "menu": false,
+    "prevented": true
+   },
+   "recent": {
+    "menu": false,
+    "prevented": true
+   },
+   "tools": {
+    "menu": false,
+    "prevented": true
+   },
+   "field": {
+    "menu": false,
+    "prevented": true
+   },
+   "zoom": {
+    "menu": false,
+    "prevented": true
+   },
+   "scene": {
+    "menu": true,
+    "items": [
+     "Add▸"
+    ]
+   },
+   "object": {
+    "menu": true,
+    "items": [
+     "Jump to code",
+     "Rename",
+     "Shape▸"
+    ]
+   }
+  },
+  "RECENT1": {
+   "sizes": {
+    "well": 36,
+    "wellHeight": 20,
+    "box": 16,
+    "gap": 8,
+    "between": 4
+   },
+   "shown": [
+    "#666666",
+    "#555555",
+    "#444444",
+    "#333333"
+   ],
+   "picked": {
+    "fill": "#444444",
+    "order": [
+     "#666666",
+     "#555555",
+     "#444444",
+     "#333333",
+     "#222222",
+     "#111111"
+    ]
+   },
+   "labels": [
+    "Recent",
+    "Project"
+   ],
+   "counts": [
+    6,
+    1
+   ],
+   "popBox": 16,
+   "front": [
+    "#111111",
+    "#666666",
+    "#555555"
+   ],
+   "none": 0,
+   "twelve": 6,
+   "nowSide": 4,
+   "nowWell": 36,
+   "nowPop": 16,
+   "wrote": "#666666",
+   "err": null
+  },
+  "CHAIN2": {
+   "ahead1": 2,
+   "ahead2": 3,
+   "ahead3": 4,
+   "rest1": 3,
+   "made1": [
+    [
+     1,
+     2,
+     -200
+    ],
+    [
+     2,
+     3,
+     -100
+    ]
+   ],
+   "sel1": [
+    1
+   ],
+   "ahead4": 4,
+   "ahead5": 5,
+   "rest2": 4,
+   "made2": [
+    [
+     1,
+     2,
+     -200
+    ],
+    [
+     2,
+     3,
+     -100
+    ],
+    [
+     3,
+     4,
+     0
+    ]
+   ],
+   "editAt": 4.5,
+   "editBack": 3.5,
+   "err": null
+  },
+  "PAINTCHAIN1": {
+   "a1": 2,
+   "a2": 3,
+   "a3": 4,
+   "rest": 3,
+   "made": [
+    [
+     1,
+     2,
+     "#ff0000"
+    ],
+    [
+     2,
+     3,
+     "#00ff00"
+    ]
+   ],
+   "err": null
+  },
+  "SHIFTM1": {
+   "ahead": 2,
+   "times": [
+    2,
+    4
+   ],
+   "now": 1,
+   "input": false,
+   "after": 1,
+   "err": null
+  },
+  "DOT1": {
+   "ink": {
+    "stroke": "rgb(255, 204, 0)",
+    "points": 2
+   },
+   "info": {
+    "name": "line1",
+    "x": 200,
+    "y": 150,
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      0,
+      0
+     ]
+    ],
+    "closed": false,
+    "stroke": "#ffcc00",
+    "width": 12,
+    "at": 1,
+    "actions": 0
+   },
+   "drawnVerts": 108,
+   "frame": {
+    "x": 200,
+    "y": 150,
+    "rotation": 0,
+    "width": 12,
+    "height": 12
+   },
+   "selected": [
+    "line1"
+   ],
+   "onObject": {
+    "bActions": 0,
+    "lines": 2,
+    "at": [
+     -300,
+     0
+    ]
+   },
+   "written": [
+    {
+     "start": 1,
+     "end": 2,
+     "to": 1
+    }
+   ],
+   "lineAt": 1,
+   "before": 0,
+   "early": 108,
+   "done": 108,
+   "src": [
+    "line1 = Shape({",
+    "  x: 200,",
+    "  y: 150,",
+    "  points: [",
+    "    [0, 0],",
+    "    [0, 0],",
+    "  ],",
+    "  closed: false,",
+    "  smooth: true,",
+    "  fill: 'none',",
+    "  stroke: '#ffcc00',",
+    "  strokeWidth: 12,",
+    "  at: 1,",
+    "  until: 3,",
+    "})",
+    ""
+   ],
+   "err": null
+  },
+  "FPS1": {
+   "was": 60,
+   "demoDur": "0.0333",
+   "len": 0.0333,
+   "hint30": [
+    "240 f"
+   ],
+   "applied": {
+    "start": 7.9667,
+    "end": 8
+   },
+   "len60": 0.0166,
+   "hint60": [
+    "480 f",
+    "478 f",
+    "2 f"
+   ],
+   "err": null
+  }
+ },
+ "volatile": {}
+}

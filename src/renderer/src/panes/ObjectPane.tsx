@@ -5,17 +5,20 @@ import { LinkIcon } from '../components/LinkIcon'
 import { actionLinks, dependentsByTarget, objectLinks, targetKey } from '../model/links'
 import { actionIdents, carriedBy, classActionIdents, classGroups, classKey, classSpan, groupMembers, overrideOf, typeGroups, type ClassGroup } from '../model/groups'
 import { maskDrawnBy, maskFor, maskNamed, masksOn } from '../model/masks'
-import { GROUP, PIVOT_PARAMS, VERB_COLORS } from '../model/registry'
-import { containers, isVisibleAt } from '../model/sample'
+import { CAMERA, GROUP, PIVOT_PARAMS, VERB_COLORS } from '../model/registry'
+import { cameraAt, containers, isVisibleAt } from '../model/sample'
 import type { Action, Mask, SceneObject } from '../model/types'
-import { addObject, canEdit, classMaskItems, createGroup, prospectiveGroup, deleteAction, deleteClass, deleteClassAction, deleteObjects, duplicateObjects, hideMenuItems, jumpToAction, jumpToClass, jumpToObject, maskedShare, maskListEditable, maskMenuItems, materializeClassAction, moveDeclaration, overrideClassAction, removeFromClass, requestClasses, requestRename, selectClass, selectClassAction, setMasked, ungroup, setLifetime } from '../project/operations'
+import { addObject, attachMenuItems, canEdit, classMaskItems, createGroup, prospectiveGroup, deleteAction, deleteClass, deleteClassAction, deleteObjects, duplicateObjects, hideMenuItems, jumpToAction, jumpToClass, jumpToObject, maskedShare, maskListEditable, maskMenuItems, materializeClassAction, moveDeclaration, overrideClassAction, removeFromClass, requestClasses, requestRename, selectClass, selectClassAction, setMasked, ungroup, setLifetime } from '../project/operations'
 import { requestSavePreset } from '../project/userPresets'
+import { updateSettings } from '../project/controller'
+import { ColorPicker } from '../components/ColorPicker'
 import { isActionSelected, OBJECT_KINDS, useStore } from '../state/store'
 import { timecode } from '../state/time'
 
 /** The fold keys of the types that are not kinds of object (D342). */
 const CLASS_TYPE = 'type:Class'
 const MASK_TYPE = 'type:Mask'
+const CAMERA_TYPE = 'type:Camera'
 
 function actionLabel(action: Action): string {
   const what = action.verb === 'to' ? Object.keys(action.changes).filter((k) => !(PIVOT_PARAMS as readonly string[]).includes(k)).join(', ') || 'to' : action.verb
@@ -59,6 +62,9 @@ export function ObjectPane() {
   // The names on screen at the playhead, as one string: the rows dim by it at any time, and the pane is drawn again only when it changes.
   const onScreen = useStore((s) => (s.model ? s.model.objects.filter((o) => o.className !== GROUP && isVisibleAt(s.model!, o, s.time)).map((o) => o.name).join(' ') : ''))
   const visible = useMemo(() => new Set(onScreen.split(' ')), [onScreen])
+  // The camera that has the picture at the playhead (D358): its row is the lit one among the cameras.
+  const liveCamera = useStore((s) => (s.model ? (cameraAt(s.model, s.time)?.name ?? '') : ''))
+  const background = useStore((s) => s.settings.background)
   // The moment itself matters only to the animations that filter hides, so the pane follows it only while the filter is on.
   const time = useStore((s) => (activeOnly ? s.time : 0))
   const running = (a: { start: number; end: number }): boolean => a.start <= time && time < a.end
@@ -102,9 +108,11 @@ export function ObjectPane() {
   /** A mask's row stands for the mask: the object, or the group whose members are its picture, which sit under it (D336). */
   const maskOwners = useMemo(() => (model ? objects.filter((o) => !!maskNamed(model, o.name)) : []), [model, objects])
   /** The layers, top first (D338): every object but a plain group, which draws nothing of its own, and but the objects of a mask made of several, which sit under it. */
-  const layers = useMemo(() => (model ? [...objects].reverse().filter((o) => (o.className === GROUP ? !!maskNamed(model, o.name) : (maskDrawnBy(model, o.name)?.name ?? o.name) === o.name)) : []), [model, objects])
+  const layers = useMemo(() => (model ? [...objects].reverse().filter((o) => o.className !== CAMERA && (o.className === GROUP ? !!maskNamed(model, o.name) : (maskDrawnBy(model, o.name)?.name ?? o.name) === o.name)) : []), [model, objects])
   /** By type: the kinds of object, then the plain groups, each without what is a mask or part of one. */
-  const types = useMemo(() => typeGroups(model ? objects.filter((o) => !maskFor(model, o.name)) : objects), [model, objects])
+  const types = useMemo(() => typeGroups((model ? objects.filter((o) => !maskFor(model, o.name)) : objects).filter((o) => o.className !== CAMERA)), [model, objects])
+  /** The cameras, the highest first: a camera draws nothing, so it is no layer, and is listed by type alone (D357, D358). */
+  const cameras = useMemo(() => objects.filter((o) => o.className === CAMERA).reverse(), [objects])
   /** The mask in hand: the one selected, or the one the selected object is part of. Every row then says whether it hides it (D333). */
   const held: Mask | null = model && selection.length === 1 ? maskFor(model, selection[0]!) : null
   const heldEditable = !!held && maskListEditable(held.name)
@@ -112,6 +120,8 @@ export function ObjectPane() {
   const isActive = (obj: SceneObject): boolean => {
     if (!model) return true
     if (obj.className === GROUP) return groupMembers(model, obj.name).some((n) => visible.has(n))
+    // A camera is active while it has the picture (D358).
+    if (obj.className === CAMERA) return obj.name === liveCamera
     return visible.has(obj.name)
   }
   /** Hidden in the view: itself, or by a group that carries it (D341). */
@@ -122,9 +132,10 @@ export function ObjectPane() {
   const shown = (obj: SceneObject): boolean => matches(obj) && (!activeOnly || isActive(obj))
   const shownClasses = classes.filter((g) => g.members.some(shown))
   const shownMasks = maskOwners.filter(shown)
+  const shownCameras = cameras.filter(shown)
   /** What folds with one press (D177, D338): the animations under their objects, and, by type, the objects under their headings. */
   const animationKeys = objects.filter((o) => o.actions.length > 0 || (o.className === GROUP && maskOwners.includes(o))).map((o) => o.name)
-  const headingKeys = view === 'type' ? [...types.map((t) => `type:${t.className}`), ...(classes.length > 0 ? [CLASS_TYPE, ...classes.map((g) => classKey(g.className))] : []), ...(maskOwners.length > 0 ? [MASK_TYPE] : [])] : []
+  const headingKeys = view === 'type' ? [...types.map((t) => `type:${t.className}`), ...(classes.length > 0 ? [CLASS_TYPE, ...classes.map((g) => classKey(g.className))] : []), ...(maskOwners.length > 0 ? [MASK_TYPE] : []), ...(cameras.length > 0 ? [CAMERA_TYPE] : [])] : []
   const fold = (keys: string[]) => {
     const open = keys.some((key) => !collapsed[key])
     const rest = Object.keys(collapsed).filter((k) => !keys.includes(k))
@@ -217,6 +228,17 @@ export function ObjectPane() {
     // The mask items sit one level down, as in the preview's menu (D256, D333).
     const maskItems = maskMenuItems(targets)
     const maskSub = maskItems.length > 0 ? [{ label: 'Mask', children: maskItems }] : []
+    if (obj.className === CAMERA && !many) {
+      showMenu(e, [
+        { label: 'Jump to code', run: () => jumpToObject(obj.name) },
+        { label: 'Rename', run: () => requestRename({ object: obj.name }) },
+        { label: 'Classes', run: () => requestClasses(targets) },
+        { label: 'Links', run: () => useStore.getState().openLinksDialog({ object: obj.name }) },
+        { label: 'Duplicate', run: () => duplicateObjects(targets) },
+        { label: 'Delete', run: () => deleteObjects(targets), danger: true },
+      ])
+      return
+    }
     if (obj.className === GROUP && !many) {
       showMenu(e, [
         { label: 'Jump to code', run: () => jumpToObject(obj.name) },
@@ -235,6 +257,7 @@ export function ObjectPane() {
       ...(many ? [] : [{ label: 'Links', run: () => useStore.getState().openLinksDialog({ object: obj.name }) }]),
       ...maskSub,
       ...hideMenuItems(targets),
+      ...attachMenuItems(targets),
       { label: many ? `Duplicate ${targets.length} objects` : 'Duplicate', run: () => duplicateObjects(targets) },
       ...(many ? [] : [{ label: 'End at', keyword: timecode(s.time, s.settings.fps), run: () => setLifetime(obj.name, { until: useStore.getState().time }) }]),
       ...(many || !obj.decl ? [] : [{ label: 'Save preset', run: () => requestSavePreset({ object: obj.name }) }]),
@@ -348,17 +371,18 @@ export function ObjectPane() {
     const shapes = mask && model && obj.className === GROUP ? mask.shapes.map((n) => model.objects.find((o) => o.name === n)).filter((o): o is SceneObject => !!o) : []
     const folds = obj.actions.length > 0 || shapes.length > 0
     const off = hidden.includes(obj.name)
+    const isCamera = obj.className === CAMERA
     const drop = where.layer && drag && drag.over === obj.name ? (drag.above ? ' drop-above' : ' drop-below') : ''
     return (
       <li
         key={`${where.member ? 'm:' : ''}${obj.name}`}
-        className={`object${selected ? ' selected' : ''}${where.member ? ' member' : ''}${active ? '' : ' inactive'}${mask ? ' mask' : ''}${hiddenNow(obj) ? ' is-hidden' : ''}${where.layer && drag?.name === obj.name ? ' dragging' : ''}${drop}`}
-        title={active ? undefined : 'Not on screen at the playhead'}
+        className={`object${selected ? ' selected' : ''}${where.member ? ' member' : ''}${active ? '' : ' inactive'}${mask ? ' mask' : ''}${isCamera ? ' camera' : ''}${isCamera && active ? ' live' : ''}${hiddenNow(obj) ? ' is-hidden' : ''}${where.layer && drag?.name === obj.name ? ' dragging' : ''}${drop}`}
+        title={isCamera ? (active ? 'Has the picture at the playhead' : 'Not the camera in use at the playhead') : active ? undefined : 'Not on screen at the playhead'}
         data-layer={where.layer ? obj.name : undefined}
       >
         {where.layer && (mask || hiding.length > 0) && <span className={`mask-line${mask ? ' cap' : ''}${held && (held === mask || hiding.includes(held)) ? ' held' : ''}`} title={mask ? undefined : `Masked by ${hiding.map((m) => m.name).join(', ')}`} />}
         <div className="object-row" onClick={clickObject(obj.name)} onDoubleClick={() => jumpToObject(obj.name)} onContextMenu={objectMenu(obj)} onPointerDown={where.layer && obj.decl ? beginLayerDrag(obj.name) : undefined}>
-          {tick(mask || part ? null : obj.name)}
+          {tick(mask || part || isCamera ? null : obj.name)}
           {folds ? (
             <button
               className={`chevron${folded ? '' : ' open'}`}
@@ -401,8 +425,14 @@ export function ObjectPane() {
               anchored
             </span>
           )}
+          {obj.attrs['attached'] === true && (
+            <span className="badge" title="Held on the screen, whatever the camera does (D362)">
+              attached
+            </span>
+          )}
           <span className="dim kind">{obj.className}</span>
-          {!part && (
+          {isCamera && <span className="eye-slot" />}
+          {!part && !isCamera && (
             <button
               className={`eye${off ? ' off' : ''}`}
               onClick={(e) => {
@@ -609,12 +639,28 @@ export function ObjectPane() {
               </li>
             )}
             {view === 'layers' ? (
-              layers.map((obj) => renderObject(obj, { layer: true }))
+              <>
+                {layers.map((obj) => renderObject(obj, { layer: true }))}
+                {(!q || 'background'.includes(q)) && !activeOnly && (
+                  <li className="object background" title="Behind everything, whatever the camera does">
+                    <div className="object-row">
+                      {tick(null)}
+                      <span className="chevron none" />
+                      <span className="glyph">
+                        <KindIcon kind="Background" />
+                      </span>
+                      <span className="name">Background</span>
+                      <ColorPicker value={background} onChange={(color) => updateSettings({ background: color })} title="Background" />
+                    </div>
+                  </li>
+                )}
+              </>
             ) : (
               <>
                 {types.filter((group) => group.objects.some(shown)).map((group) => section(`type:${group.className}`, group.className, group.objects.filter(shown).length, () => group.objects.map((obj) => renderObject(obj))))}
                 {shownClasses.length > 0 && section(CLASS_TYPE, 'Class', shownClasses.length, () => shownClasses.map(renderClass))}
                 {shownMasks.length > 0 && section(MASK_TYPE, 'Mask', shownMasks.length, () => shownMasks.map((obj) => renderObject(obj)))}
+                {shownCameras.length > 0 && section(CAMERA_TYPE, 'Camera', shownCameras.length, () => shownCameras.map((obj) => renderObject(obj)))}
               </>
             )}
             {(q || activeOnly) && !objects.some(shown) && <li className="empty dim">Nothing matches.</li>}

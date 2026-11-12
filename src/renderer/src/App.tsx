@@ -16,6 +16,7 @@ import { dropTargets } from './state/dropTargets'
 import { getEditor } from './code/editor'
 import { setTimeHints } from './code/timeHints'
 import { matchHotkey, NO_OVERRIDES } from './state/hotkeys'
+import { CAMERA } from './model/registry'
 import { useStore } from './state/store'
 
 /** True when the key event came from somewhere that handles its own typing. */
@@ -147,7 +148,8 @@ export function App() {
           return
         case 'selectAll':
           e.preventDefault()
-          select(store.model?.objects.map((o) => o.name) ?? [])
+          // Every object: a camera is none of what is drawn, and is selected for itself (D361).
+          select(store.model?.objects.filter((o) => o.className !== CAMERA).map((o) => o.name) ?? [])
           return
         case 'previousEdge':
         case 'nextEdge':
@@ -214,6 +216,11 @@ export function App() {
         case 'razor':
           e.preventDefault()
           store.setTimelineTool(store.timelineTool === 'razor' ? 'select' : 'razor')
+          return
+        case 'previewView':
+          // Preview, Both, Camera, in turn (D359).
+          e.preventDefault()
+          store.cyclePreviewView()
           return
         case 'marker':
           e.preventDefault()

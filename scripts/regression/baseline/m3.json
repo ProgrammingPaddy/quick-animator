@@ -1,0 +1,50 @@
+{
+ "results": {
+  "GL1": {
+   "said": [],
+   "errs": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "lost": false,
+   "sets": [
+    "spot -> title bar1 bar2 logo",
+    "strip! -> bar1 bar2"
+   ]
+  },
+  "GROUP1": {
+   "rows": [
+    "mask1[logo badge]",
+    "spot",
+    "bar2",
+    "bar1",
+    "title",
+    "backdrop"
+   ],
+   "lanes": [
+    "objects:backdrop,title,bar1,bar2",
+    "classes:class",
+    "masks:logo,spot,badge,mask1"
+   ],
+   "selection": [
+    "mask1"
+   ],
+   "dragged": {
+    "selection": [
+     "mask1"
+    ],
+    "group": "mask1 = Group({\n  members: 'logo badge',\n  masks: 'below',\n  x: 100,\n})",
+    "logo": 0
+   },
+   "memberHeld": {
+    "ticks": 4,
+    "edge": 1
+   }
+  }
+ },
+ "volatile": {}
+}

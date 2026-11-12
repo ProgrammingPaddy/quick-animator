@@ -1,0 +1,67 @@
+{
+ "results": {
+  "SCALE1": {
+   "loaded": {
+    "verbs": [
+     "to",
+     "move",
+     "rotate",
+     "resize",
+     "fade",
+     "path",
+     "morph"
+    ],
+    "canonical": "resize",
+    "b": [
+     [
+      "resize",
+      {
+       "scale": 2
+      }
+     ]
+    ],
+    "bScaleAtEnd": 2,
+    "gScaleAtEnd": 1.5,
+    "rScaleShown": 1,
+    "warnings": [
+     [
+      "b.scale is now resize: write b.resize({ ... })",
+      18
+     ]
+    ],
+    "clipLabels": [
+     "resize"
+    ],
+    "verbFor": "resize"
+   },
+   "written": {
+    "r": [
+     "r.resize({",
+     "  width: 120,",
+     "  height: 60,",
+     "  at: 2,",
+     "  duration: 1,"
+    ],
+    "g": [
+     "g.resize({",
+     "  scale: 1.5,",
+     "  pivotX: -300,",
+     "  pivotY: 0,"
+    ],
+    "rActs": [
+     "resize"
+    ],
+    "gActs": [
+     "resize",
+     "resize"
+    ]
+   },
+   "restored": true,
+   "err": null
+  },
+  "OFF": {
+   "tool": "select"
+  }
+ },
+ "volatile": {}
+}

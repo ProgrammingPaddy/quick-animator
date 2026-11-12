@@ -37,6 +37,7 @@ const common: AttrSchema[] = [
   { name: 'scale', type: 'number', default: 1, doc: 'Size multiplier.', animatable: true },
   { name: 'opacity', type: 'number', default: 1, doc: '0 is invisible and costs nothing, 1 is solid. This is the one visibility control (D52).', animatable: true },
   { name: 'fill', type: 'color', default: '#ffffff', doc: 'Fill color, as #rrggbb.', animatable: true },
+  { name: 'attached', type: 'boolean', default: false, doc: "Held on the screen (D362): x and y are from the middle of the picture, and no camera's move, zoom, or turn changes where it shows.", animatable: false },
   { name: 'class', type: 'string', default: '', doc: "Class names separated by spaces, like CSS classes. An action on all('name') applies to every member (D80).", animatable: false },
   { name: 'at', type: 'number', default: 0, doc: 'When the object begins, in seconds or a time reference such as other.end. Before it, the object does not exist (D138).', animatable: false },
   { name: 'until', type: 'number', default: 0, doc: 'When the object is removed, in seconds or a time reference. Unset, it lasts to the end of the content.', animatable: false },
@@ -118,13 +119,29 @@ export const classes: Record<string, ClassSchema> = {
       { name: 'pivotY', type: 'number', default: 0, doc: 'The pivot, up.', animatable: false },
       { name: 'masks', type: 'string', default: '', doc: "Makes the group one mask (D336): its members together are the mask's picture, drawn nowhere else, and what this lists shows only where they are. The words are a mask's: 'below', 'above', names, and except.", animatable: false },
       { name: 'inverted', type: 'boolean', default: false, doc: 'On a mask: hides what is inside it instead of what is outside.', animatable: false },
+      { name: 'attached', type: 'boolean', default: false, doc: 'Holds everything the group carries on the screen (D362).', animatable: false },
       { name: 'imported', type: 'string', default: '', doc: 'The file this came in from, when it was imported; the object pane tags it (D241).', animatable: false, hidden: true },
+    ],
+  },
+  Camera: {
+    name: 'Camera',
+    doc: 'What the picture is taken through (D357): it frames the final render, and is not drawn. The top camera alive has the picture.',
+    attrs: [
+      { name: 'x', type: 'number', default: 0, doc: "The point of the scene at the middle of the picture, in pixels to the right of the scene's middle.", animatable: true },
+      { name: 'y', type: 'number', default: 0, doc: "The point of the scene at the middle of the picture, in pixels above the scene's middle.", animatable: true },
+      { name: 'zoom', type: 'number', default: 1, doc: "How close: 1 shows the project's size as it is, 2 twice as close, 0.5 twice as much.", animatable: true },
+      { name: 'rotation', type: 'number', default: 0, doc: 'The roll, in degrees, counterclockwise.', animatable: true },
+      { name: 'class', type: 'string', default: '', doc: "Class names separated by spaces, like CSS classes. An action on all('name') applies to every member (D80).", animatable: false },
+      { name: 'at', type: 'number', default: 0, doc: 'When the camera begins, in seconds or a time reference. With several alive, the one declared last has the picture (D358).', animatable: false },
+      { name: 'until', type: 'number', default: 0, doc: 'When the camera ends, in seconds or a time reference: the picture goes back to the camera beneath it. Unset, it lasts to the end of the content.', animatable: false },
     ],
   },
 }
 
 /** The class whose body is other objects (D124). */
 export const GROUP = 'Group'
+/** The class that frames the picture and draws nothing (D357). */
+export const CAMERA = 'Camera'
 /** The class drawn from points of its own (D232). */
 export const SHAPE = 'Shape'
 /** The attributes that say something of a mask alone (D331): the Selected pane shows them on a mask and nowhere else. */

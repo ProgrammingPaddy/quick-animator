@@ -1,0 +1,595 @@
+{
+ "results": {
+  "PANE1": {
+   "layers": {
+    "rows": [
+     "badge",
+     "spot",
+     "logo",
+     "bar2",
+     "bar1",
+     "title",
+     "backdrop"
+    ],
+    "tools": [
+     "Show All*",
+     "Show Only Active",
+     "Layers*",
+     "Type",
+     "Objects",
+     "Animations"
+    ],
+    "heads": [],
+    "ticks": {},
+    "lines": [
+     "spot:cap",
+     "logo",
+     "bar2",
+     "bar1",
+     "title"
+    ]
+   },
+   "held": {
+    "ticks": {
+     "badge": false,
+     "logo": true,
+     "bar2": true,
+     "bar1": true,
+     "title": true,
+     "backdrop": false
+    },
+    "lines": [
+     "spot:cap:held",
+     "logo:held",
+     "bar2:held",
+     "bar1:held",
+     "title:held"
+    ],
+    "maskRow": "spotmaskbelow except backdropCircle",
+    "edge": 1
+   },
+   "untick": {
+    "scope": "below except backdrop title",
+    "ticks": {
+     "badge": false,
+     "logo": true,
+     "bar2": true,
+     "bar1": true,
+     "title": false,
+     "backdrop": false
+    },
+    "selection": [
+     "spot"
+    ],
+    "lines": [
+     "spot:cap:held",
+     "logo:held",
+     "bar2:held",
+     "bar1:held"
+    ]
+   },
+   "tickAbove": {
+    "scope": "below badge except backdrop title",
+    "ticks": {
+     "badge": true,
+     "logo": true,
+     "bar2": true,
+     "bar1": true,
+     "title": false,
+     "backdrop": false
+    }
+   },
+   "untickClass": {
+    "scope": "below badge except backdrop title bar",
+    "ticks": {
+     "backdrop": false,
+     "bar1": false,
+     "bar2": false,
+     "badge": true,
+     "logo": true,
+     "title": false,
+     "bar": false
+    }
+   },
+   "eye": {
+    "before": "#f59e0b",
+    "hidden": [
+     "spot"
+    ],
+    "off": "#f59e0b",
+    "rowClass": "object selected mask is-hidden",
+    "selection": [
+     "spot"
+    ]
+   },
+   "eyeOn": {
+    "on": "#24324a",
+    "hidden": []
+   },
+   "type": {
+    "view": "type",
+    "heads": [
+     "Rect 4",
+     "Circle 1",
+     "Text 1",
+     "Class 1",
+     "Mask 1"
+    ],
+    "tools": [
+     "Show All*",
+     "Show Only Active",
+     "Layers",
+     "Type*",
+     "Objects",
+     "Animations"
+    ],
+    "rows": [
+     "backdropRect",
+     "bar1Rect",
+     "bar2Rect",
+     "badgeRect",
+     "logoCircle",
+     "titleText",
+     "barclass2",
+     "bar1Rect",
+     "bar2Rect",
+     "spotmaskbelow except backdropCircle"
+    ],
+    "ticks": {
+     "backdrop": false,
+     "bar1": true,
+     "bar2": true,
+     "badge": false,
+     "logo": true,
+     "title": true,
+     "bar": true
+    }
+   }
+  },
+  "PANE2": {
+   "all": {
+    "rows": [
+     "badge",
+     "spot",
+     "logo",
+     "bar2",
+     "bar1",
+     "title",
+     "backdrop"
+    ],
+    "label": [
+     "Show All*",
+     "Show Only Active",
+     "Layers*",
+     "Type",
+     "Objects",
+     "Animations"
+    ]
+   },
+   "active0": {
+    "rows": [
+     "spot",
+     "logo",
+     "bar2",
+     "bar1",
+     "title",
+     "backdrop"
+    ],
+    "label": [
+     "Show All",
+     "Show Only Active*",
+     "Layers*",
+     "Type",
+     "Objects",
+     "Animations"
+    ],
+    "actions": [
+     "move0:00:00"
+    ]
+   },
+   "active15": {
+    "rows": [
+     "spot",
+     "logo",
+     "bar2",
+     "bar1",
+     "title",
+     "backdrop"
+    ],
+    "actions": [
+     "move0:00:00",
+     "fade0:01:00"
+    ]
+   },
+   "active35": {
+    "rows": [
+     "badge",
+     "spot",
+     "logo",
+     "bar2",
+     "bar1",
+     "backdrop"
+    ]
+   },
+   "back": {
+    "rows": 7,
+    "label": [
+     "Show All*",
+     "Show Only Active",
+     "Layers*",
+     "Type",
+     "Objects",
+     "Animations"
+    ]
+   },
+   "fold": {
+    "before": 2,
+    "collapsed": 0,
+    "keys": [
+     "title",
+     "spot"
+    ],
+    "expanded": 2
+   },
+   "foldType": {
+    "tools": [
+     "Show All*",
+     "Show Only Active",
+     "Layers",
+     "Type*",
+     "Objects",
+     "Animations"
+    ],
+    "before": 9,
+    "collapsed": 0,
+    "heads": [
+     "Rect 4",
+     "Circle 1",
+     "Text 1",
+     "Class 1",
+     "Mask 1"
+    ],
+    "expanded": 9
+   }
+  },
+  "DRAG1": {
+   "start": {
+    "rows": [
+     "badge",
+     "spot",
+     "logo",
+     "bar2",
+     "bar1",
+     "title",
+     "backdrop"
+    ],
+    "order": [
+     "backdrop",
+     "title",
+     "bar1",
+     "bar2",
+     "logo",
+     "spot",
+     "badge"
+    ],
+    "targets": [
+     "title",
+     "bar1",
+     "bar2",
+     "logo"
+    ]
+   },
+   "mark1": [
+    "badge:dragging",
+    "spot:drop-below"
+   ],
+   "badgeDown": {
+    "rows": [
+     "spot",
+     "badge",
+     "logo",
+     "bar2",
+     "bar1",
+     "title",
+     "backdrop"
+    ],
+    "order": [
+     "backdrop",
+     "title",
+     "bar1",
+     "bar2",
+     "logo",
+     "badge",
+     "spot"
+    ],
+    "targets": [
+     "title",
+     "bar1",
+     "bar2",
+     "logo",
+     "badge"
+    ],
+    "selection": [
+     "badge"
+    ]
+   },
+   "mark2": [
+    "spot:dragging",
+    "backdrop:drop-below"
+   ],
+   "maskBottom": {
+    "rows": [
+     "badge",
+     "logo",
+     "bar2",
+     "bar1",
+     "title",
+     "backdrop",
+     "spot"
+    ],
+    "targets": [],
+    "err": null
+   },
+   "mark3": [
+    "badge:drop-above",
+    "spot:dragging"
+   ],
+   "maskTop": {
+    "rows": [
+     "spot",
+     "badge",
+     "logo",
+     "bar2",
+     "bar1",
+     "title",
+     "backdrop"
+    ],
+    "targets": [
+     "title",
+     "bar1",
+     "bar2",
+     "logo",
+     "badge"
+    ]
+   },
+   "mark4": [
+    "badge:drop-above",
+    "title:dragging"
+   ],
+   "escaped": {
+    "rows": [
+     "spot",
+     "badge",
+     "logo",
+     "bar2",
+     "bar1",
+     "title",
+     "backdrop"
+    ],
+    "dragging": 0
+   }
+  },
+  "PICK1": {
+   "barInside": [
+    "bar1"
+   ],
+   "barHidden": [
+    "bar1"
+   ],
+   "center": [
+    "backdrop"
+   ],
+   "marquee": [
+    "backdrop",
+    "badge",
+    "bar1",
+    "bar2",
+    "logo",
+    "title"
+   ],
+   "dragged": {
+    "selection": [
+     "spot"
+    ],
+    "x": 200,
+    "y": 100,
+    "err": null
+   },
+   "afterClickBadge": [
+    "badge"
+   ]
+  },
+  "TL1": {
+   "lanes": [
+    "objects:backdrop,title,bar1,bar2,logo,badge",
+    "groups:cards",
+    "classes:class",
+    "masks:spot"
+   ],
+   "masksFirst": [
+    "masks",
+    "objects",
+    "groups",
+    "classes"
+   ],
+   "reset": [
+    "objects",
+    "groups",
+    "classes",
+    "masks"
+   ],
+   "prefRows": [
+    "Objects",
+    "Groups",
+    "Classes",
+    "Masks",
+    "Cameras"
+   ],
+   "draggedLive": {
+    "rows": [
+     "Masks",
+     "Objects",
+     "Groups",
+     "Classes",
+     "Cameras"
+    ],
+    "dragging": true
+   },
+   "dragged": {
+    "rows": [
+     "Masks",
+     "Objects",
+     "Groups",
+     "Classes",
+     "Cameras"
+    ],
+    "saved": [
+     "masks",
+     "objects",
+     "groups",
+     "classes",
+     "cameras"
+    ],
+    "lanes": [
+     "masks",
+     "objects",
+     "groups",
+     "classes"
+    ],
+    "reset": [
+     "Reset"
+    ]
+   },
+   "arrow": [
+    "Objects",
+    "Masks",
+    "Groups",
+    "Classes",
+    "Cameras"
+   ],
+   "afterReset": {
+    "rows": [
+     "Objects",
+     "Groups",
+     "Classes",
+     "Masks",
+     "Cameras"
+    ],
+    "saved": null,
+    "stored": null
+   }
+  },
+  "SEL1": {
+   "plain": {
+    "sections": [
+     "Lifetime",
+     "Position",
+     "Size",
+     "Color",
+     "Classes"
+    ],
+    "hasMasks": false,
+    "hasInverted": false
+   },
+   "mask": {
+    "sections": [
+     "Lifetime",
+     "Position",
+     "Size",
+     "Color",
+     "Mask",
+     "Classes"
+    ],
+    "keys": [
+     "masks",
+     "inverted"
+    ],
+    "head": "spotCirclemask"
+   },
+   "invertedOn": {
+    "decl": "spot = Circle({\n  x: 0,\n  y: 0,\n  radius: 300,\n  masks: 'below except backdrop',\n  inverted: true,\n})",
+    "inverted": true
+   },
+   "invertedOff": "spot = Circle({\n  x: 0,\n  y: 0,\n  radius: 300,\n  masks: 'below except backdrop',\n})",
+   "typed": {
+    "scope": "title logo",
+    "targets": [
+     "title",
+     "logo"
+    ]
+   }
+  },
+  "MENU1": {
+   "plain": [
+    "Jump to code",
+    "Rename",
+    "Classes",
+    "Links",
+    "Mask▸",
+    "Hide",
+    "Attach to screen",
+    "Duplicate",
+    "End at 0:00:00",
+    "Save preset",
+    "Delete"
+   ],
+   "plainMask": [
+    "Add mask",
+    "Use as mask",
+    "Masked by > spot✓"
+   ],
+   "mask": [
+    "Jump to code",
+    "Rename",
+    "Classes",
+    "Links",
+    "Mask▸",
+    "Hide",
+    "Attach to screen",
+    "Duplicate",
+    "End at 0:00:00",
+    "Save preset",
+    "Delete"
+   ],
+   "maskMask": [
+    "Inverted",
+    "Release mask"
+   ],
+   "maskedBy": "below except backdrop title",
+   "manyItems": [
+    "Add mask",
+    "Use as mask",
+    "Masked by"
+   ],
+   "addMask": {
+    "selection": [
+     "mask1"
+    ],
+    "decl": "mask1 = Rect({\n  x: 0,\n  y: -150,\n  width: 1000,\n  height: 80,\n  masks: 'bar1 bar2',\n})"
+   },
+   "addKinds": [
+    "Rect",
+    "Circle",
+    "Text",
+    "Shape",
+    "Mask"
+   ],
+   "toolKinds": [
+    "Rect",
+    "Circle",
+    "Text",
+    "Mask",
+    "Object",
+    "Group",
+    "Class"
+   ],
+   "placed": {
+    "selection": [
+     "mask2"
+    ],
+    "decl": "mask2 = Rect({\n  x: 300,\n  y: 200,\n  width: 960,\n  height: 540,\n  masks: 'below',\n  until: 2,\n})"
+   }
+  }
+ },
+ "volatile": {}
+}

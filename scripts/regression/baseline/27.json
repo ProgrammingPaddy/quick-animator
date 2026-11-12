@@ -1,0 +1,182 @@
+{
+ "results": {
+  "SNAP1": {
+   "pps": 100,
+   "mid": {
+    "b": [
+     [
+      "move",
+      2,
+      3
+     ]
+    ],
+    "line": true
+   },
+   "after": {
+    "b": [
+     [
+      "move",
+      2,
+      3
+     ]
+    ],
+    "line": false
+   },
+   "lifeMid": {
+    "b": {
+     "at": 0,
+     "until": 4
+    },
+    "line": true
+   },
+   "err": null
+  },
+  "SHIFTTL1": {
+   "t0": 0,
+   "hover": true,
+   "jumped": 2,
+   "restored": 0,
+   "selected": [
+    {
+     "object": "a",
+     "index": 0
+    }
+   ]
+  },
+  "WHEELTL1": {
+   "before": [
+    [
+     "move",
+     1,
+     2
+    ]
+   ],
+   "after": {
+    "a": [
+     [
+      "move",
+      1,
+      2.1002
+     ]
+    ],
+    "time": 2.1002,
+    "step": 1
+   },
+   "restored": 0
+  },
+  "CHAIN2": {
+   "lookahead": 1,
+   "one": {
+    "acts": [
+     [
+      "move",
+      0,
+      1
+     ]
+    ],
+    "time": 2
+   },
+   "two": {
+    "acts": [
+     [
+      "move",
+      0,
+      1
+     ],
+     [
+      "move",
+      1,
+      2
+     ]
+    ],
+    "time": 3,
+    "dest": [
+     -100,
+     100
+    ]
+   },
+   "rest": 2,
+   "err": null
+  },
+  "PANE3": {
+   "all": [
+    "move",
+    "move",
+    "move",
+    "move"
+   ],
+   "running": [
+    "move",
+    "move"
+   ],
+   "later": [],
+   "layout": 3
+  },
+  "FREE1": {
+   "xRow": {
+    "src": true,
+    "expr": "a.x + 20",
+    "shown": "= -280",
+    "linkButtons": 12
+   },
+   "cls": {
+    "classes": [
+     "bars",
+     "extra"
+    ],
+    "srcLinked": false
+   },
+   "text": {
+    "src": true,
+    "shown": "= a"
+   },
+   "life": {
+    "src": true,
+    "cAt": 3,
+    "shown": "= 3"
+   },
+   "err": null
+  },
+  "DLG3": {
+   "slot": "x",
+   "rows": [
+    "▸object a Rect, 0:00:00 to 0:03:00",
+    "▸object c Text, 0:00:00 to the end",
+    "▸animation a.move 0:01:00 to 0:02:00",
+    "▸animation a.move 0:04:00 to 0:05:00"
+   ],
+   "parts": [
+    "start",
+    "end",
+    "x",
+    "y",
+    "z",
+    "rotation",
+    "scale",
+    "opacity",
+    "fill",
+    "width",
+    "height"
+   ],
+   "linked": {
+    "src": true,
+    "current": "a.x"
+   },
+   "unlinked": {
+    "src": true,
+    "bx": 300
+   },
+   "timeRows": [
+    "▾object a Rect, 0:00:00 to 0:03:00",
+    "▸object c Text, 0:00:00 to the end",
+    "▸animation a.move 0:01:00 to 0:02:00",
+    "▸animation a.move 0:04:00 to 0:05:00"
+   ],
+   "err": null
+  },
+  "OFF": {
+   "tool": "select"
+  }
+ },
+ "volatile": {}
+}

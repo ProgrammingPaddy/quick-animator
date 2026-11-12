@@ -1,0 +1,134 @@
+{
+ "results": {
+  "DLG1": {
+   "title": "Links of b.move",
+   "all": [
+    "▸object a Rect, 0:00:00 to 0:05:00",
+    "▸object b Rect, 0:01:00 to 0:05:00",
+    "▸animation a.move 0:01:00 to 0:02:00"
+   ],
+   "narrowed": [
+    "▸animation a.move 0:01:00 to 0:02:00"
+   ],
+   "linked": {
+    "src": true,
+    "b": [
+     [
+      2,
+      3
+     ]
+    ],
+    "slotText": "aMove.end"
+   },
+   "unlinked": {
+    "src": false,
+    "slotText": "0:03:00"
+   },
+   "closed": true,
+   "err": null
+  },
+  "DLG2": {
+   "slots": [
+    "start",
+    "end"
+   ],
+   "src": true,
+   "bUntil": 2,
+   "err": null
+  },
+  "PANE1": {
+   "all": {
+    "names": [
+     "a",
+     "b",
+     "c",
+     "g",
+     "a"
+    ],
+    "inactive": [
+     "b"
+    ]
+   },
+   "searched": {
+    "names": [
+     "b"
+    ],
+    "classGroups": 0
+   },
+   "active": {
+    "names": [
+     "a",
+     "c",
+     "g",
+     "a"
+    ],
+    "nothing": false
+   },
+   "folded": {
+    "rectListed": true,
+    "collapsed": [
+     "type:Rect"
+    ]
+   },
+   "err": null
+  },
+  "PANE2": {
+   "dim": []
+  },
+  "SEL4": {
+   "c": {
+    "x": 120,
+    "opacity": 0.8,
+    "text": "Hi there",
+    "fill": "#ff0000"
+   },
+   "aUntil": null,
+   "err": null
+  },
+  "SEL5": {
+   "head": "a.move0:01:00 to 0:02:00, 1 s",
+   "sections": [
+    "Goes to",
+    "Timing"
+   ],
+   "a": [
+    {
+     "name": null,
+     "verb": "move",
+     "start": 1.75,
+     "end": 3.75,
+     "changes": {
+      "x": 50
+     },
+     "timing": {
+      "at": 1.5,
+      "duration": 2,
+      "delay": 0.25,
+      "relative": true
+     }
+    }
+   ],
+   "err": null
+  },
+  "EASE1": {
+   "named": "bounce",
+   "custom": {
+    "ease": "fn",
+    "src": true
+   },
+   "halfWithSquare": -225,
+   "expectHalf": -225,
+   "edited": true,
+   "ramps": {
+    "easeInRow": true
+   },
+   "easeIn": 0.1,
+   "err": null
+  },
+  "OFF": {
+   "listSwitch": false,
+   "tool": "select"
+  }
+ },
+ "volatile": {}
+}

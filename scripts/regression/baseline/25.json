@@ -1,0 +1,155 @@
+{
+ "results": {
+  "PROG1": {
+   "err": null,
+   "slide": [
+    [
+     "slide",
+     "move",
+     1,
+     3
+    ]
+   ],
+   "b": [
+    [
+     null,
+     "move",
+     2,
+     3
+    ],
+    [
+     "later",
+     "move",
+     4,
+     6
+    ]
+   ],
+   "c": [
+    [
+     null,
+     "move",
+     4.5,
+     5.5
+    ]
+   ],
+   "warnings": []
+  },
+  "LINK1": {
+   "linked": {
+    "src": true,
+    "a": [
+     [
+      "aMove",
+      "move",
+      1,
+      2
+     ]
+    ],
+    "b": [
+     [
+      null,
+      "move",
+      2,
+      3
+     ]
+    ]
+   },
+   "marks": {
+    "text": "aMove.end",
+    "title": "start follows aMove.end",
+    "targetTitle": "Followed by:\nb.move starts at its end"
+   },
+   "rippled": {
+    "a": [
+     [
+      "aMove",
+      "move",
+      2,
+      3
+     ]
+    ],
+    "b": [
+     [
+      null,
+      "move",
+      3,
+      4
+     ]
+    ]
+   },
+   "unlinked": {
+    "b": [
+     [
+      null,
+      "move",
+      3,
+      4
+     ]
+    ],
+    "src": true
+   },
+   "err": null
+  },
+  "LINK2": {
+   "linked": {
+    "src": true,
+    "bAt": 2,
+    "title": "aMove.end",
+    "aTarget": "Followed by:\nb begins at its end"
+   },
+   "until": {
+    "src": true,
+    "bUntil": 5,
+    "aTarget": "Followed by:\nb is removed at its end"
+   },
+   "unlinked": {
+    "at": 1,
+    "until": 5,
+    "src": false
+   },
+   "err": null
+  },
+  "LINK3": {
+   "clip": "x = a.x + 20",
+   "clipTitle": "x follows a.x + 20",
+   "pane": "x follows a.x + 20",
+   "err": null
+  },
+  "MENU4": {
+   "action": [
+    "Jump to code",
+    "Go to start",
+    "Go to end",
+    "Name",
+    "Ease",
+    "Return",
+    "Links",
+    "Save preset",
+    "Delete"
+   ],
+   "linkTo": {
+    "object": "b",
+    "index": 0
+   },
+   "clip": [
+    "Jump to code",
+    "Go to start",
+    "Go to end",
+    "Rename",
+    "Classes",
+    "Begin at",
+    "End at",
+    "No end",
+    "Links",
+    "Hide",
+    "Duplicate",
+    "Save preset",
+    "Delete"
+   ]
+  },
+  "OFF": {
+   "tool": "select"
+  }
+ },
+ "volatile": {}
+}

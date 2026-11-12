@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { NO_VIEW, type View } from '../model/sample'
 
 /** Space kept around the camera frame when fitting it to the pane, in pane pixels. */
 const PADDING = 40
@@ -8,7 +9,9 @@ const MAX_ZOOM = 32
 /**
  * The Three.js view of the world. The camera frame, at project resolution, is what gets
  * rendered to video; the space around it exists so things can live and move off screen.
- * Origin at the frame center, y up, pixel units (decision D21).
+ * Origin at the scene's middle, y up, pixel units (decision D21). The frame sits where the
+ * camera that has the picture puts it, turned and sized as it frames; with no camera, at the
+ * scene's middle (D357).
  */
 export class Viewport {
   /** Pane pixels per world pixel. */
@@ -26,6 +29,8 @@ export class Viewport {
   private readonly frame: THREE.Mesh
   private readonly outline: THREE.LineSegments
   private composition = { width: 1920, height: 1080 }
+  /** What the frame is cut by: the view of the camera that has the picture (D357). */
+  private placed: View = NO_VIEW
   private view = { width: 0, height: 0 }
   /** True once the pane has reported a size. Until then nothing renders or picks. */
   get sized(): boolean {
@@ -58,6 +63,14 @@ export class Viewport {
     this.fit()
   }
 
+  /** Put the frame where a camera frames (D357); the view itself stays where it is. */
+  setFrame(view: View): void {
+    const p = this.placed
+    if (p.x === view.x && p.y === view.y && p.zoom === view.zoom && p.rotation === view.rotation) return
+    this.placed = view
+    this.applyComposition()
+  }
+
   resize(width: number, height: number, pixelRatio: number): void {
     this.view = { width, height }
     this.renderer.setPixelRatio(pixelRatio)
@@ -66,17 +79,18 @@ export class Viewport {
     else this.fit()
   }
 
-  /** Show the whole camera frame, centered, with padding. */
+  /** Show the project's frame at the scene's middle and the camera's frame where it is now, centered, with padding (D359): with no camera, or one that looks inside the scene, that is the scene as it always was. */
   fit(): void {
     const { width, height } = this.view
     if (width === 0 || height === 0) return
     this.adjusted = false
+    const frame = this.fitRect()
     const zoom = Math.min(
-      (width - PADDING * 2) / this.composition.width,
-      (height - PADDING * 2) / this.composition.height,
+      (width - PADDING * 2) / (frame.right - frame.left),
+      (height - PADDING * 2) / (frame.top - frame.bottom),
     )
     this.zoom = Math.max(zoom, MIN_ZOOM)
-    this.center = { x: 0, y: 0 }
+    this.center = { x: (frame.left + frame.right) / 2, y: (frame.top + frame.bottom) / 2 }
     this.updateCamera()
   }
 
@@ -119,8 +133,26 @@ export class Viewport {
     return { left: this.center.x - halfWidth, right: this.center.x + halfWidth, top: this.center.y + halfHeight, bottom: this.center.y - halfHeight }
   }
 
-  /** The camera frame in world coordinates. */
+  /** The camera frame in world coordinates: the upright box around it, where the camera puts it. */
   frameRect(): { left: number; right: number; top: number; bottom: number } {
+    const v = this.placed
+    const a = (v.rotation * Math.PI) / 180
+    const w = this.composition.width / v.zoom
+    const h = this.composition.height / v.zoom
+    const halfWidth = (Math.abs(Math.cos(a)) * w + Math.abs(Math.sin(a)) * h) / 2
+    const halfHeight = (Math.abs(Math.sin(a)) * w + Math.abs(Math.cos(a)) * h) / 2
+    return { left: v.x - halfWidth, right: v.x + halfWidth, top: v.y + halfHeight, bottom: v.y - halfHeight }
+  }
+
+  /** What Fit shows: the box around the project's frame at the scene's middle and the camera's frame. */
+  fitRect(): { left: number; right: number; top: number; bottom: number } {
+    const a = this.sceneRect()
+    const b = this.frameRect()
+    return { left: Math.min(a.left, b.left), right: Math.max(a.right, b.right), top: Math.max(a.top, b.top), bottom: Math.min(a.bottom, b.bottom) }
+  }
+
+  /** The project's frame at the scene's middle, whatever a camera frames. */
+  sceneRect(): { left: number; right: number; top: number; bottom: number } {
     return { left: -this.composition.width / 2, right: this.composition.width / 2, top: this.composition.height / 2, bottom: -this.composition.height / 2 }
   }
 
@@ -130,6 +162,11 @@ export class Viewport {
       x: (paneX - this.view.width / 2) / this.zoom + this.center.x,
       y: -(paneY - this.view.height / 2) / this.zoom + this.center.y,
     }
+  }
+
+  /** The pane position of a place in the world: the inverse of `toWorld`. */
+  toPane(x: number, y: number): { x: number; y: number } {
+    return { x: (x - this.center.x) * this.zoom + this.view.width / 2, y: -(y - this.center.y) * this.zoom + this.view.height / 2 }
   }
 
   /** Normalized device coordinates of a pane position, for picking. */
@@ -149,8 +186,13 @@ export class Viewport {
 
   private applyComposition(): void {
     const { width, height } = this.composition
-    this.frame.scale.set(width, height, 1)
-    this.outline.scale.set(width, height, 1)
+    const v = this.placed
+    const turn = (v.rotation * Math.PI) / 180
+    for (const [mesh, z] of [[this.frame, -10], [this.outline, -9]] as const) {
+      mesh.scale.set(width / v.zoom, height / v.zoom, 1)
+      mesh.position.set(v.x, v.y, z)
+      mesh.rotation.z = turn
+    }
   }
 
   private updateCamera(): void {

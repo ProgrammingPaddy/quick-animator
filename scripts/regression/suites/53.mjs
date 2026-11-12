@@ -1,0 +1,75 @@
+// Units as a stack with chains, functions per unit and of the progress, the font field, the text bar, editing in the preview, and text to shape.
+// Steps: reload open UNITS2 UNITFN1 PROGFN1 FONTFIELD1 TEXTBAR1 EDITTEXT1 CONVERT1
+import { writeFileSync } from 'node:fs'
+
+const SP = process.env.QA_REGRESSION_HOME
+if (!SP) throw new Error('Run the suites through scripts/regression/run.mjs: it makes the scratch project they write to')
+const SCRATCH = `${SP}/first/scenes/main.js`
+const PROJECT = `${SP}/first`
+const targets = await (await fetch('http://127.0.0.1:9222/json')).json()
+const page = targets.find((t) => t.type === 'page')
+const ws = new WebSocket(page.webSocketDebuggerUrl)
+let nextId = 0
+const pending = new Map()
+const send = (method, params = {}) => new Promise((resolve, reject) => { const id = ++nextId; pending.set(id, { resolve, reject }); ws.send(JSON.stringify({ id, method, params })) })
+await new Promise((r) => ws.addEventListener('open', r))
+ws.addEventListener('message', (ev) => { const m = JSON.parse(String(ev.data)); const p = pending.get(m.id); if (!p) return; pending.delete(m.id); m.error ? p.reject(new Error(JSON.stringify(m.error))) : p.resolve(m.result) })
+// A blur or a focus reaches the app as in a window in front, wherever the test window stands.
+await send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {})
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const frame = () => send('Page.captureScreenshot', { format: 'jpeg', quality: 20 }).catch(() => {})
+const run = async (body) => {
+  const expression = `(async () => { const ops = await import('/src/project/operations.ts'); const smp = await import('/src/model/sample.ts'); const st = window.__quickAnimator.useStore; const S = () => st.getState(); const tick = (ms = 60) => new Promise(r => setTimeout(r, ms));
+const pe = (el, type, x, y, extra = {}) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, buttons: type === 'pointerup' ? 0 : 1, pointerId: 1, isPrimary: true, pointerType: 'mouse', ...extra }));
+const key = (type, k, extra = {}) => window.dispatchEvent(new KeyboardEvent(type, { key: k, code: k === 'Shift' ? 'ShiftLeft' : k, bubbles: true, cancelable: true, ...extra }));
+const obj = (name) => S().model.objects.find(o => o.name === name);
+const acts = (name) => obj(name).actions.map(a => ({ verb: a.verb, start: a.start, end: a.end, changes: Object.fromEntries(Object.entries(a.changes).map(([k, v]) => [k, typeof v === 'function' ? 'fn' : v])) }));
+const clipOf = (name) => document.querySelector('.oclip[data-object="' + name + '"]');
+const setSource = async (text) => { const ed = window.__quickAnimator.getEditor(); ed.dispatch({ changes: { from: 0, to: ed.state.doc.length, insert: text } }); await tick(400) };
+const setInput = async (el, value) => { const proto = Object.getPrototypeOf(el); const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set; if (setter) setter.call(el, value); else el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); await tick(60) };
+const commit = async (el, value) => { el.focus(); await setInput(el, value); el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); el.blur(); await tick(200) };
+const rowOf = (name) => [...document.querySelectorAll('.now-values tr')].find(tr => tr.querySelector('td.k')?.textContent === name);
+const geom = () => { const el = document.querySelector('.preview'); const r = el.getBoundingClientRect(); const zoom = Math.max(Math.min((r.width - 80) / 1920, (r.height - 80) / 1080), 0.02); const sx = (wx) => r.left + r.width / 2 + wx * zoom; const sy = (wy) => r.top + r.height / 2 - wy * zoom; return { el, r, zoom, sx, sy } };
+const path = async (g, points, extra = {}) => { const [first, ...rest] = points; pe(g.el, 'pointerdown', g.sx(first.x), g.sy(first.y), extra); pe(g.el, 'pointermove', g.sx(first.x) + 4, g.sy(first.y), extra); let prev = first; for (const p of rest) { const n = Math.max(1, Math.ceil(Math.hypot(p.x - prev.x, p.y - prev.y) / 15)); for (let i = 1; i <= n; i++) pe(g.el, 'pointermove', g.sx(prev.x + (p.x - prev.x) * i / n), g.sy(prev.y + (p.y - prev.y) * i / n), extra); prev = p } pe(g.el, 'pointerup', g.sx(prev.x), g.sy(prev.y), extra); await tick(150) };
+const pps = () => { const a = document.querySelectorAll('.tl-ruler .tick'); if (a.length < 2) return null; const t0 = parseFloat(a[0].textContent), t1 = parseFloat(a[1].textContent); return (a[1].getBoundingClientRect().left - a[0].getBoundingClientRect().left) / (t1 - t0) };
+const at = (name) => ({ x: obj(name).attrs.x, y: obj(name).attrs.y });
+${body} })()`
+  const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, timeout: 120000 })
+  if (r.exceptionDetails) return { EXCEPTION: r.exceptionDetails.exception?.description ?? r.exceptionDetails.text }
+  return r.result.value
+}
+const write = async (text) => { await sleep(1500); writeFileSync(SCRATCH, text); await sleep(1500); await frame(); await sleep(200) }
+const CHAIN = ['t = Text({', '  x: 0,', '  y: 0,', "  text: 'ab cd',", '  fontSize: 60,', '  until: 5,', '})', '', 't.fade({', '  opacity: [0, 1],', "  by: 'char',", '  stagger: 0.1,', '  at: 1,', '  duration: 0.3,', '})', '', 't.fade({', '  opacity: 0,', "  by: 'word',", '  stagger: 0.2,', '  at: 2,', '  duration: 0.3,', '})', '', 't.fade({', '  opacity: [0, 1],', "  by: 'char',", '  stagger: 0.1,', '  at: 3,', '  duration: 0.3,', '})', ''].join('\n')
+const FNS = ['t = Text({', '  x: 0,', '  y: 0,', "  text: 'ab cd',", '  fontSize: 60,', '  until: 6,', '})', '', 't.to({', '  y: (p, i) => i * 10 + p * 100,', '  fill: (p, i) => Color.hue(i / 4),', "  text: (p, i, c) => (p < 1 ? 'x' : c),", "  by: 'char',", '  stagger: (i) => 0.1 * i,', '  at: 1,', '  duration: 1,', "  ease: 'linear',", '})', '', 't.path({', '  shape: [', '    [0, 0],', '    [0, 50],', '    [40, 50],', '  ],', "  by: 'char',", '  stagger: 0.1,', '  at: 4,', '  duration: 1,', '  orient: true,', "  ease: 'linear',", '})', ''].join('\n')
+const PROG = ['b = Rect({', '  x: 0,', '  y: 0,', '  width: 100,', '  height: 60,', '  until: 4,', '})', '', 'c = Circle({', '  x: 300,', '  y: 0,', '  radius: 40,', '  until: 4,', '})', '', 'b.move({', '  x: (p) => Math.sin(p * Math.PI) * 100,', '  relative: true,', '  at: 1,', '  duration: 1,', "  ease: 'linear',", '})', '', 'c.fade({', '  opacity: (p) => (p < 0.5 ? 0 : 1),', '  at: 1,', '  duration: 1,', "  ease: 'linear',", '})', ''].join('\n')
+const TWO = ['a = Text({', '  x: -300,', '  y: 0,', "  text: 'One',", '  fontSize: 60,', '})', '', 'b = Text({', '  x: 300,', '  y: 0,', "  text: 'Two',", '  fontSize: 60,', '})', ''].join('\n')
+const ONE = ['t = Text({', '  x: 0,', '  y: 0,', "  text: 'Hello',", '  fontSize: 80,', '  until: 4,', '})', ''].join('\n')
+const CONV = ['t = Text({', '  x: 0,', '  y: 100,', "  text: 'Hi',", '  fontSize: 120,', "  font: 'Testfont',", '  until: 4,', '})', '', 'u = Text({', '  x: 0,', '  y: -100,', "  text: 'Yo',", '  fontSize: 120,', "  font: 'Segoe UI',", '  until: 4,', '})', '', 't.fade({', '  opacity: [0, 1],', "  by: 'char',", '  at: 1,', '  duration: 0.3,', '})', '', 't.move({', '  x: 100,', '  at: 2,', '  duration: 0.5,', '})', ''].join('\n')
+const KEY = `const press = (el, code, extra = {}) => el.dispatchEvent(new KeyboardEvent('keydown', { code, key: code.replace('Key', '').replace('Arrow', 'Arrow'), bubbles: true, cancelable: true, ...extra }));`
+
+const G = {
+  // Chained unit fades (D269): the first's start holds before it, the second runs the text out word by word from what the first left, the third brings it back from nothing; the opacity lane's share says what is seen.
+  UNITS2: `await setSource(${JSON.stringify(CHAIN)}); S().select([]); S().setTime(0); await tick(300); const m = S().model; const text = await import('/src/model/text.ts'); const layout = text.layoutOf(smp.textStyleAt(m, obj('t'), 0)); const op = (t) => smp.textUnitStates(m, obj('t'), t, layout)?.map(s => Math.round(s.opacity * 1000) / 1000) ?? null; const share = (t) => Math.round(smp.visibleShareAt(m, obj('t'), t) * 1000) / 1000; return { spans: obj('t').actions.map(a => [a.start, a.end]), at05: op(0.5), at18: op(1.8), at22: op(2.2), at28: op(2.8), at32: op(3.2), at4: op(4), shares: [share(0.5), share(1.8), share(2.8), share(4)], warnings: m.warnings, err: S().error }`,
+  // Functions per unit (D269): a value from the progress and the index, a hue, a character shown in place of its own, a stagger from the index, and a path by character as changes from its place, turning with it.
+  UNITFN1: `await setSource(${JSON.stringify(FNS)}); S().select([]); S().setTime(0); await tick(300); const m = S().model; const text = await import('/src/model/text.ts'); const layout = text.layoutOf(smp.textStyleAt(m, obj('t'), 0)); const states = (t) => smp.textUnitStates(m, obj('t'), t, layout); const a = obj('t').actions[0]; const p = obj('t').actions[1]; const s15 = states(1.5); const s25 = states(2.9); const s45 = states(4.5); const r = (v) => Math.round(v * 10) / 10; return { span: [a.start, a.end], pathSpan: [p.start, p.end], at15: s15?.map(s => [r(s.dy), s.fill, s.text]), at29text: s25?.map(s => s.text), scramble: [m ? 1 : 0], path45: s45?.map(s => [r(s.dx), r(s.dy), r(s.rotation)]), warnings: m.warnings, err: S().error }`,
+  // A change written as a function of the progress on an object (D269): a relative move that swings out and back, a fade that is off then on.
+  PROGFN1: `await setSource(${JSON.stringify(PROG)}); S().select([]); S().setTime(0); await tick(300); const m = S().model; const v = (n, a, t) => Math.round(smp.valueAt(m, obj(n), a, t) * 100) / 100; return { bx: [v('b', 'x', 1), v('b', 'x', 1.5), v('b', 'x', 2), v('b', 'x', 3)], co: [v('c', 'opacity', 1.25), v('c', 'opacity', 1.75), v('c', 'opacity', 3)], warnings: m.warnings, err: S().error }`,
+  // The font field (D271): typing narrows the list, the project's font first; the arrows and Enter take one; Escape gives up.
+  FONTFIELD1: `await setSource(${JSON.stringify(ONE)}); S().select([]); S().setTime(0); await tick(300); S().select(['t']); await tick(250); ${KEY} const input = rowOf('font').querySelector('input[role=combobox]'); input.focus(); await setInput(input, 'Test'); await tick(150); const items = [...document.querySelectorAll('.font-list li')].map(li => li.textContent); press(input, 'ArrowDown'); press(input, 'Enter'); await tick(250); const chosen = { font: obj('t').attrs.font, src: S().source.includes("font: 'Testfont'"), listGone: !document.querySelector('.font-list') }; const input2 = rowOf('font').querySelector('input[role=combobox]'); input2.focus(); await setInput(input2, 'Nothing like this'); press(input2, 'Escape'); await tick(200); return { items: items.slice(0, 3), first: items[0], chosen, afterEscape: obj('t').attrs.font, err: S().error }`,
+  // The text bar (D270): with two Texts selected, bold, align, size, and font go to both.
+  TEXTBAR1: `await setSource(${JSON.stringify(TWO)}); S().setTool('select'); S().select(['a', 'b']); S().setTime(0); await tick(300); const bar = document.querySelector('.preview-modes.text-bar'); const buttons = [...bar.querySelectorAll('button')].map(b => b.getAttribute('title')); bar.querySelector('button[title=Bold]').click(); await tick(200); bar.querySelector('button[title="Align right"]').click(); await tick(200); const field = bar.querySelector('.num-field input'); await commit(field, '90'); const src = S().source; const fontInput = bar.querySelector('input[role=combobox]'); fontInput.focus(); await setInput(fontInput, 'Testfont'); fontInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await tick(250); return { buttons, weights: [obj('a').attrs.weight, obj('b').attrs.weight], aligns: [obj('a').attrs.align, obj('b').attrs.align], sizes: [obj('a').attrs.fontSize, obj('b').attrs.fontSize], fonts: [obj('a').attrs.font, obj('b').attrs.font], boldOn: bar.querySelector('button[title=Bold]').getAttribute('aria-pressed'), err: S().error }`,
+  // Editing in the preview (D270): a double-click on a Text opens its words where they are; a line break typed and a click away write them with the break.
+  EDITTEXT1: `await setSource(${JSON.stringify(ONE)}); S().setTool('select'); S().select([]); S().setTime(0); await tick(300); const g = geom(); const f = window.__quickAnimator.getRenderer().frameOf('t'); g.el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX: g.sx(f.x), clientY: g.sy(f.y) })); await tick(250); const area = document.querySelector('.preview-text-edit'); const opened = { present: !!area, value: area?.value, selected: [...S().selection] }; await setInput(area, 'Hello' + String.fromCharCode(10) + 'World'); area.blur(); await tick(300); const closed = !document.querySelector('.preview-text-edit'); return { opened, closed, text: obj('t').attrs.text, lines: String(obj('t').attrs.text).split(String.fromCharCode(10)).length, src: S().source.includes("text: 'Hello\\\\nWorld'"), err: S().error }`,
+  // Text to shape (D273): the dialog lists what runs on the text alone; on Convert the text is a Shape with its letters as curves, from the project's font, the move kept; an installed font is found too.
+  CONVERT1: `await setSource(${JSON.stringify(CONV)}); S().select([]); S().setTime(0); await tick(300); const mod = await import('/src/project/textToShape.ts'); void mod.convertTextToShape('t'); await tick(300); const dlg = { title: S().dialog?.title, items: S().dialog?.items }; S().dialog.onConfirm(''); S().closeDialog(); await tick(1200); const t = obj('t'); const tDone = { className: t.className, curves: typeof t.attrs.curves === 'string' ? t.attrs.curves.split(String.fromCharCode(10)).length : 0, acts: t.actions.map(a => a.verb), hasText: 'text' in t.attrs, x: t.attrs.x, y: t.attrs.y }; const bounds = smp.ownBounds(S().model, t, 0); await mod.convertTextToShape('u'); await tick(500); let waited = 0; while (obj('u').className !== 'Shape' && waited < 40000) { await tick(500); waited += 500 } const u = obj('u'); return { dlg, tDone, bounds: { w: Math.round(bounds.width), h: Math.round(bounds.height) }, u: { className: u.className, curves: typeof u.attrs.curves === 'string' ? u.attrs.curves.length : 0, waited }, err: S().error }`,
+}
+
+const scenes = {}
+for (const key of process.argv.slice(2)) {
+  if (key === 'open') { console.log('open', JSON.stringify(await run(`await window.__quickAnimator.openProject('${PROJECT}'); await tick(800); return { project: S().project?.path, objects: S().model?.objects.length }`))); continue }
+  if (scenes[key]) { await write(scenes[key]); continue }
+  if (key === 'reload') { await run(`location.reload()`).catch(() => {}); await sleep(2500); await frame(); await sleep(300); console.log('reloaded'); continue }
+  if (key === 'frame') { await frame(); await sleep(300); console.log('frame'); continue }
+  console.log(key, JSON.stringify(await run(G[key])))
+}
+ws.close()

@@ -1,10 +1,10 @@
 const LINE = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' } as const
 
 /**
- * A small picture of what a row is (D342): a kind of object, a group, a class, or a mask, which
- * shows through where its picture is, or, inverted, everywhere else.
+ * A small picture of what a row is (D342): a kind of object, a group, a class, a mask, which
+ * shows through where its picture is, or, inverted, everywhere else, or a camera (D357).
  */
-export function KindIcon({ kind }: { kind: 'Rect' | 'Circle' | 'Text' | 'Shape' | 'Group' | 'Class' | 'Mask' | 'InvertedMask' | (string & {}) }) {
+export function KindIcon({ kind }: { kind: 'Rect' | 'Circle' | 'Text' | 'Shape' | 'Group' | 'Class' | 'Mask' | 'InvertedMask' | 'Camera' | 'Background' | (string & {}) }) {
   return (
     <svg className="kind-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
       {kind === 'Rect' && <rect x="2" y="4" width="12" height="8" rx="1.5" {...LINE} />}
@@ -24,6 +24,13 @@ export function KindIcon({ kind }: { kind: 'Rect' | 'Circle' | 'Text' | 'Shape' 
         </>
       )}
       {kind === 'Mask' && <path fill="currentColor" fillRule="evenodd" d="M3 2.5h10A1.5 1.5 0 0 1 14.5 4v8a1.5 1.5 0 0 1-1.5 1.5H3A1.5 1.5 0 0 1 1.5 12V4A1.5 1.5 0 0 1 3 2.5zM8 4.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4z" />}
+      {kind === 'Camera' && (
+        <>
+          <rect x="1.8" y="4.5" width="8.8" height="7" rx="1.4" {...LINE} />
+          <path d="M10.6 7.2l3.6-1.9v5.4l-3.6-1.9z" {...LINE} />
+        </>
+      )}
+      {kind === 'Background' && <rect x="2" y="3.5" width="12" height="9" rx="1.5" fill="currentColor" opacity="0.55" />}
       {kind === 'InvertedMask' && (
         <>
           <rect x="2" y="3" width="12" height="10" rx="1.5" {...LINE} />

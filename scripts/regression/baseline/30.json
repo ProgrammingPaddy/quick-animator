@@ -1,0 +1,214 @@
+{
+ "results": {
+  "SMOOTH1": {
+   "straightCurve": 3,
+   "curve": 49,
+   "anchors": 3,
+   "src": false,
+   "offLine": 19,
+   "mid": [
+    0,
+    200
+   ],
+   "atOne": [
+    0,
+    200
+   ],
+   "drawn": {
+    "segments": 169,
+    "handles": 3
+   },
+   "undone": true,
+   "err": null
+  },
+  "ENDS1": {
+   "first": {
+    "src": true,
+    "decl": -300,
+    "acts": [
+     "path"
+    ]
+   },
+   "last": {
+    "src": true,
+    "acts": [
+     "path"
+    ]
+   },
+   "previewed": 2,
+   "shifted": {
+    "src": true,
+    "acts": [
+     "path"
+    ],
+    "time": 2
+   },
+   "turned": {
+    "acts": [
+     [
+      "path",
+      0,
+      2
+     ],
+     [
+      "rotate",
+      0,
+      2
+     ]
+    ],
+    "shapeKept": true,
+    "src": [
+     "p.rotate({",
+     "  rotation: 90,"
+    ]
+   },
+   "err": null
+  },
+  "MID1": {
+   "movedMid": {
+    "before": [
+     0,
+     200
+    ],
+    "count": 3,
+    "src": true
+   },
+   "inserted": {
+    "count": 4,
+    "picked": [
+     1
+    ],
+    "second": {
+     "x": -207,
+     "y": 93
+    },
+    "near": true
+   },
+   "objectSelected": {
+    "lastSrc": true,
+    "decl": -300,
+    "acts": [
+     "path"
+    ],
+    "selected": [
+     "p"
+    ],
+    "selectedActions": []
+   },
+   "err": null
+  },
+  "MARQ1": {
+   "boxed": {
+    "picked": [
+     0,
+     1
+    ],
+    "stillSelected": 1
+   },
+   "movedAll": {
+    "points": [
+     [
+      -290,
+      10
+     ],
+     [
+      10,
+      210
+     ],
+     [
+      300,
+      0
+     ]
+    ],
+    "picked": [
+     0,
+     1
+    ]
+   },
+   "deleted": {
+    "points": [
+     [
+      300,
+      0
+     ]
+    ],
+    "picked": [],
+    "acts": 1
+   },
+   "clickedEmpty": {
+    "selectedActions": 0,
+    "picked": 0
+   },
+   "err": null
+  },
+  "ADDTOOL1": {
+   "cls": "preview drawing mode-all view-preview tool-path",
+   "onObject": {
+    "tool": "path",
+    "selected": [
+     {
+      "object": "q",
+      "index": 0
+     }
+    ],
+    "count": 1,
+    "first": {
+     "x": 200,
+     "y": 300
+    }
+   },
+   "drew": {
+    "count": 2,
+    "tool": "path"
+   },
+   "onEmpty": {
+    "tool": "path",
+    "count": 2,
+    "points": [
+     [
+      0,
+      -300
+     ],
+     [
+      500,
+      -100
+     ]
+    ],
+    "paths": 2
+   },
+   "hint": false,
+   "err": null
+  },
+  "REL1": {
+   "start": [
+    0,
+    -300
+   ],
+   "end": [
+    100,
+    -300
+   ],
+   "half": 50,
+   "warnings": [],
+   "clip": {
+    "bg": "rgb(134, 239, 172)",
+    "color": "rgb(17, 24, 39)"
+   },
+   "ghosts": [
+    "smooth: false,",
+    "smooth: false,"
+   ],
+   "err": null
+  },
+  "LOOP1": {
+   "contentEnd": 2,
+   "playbackEnd": 3,
+   "wrapped": true,
+   "neverPastContent": true
+  },
+  "OFF": {
+   "tool": "select"
+  }
+ },
+ "volatile": {}
+}

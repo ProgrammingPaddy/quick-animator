@@ -1,0 +1,342 @@
+{
+ "results": {
+  "PRESETS2": {
+   "rows": [
+    [
+     "Fade in",
+     null,
+     "fadeIn"
+    ],
+    [
+     "Fade out",
+     null,
+     "fadeOut"
+    ],
+    [
+     "Pop in",
+     null,
+     "popIn"
+    ],
+    [
+     "Pop out",
+     null,
+     "popOut"
+    ],
+    [
+     "Blink",
+     null,
+     "blink"
+    ],
+    [
+     "Slide in",
+     [
+      "left",
+      "right",
+      "top",
+      "bottom"
+     ],
+     "slideIn"
+    ],
+    [
+     "Bounce in",
+     null,
+     "bounceIn"
+    ],
+    [
+     "Snap in",
+     null,
+     "snapIn"
+    ],
+    [
+     "Shake",
+     null,
+     "shake"
+    ],
+    [
+     "Spin",
+     [
+      "left",
+      "right"
+     ],
+     "spin"
+    ],
+    [
+     "Pulse",
+     null,
+     "pulse"
+    ],
+    [
+     "Grow",
+     null,
+     "grow"
+    ],
+    [
+     "Shrink",
+     null,
+     "shrink"
+    ],
+    [
+     "Orbit",
+     null,
+     "orbit"
+    ],
+    [
+     "Circle",
+     null,
+     "morphCircle"
+    ],
+    [
+     "Square",
+     null,
+     "morphSquare"
+    ],
+    [
+     "Polygon",
+     [
+      "6",
+      "3",
+      "5",
+      "8"
+     ],
+     "morphPolygon"
+    ],
+    [
+     "Star",
+     [
+      "5",
+      "4",
+      "6",
+      "8"
+     ],
+     "morphStar"
+    ],
+    [
+     "Blob",
+     null,
+     "morphBlob"
+    ],
+    [
+     "Type on",
+     null,
+     "typeOn"
+    ],
+    [
+     "Rise by word",
+     null,
+     "riseByWord"
+    ],
+    [
+     "Letters drop",
+     null,
+     "lettersDrop"
+    ],
+    [
+     "Lines in",
+     null,
+     "linesIn"
+    ],
+    [
+     "Fade out by word",
+     null,
+     "fadeOutByWord"
+    ],
+    [
+     "Code typing",
+     null,
+     "codeTyping"
+    ],
+    [
+     "Enchanted",
+     null,
+     "enchanted"
+    ],
+    [
+     "Slot machine",
+     null,
+     "slotMachine"
+    ],
+    [
+     "Color change",
+     [
+      "red",
+      "orange",
+      "yellow",
+      "green",
+      "blue",
+      "purple",
+      "white",
+      "rainbow"
+     ],
+     "colorChange"
+    ],
+    [
+     "Rect",
+     null,
+     ""
+    ],
+    [
+     "Circle",
+     null,
+     ""
+    ],
+    [
+     "Text",
+     null,
+     "Text"
+    ],
+    [
+     "Shape",
+     null,
+     ""
+    ],
+    [
+     "Mask",
+     null,
+     ""
+    ]
+   ],
+   "fadeOut": {
+    "b": [
+     [
+      "fade",
+      3.7,
+      4,
+      "fadeOut"
+     ]
+    ],
+    "c": [
+     [
+      "fade",
+      2.7,
+      3,
+      "fadeOut2"
+     ]
+    ],
+    "names": true
+   },
+   "pulse": {
+    "acts": [
+     [
+      "resize",
+      0,
+      0.6
+     ]
+    ],
+    "src": true,
+    "scaleMid": 1.2,
+    "scaleEnd": 1
+   },
+   "spin": [
+    [
+     "rotate",
+     {
+      "rotation": -360
+     },
+     true
+    ]
+   ],
+   "slide": {
+    "acts": [
+     [
+      "move",
+      0,
+      0.6,
+      true
+     ]
+    ],
+    "x0": 760,
+    "xEnd": -300,
+    "decl": -300
+   },
+   "orbit": {
+    "verb": "path",
+    "src": true,
+    "x0": -300,
+    "xMid": -700,
+    "movedX0": 100,
+    "movedXMid": -300
+   },
+   "restored": true,
+   "err": null
+  },
+  "DRAGDROP1": {
+   "onClip": {
+    "acts": [
+     [
+      "path",
+      2,
+      5,
+      "orbit"
+     ]
+    ],
+    "ghost": [
+     [
+      "300px",
+      "preset-ghost over-timeline"
+     ],
+     [
+      "300px",
+      "preset-ghost over-timeline"
+     ]
+    ]
+   },
+   "onObject": {
+    "acts": [
+     [
+      "rotate",
+      0,
+      1
+     ]
+    ],
+    "ghost": [
+     [
+      "96px",
+      "preset-ghost over-preview"
+     ],
+     [
+      "96px",
+      "preset-ghost over-preview"
+     ]
+    ]
+   },
+   "onObjectLater": [
+    [
+     "rotate",
+     2
+    ]
+   ],
+   "inPreview": {
+    "added": 1,
+    "last": [
+     "Circle",
+     200,
+     -200,
+     2
+    ]
+   },
+   "onTimeline": {
+    "added": 1,
+    "last": [
+     "Rect",
+     0,
+     0,
+     4
+    ]
+   },
+   "err": null
+  },
+  "PREVIEW1": {
+   "shown": {
+    "box": true,
+    "canvas": true,
+    "caption": "Bounce in"
+   },
+   "gone": true,
+   "err": null
+  },
+  "OFF": {
+   "tool": "select"
+  }
+ },
+ "volatile": {}
+}

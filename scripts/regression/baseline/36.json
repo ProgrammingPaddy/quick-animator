@@ -1,0 +1,890 @@
+{
+ "results": {
+  "RANGE1": {
+   "model": {
+    "changes": {
+     "opacity": 1
+    },
+    "from": {
+     "opacity": 0
+    },
+    "kind": "range",
+    "parts": 2,
+    "c": [
+     0,
+     0,
+     0.5,
+     1,
+     1
+    ],
+    "b": [
+     -500,
+     -500,
+     -400,
+     -300,
+     -300
+    ],
+    "definers": [
+     "fade",
+     "fade",
+     null
+    ]
+   },
+   "edited": {
+    "src": true,
+    "from": 0.2,
+    "to": 0.8
+   },
+   "atStart": {
+    "src": true,
+    "decl": 0.4
+   },
+   "before": {
+    "src": true,
+    "decl": 0.4
+   },
+   "relative": {
+    "decl": -200,
+    "from": -200,
+    "to": 0,
+    "shown": -400
+   },
+   "pane": {
+    "inputs": [
+     "0.3",
+     "0.8"
+    ],
+    "status": "from, to"
+   },
+   "paneEdit": {
+    "src": true
+   },
+   "warnings": [],
+   "err": null
+  },
+  "PRESETS3": {
+   "slide": {
+    "act": {
+     "verb": "move",
+     "start": 0,
+     "end": 0.6,
+     "relative": true,
+     "changes": {
+      "x": 0
+     },
+     "from": {
+      "x": 1060
+     },
+     "ease": null,
+     "easeIn": 0
+    },
+    "src": true,
+    "x0": 760,
+    "xMid": 136,
+    "xEnd": -300,
+    "decl": -300,
+    "declKeys": [
+     "x",
+     "y",
+     "width",
+     "height",
+     "until"
+    ]
+   },
+   "bounce": {
+    "act": {
+     "verb": "move",
+     "start": 0,
+     "end": 0.8,
+     "relative": true,
+     "changes": {
+      "y": 0
+     },
+     "from": {
+      "y": 600
+     },
+     "ease": "bounce",
+     "easeIn": null
+    },
+    "src": true,
+    "y0": 600,
+    "yEnd": 0
+   },
+   "snap": {
+    "act": {
+     "verb": "move",
+     "start": 0,
+     "end": 0.4,
+     "relative": true,
+     "changes": {
+      "x": 0
+     },
+     "from": {
+      "x": -200
+     },
+     "ease": "snap",
+     "easeIn": null
+    },
+    "src": true
+   },
+   "fadeIn": {
+    "act": {
+     "verb": "fade",
+     "start": 1,
+     "end": 1.3,
+     "relative": false,
+     "changes": {
+      "opacity": 1
+     },
+     "from": {
+      "opacity": 0
+     },
+     "ease": null,
+     "easeIn": null
+    },
+    "src": true,
+    "declOpacity": null,
+    "o1": 0,
+    "o13": 1
+   },
+   "popIn": {
+    "act": {
+     "verb": "fade",
+     "start": 1,
+     "end": 1.0166,
+     "relative": false,
+     "changes": {
+      "opacity": 1
+     },
+     "from": {
+      "opacity": 0
+     },
+     "ease": null,
+     "easeIn": null
+    },
+    "src": true
+   },
+   "drops": {
+    "outAtZero": [
+     "fade",
+     3.7,
+     4
+    ],
+    "outInside": [
+     "fade",
+     1.7,
+     2
+    ],
+    "spinInside": [
+     "rotate",
+     2
+    ],
+    "spinAtCStart": [
+     "rotate",
+     1
+    ]
+   },
+   "err": null
+  },
+  "PANE1": {
+   "look": {
+    "body": true,
+    "padding": "0px",
+    "headerHeight": 28,
+    "otherHeader": 28,
+    "headerAtTop": 0,
+    "scroll": "auto",
+    "images": 5
+   },
+   "names": [
+    [
+     "Fade in",
+     true,
+     false
+    ],
+    [
+     "Fade out",
+     true,
+     false
+    ],
+    [
+     "Pop in",
+     true,
+     false
+    ],
+    [
+     "Pop out",
+     true,
+     false
+    ],
+    [
+     "Blink",
+     true,
+     false
+    ],
+    [
+     "Slide in",
+     true,
+     true
+    ],
+    [
+     "Bounce in",
+     true,
+     false
+    ],
+    [
+     "Snap in",
+     true,
+     false
+    ],
+    [
+     "Shake",
+     true,
+     false
+    ],
+    [
+     "Spin",
+     true,
+     true
+    ],
+    [
+     "Pulse",
+     true,
+     false
+    ],
+    [
+     "Grow",
+     true,
+     false
+    ],
+    [
+     "Shrink",
+     true,
+     false
+    ],
+    [
+     "Orbit",
+     true,
+     false
+    ],
+    [
+     "Circle",
+     true,
+     false
+    ],
+    [
+     "Square",
+     true,
+     false
+    ],
+    [
+     "Polygon",
+     true,
+     true
+    ],
+    [
+     "Star",
+     true,
+     true
+    ],
+    [
+     "Blob",
+     true,
+     false
+    ],
+    [
+     "Type on",
+     true,
+     false
+    ],
+    [
+     "Rise by word",
+     true,
+     false
+    ],
+    [
+     "Letters drop",
+     true,
+     false
+    ],
+    [
+     "Lines in",
+     true,
+     false
+    ],
+    [
+     "Fade out by word",
+     true,
+     false
+    ],
+    [
+     "Code typing",
+     true,
+     false
+    ],
+    [
+     "Enchanted",
+     true,
+     false
+    ],
+    [
+     "Slot machine",
+     true,
+     false
+    ],
+    [
+     "Color change",
+     true,
+     true
+    ],
+    [
+     "Rect",
+     true,
+     false
+    ],
+    [
+     "Circle",
+     true,
+     false
+    ],
+    [
+     "Text",
+     true,
+     false
+    ],
+    [
+     "Shape",
+     true,
+     false
+    ],
+    [
+     "Mask",
+     true,
+     false
+    ]
+   ],
+   "fade": {
+    "rows": [
+     "Fade in",
+     "Fade out",
+     "Pop in",
+     "Pop out",
+     "Blink",
+     "Type on",
+     "Fade out by word",
+     "Code typing"
+    ],
+    "sections": 3
+   },
+   "circ": {
+    "rows": [
+     "Circle",
+     "Circle"
+    ]
+   },
+   "none": {
+    "empty": true,
+    "rows": 0
+   },
+   "back": 33,
+   "overTimeline": {
+    "cls": "preset-ghost object over-timeline",
+    "width": "200px",
+    "height": "34px",
+    "left": 0,
+    "clip": true,
+    "image": false
+   },
+   "expectedClipWidth": 200,
+   "overPreview": {
+    "cls": "preset-ghost object over-preview",
+    "width": "92px",
+    "height": "53px",
+    "left": -46,
+    "clip": false,
+    "image": true
+   },
+   "expectedWidth": 92,
+   "added": 0,
+   "err": null
+  },
+  "TRAVEL1": {
+   "lines": {
+    "p": {
+     "anchors": [
+      [
+       100,
+       0
+      ],
+      [
+       300,
+       0
+      ]
+     ],
+     "first": [
+      100,
+      0
+     ],
+     "last": [
+      300,
+      0
+     ],
+     "raw": [
+      [
+       -200,
+       0
+      ],
+      [
+       0,
+       0
+      ]
+     ]
+    },
+    "q": {
+     "anchors": [
+      [
+       -300,
+       -200
+      ],
+      [
+       0,
+       0
+      ]
+     ],
+     "mid": [
+      -150,
+      -100
+     ]
+    },
+    "r": {
+     "anchors": 0,
+     "first": [
+      100,
+      300
+     ],
+     "points": 218
+    }
+   },
+   "shownLines": 3,
+   "edited": {
+    "selected": [
+     {
+      "object": "p",
+      "index": 0
+     }
+    ],
+    "src": true,
+    "anchor0": [
+     50,
+     50
+    ],
+    "x0": 50
+   },
+   "shifted": {
+    "src": true,
+    "first": [
+     150,
+     260
+    ],
+    "selected": [
+     {
+      "object": "r",
+      "index": 0
+     }
+    ]
+   },
+   "unshifted": {
+    "offsetGone": true,
+    "first": [
+     100,
+     300
+    ]
+   },
+   "movedWhole": {
+    "src": true,
+    "anchors": [
+     [
+      70,
+      80
+     ],
+     [
+      320,
+      30
+     ]
+    ]
+   },
+   "err": null
+  },
+  "DRAGS1": {
+   "cases": [
+    [
+     "decl",
+     true,
+     true,
+     [
+      -100,
+      50
+     ],
+     [
+      -100,
+      50
+     ],
+     0,
+     [
+      -100,
+      50
+     ],
+     null
+    ],
+    [
+     "move-before",
+     true,
+     true,
+     [
+      -100,
+      50
+     ],
+     [
+      -100,
+      50
+     ],
+     0,
+     [
+      -100,
+      50
+     ],
+     null
+    ],
+    [
+     "move-during",
+     true,
+     true,
+     [
+      100,
+      50
+     ],
+     [
+      100,
+      50
+     ],
+     1.5,
+     [
+      -300,
+      0
+     ],
+     null
+    ],
+    [
+     "move-after",
+     true,
+     true,
+     [
+      100,
+      50
+     ],
+     [
+      100,
+      50
+     ],
+     3,
+     [
+      -300,
+      0
+     ],
+     null
+    ],
+    [
+     "path-start",
+     true,
+     true,
+     [
+      -200,
+      50
+     ],
+     [
+      -200,
+      50
+     ],
+     0,
+     [
+      -300,
+      0
+     ],
+     null
+    ],
+    [
+     "path-during",
+     true,
+     true,
+     [
+      100,
+      250
+     ],
+     [
+      100,
+      250
+     ],
+     2,
+     [
+      -300,
+      0
+     ],
+     null
+    ],
+    [
+     "path-after",
+     true,
+     true,
+     [
+      100,
+      250
+     ],
+     [
+      100,
+      250
+     ],
+     3,
+     [
+      -300,
+      0
+     ],
+     null
+    ],
+    [
+     "orbit-start",
+     true,
+     true,
+     [
+      0,
+      100
+     ],
+     [
+      0,
+      100
+     ],
+     0,
+     [
+      -100,
+      100
+     ],
+     null
+    ],
+    [
+     "orbit-mid",
+     true,
+     true,
+     [
+      200,
+      200
+     ],
+     [
+      200,
+      200
+     ],
+     0.5,
+     [
+      141,
+      120
+     ],
+     null
+    ],
+    [
+     "slide-start",
+     true,
+     true,
+     [
+      -500,
+      50
+     ],
+     [
+      -500,
+      50
+     ],
+     0,
+     [
+      -100,
+      50
+     ],
+     null
+    ],
+    [
+     "slide-before",
+     true,
+     true,
+     [
+      -500,
+      50
+     ],
+     [
+      -500,
+      50
+     ],
+     0.5,
+     [
+      -100,
+      50
+     ],
+     null
+    ],
+    [
+     "slide-mid",
+     true,
+     true,
+     [
+      -300,
+      100
+     ],
+     [
+      -300,
+      100
+     ],
+     0.3,
+     [
+      -300,
+      0
+     ],
+     null
+    ],
+    [
+     "slide-after",
+     true,
+     true,
+     [
+      -300,
+      100
+     ],
+     [
+      -300,
+      100
+     ],
+     1,
+     [
+      -300,
+      0
+     ],
+     null
+    ],
+    [
+     "turn-during",
+     true,
+     true,
+     [
+      0,
+      100
+     ],
+     [
+      0,
+      100
+     ],
+     0.5,
+     [
+      0,
+      100
+     ],
+     null
+    ],
+    [
+     "fade-during",
+     true,
+     true,
+     [
+      0,
+      100
+     ],
+     [
+      0,
+      100
+     ],
+     0.25,
+     [
+      0,
+      100
+     ],
+     null
+    ],
+    [
+     "move-and-path",
+     true,
+     true,
+     [
+      150,
+      150
+     ],
+     [
+      150,
+      150
+     ],
+     1.5,
+     [
+      -300,
+      0
+     ],
+     null
+    ],
+    [
+     "shift-after-path",
+     true,
+     true,
+     [
+      200,
+      300
+     ],
+     [
+      200,
+      300
+     ],
+     3,
+     [
+      -300,
+      0
+     ],
+     null
+    ],
+    [
+     "bounce-mid",
+     true,
+     true,
+     [
+      -100,
+      100
+     ],
+     [
+      -100,
+      100
+     ],
+     0.4,
+     [
+      -300,
+      0
+     ],
+     null
+    ],
+    [
+     "bounce-after",
+     true,
+     true,
+     [
+      -100,
+      100
+     ],
+     [
+      -100,
+      100
+     ],
+     1,
+     [
+      -300,
+      0
+     ],
+     null
+    ]
+   ],
+   "failed": [],
+   "err": null
+  },
+  "OFF": {
+   "tool": "select"
+  }
+ },
+ "volatile": {}
+}

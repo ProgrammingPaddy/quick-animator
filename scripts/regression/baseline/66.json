@@ -1,0 +1,387 @@
+{
+ "results": {
+  "KEY1": {
+   "before": {
+    "x": {
+     "state": "keyed",
+     "disabled": false,
+     "title": "Key here: an animation from the key before to this value"
+    },
+    "y": {
+     "state": "none",
+     "disabled": false,
+     "title": "Key here: an animation from the key before to this value"
+    },
+    "rows": true
+   },
+   "afterX": {
+    "acts": [
+     {
+      "verb": "move",
+      "start": 1,
+      "end": 2,
+      "changes": {
+       "x": 0
+      }
+     },
+     {
+      "verb": "move",
+      "start": 2,
+      "end": 4,
+      "changes": {
+       "x": 0
+      }
+     }
+    ],
+    "state": {
+     "state": "here",
+     "disabled": false,
+     "title": "Remove the key here. Right-click: its ease"
+    },
+    "selection": [
+     "a"
+    ],
+    "selectedActions": 0
+   },
+   "afterY": {
+    "acts": [
+     {
+      "verb": "move",
+      "start": 1,
+      "end": 2,
+      "changes": {
+       "x": 0
+      }
+     },
+     {
+      "verb": "move",
+      "start": 2,
+      "end": 4,
+      "changes": {
+       "x": 0
+      }
+     },
+     {
+      "verb": "move",
+      "start": 0,
+      "end": 4,
+      "changes": {
+       "y": 0
+      }
+     }
+    ],
+    "stateY": {
+     "state": "here",
+     "disabled": false,
+     "title": "Remove the key here. Right-click: its ease"
+    },
+    "src": "a = Rect({\n  x: -300,\n  y: 0,\n  width: 100,\n  height: 60,\n  until: 8,\n})\n\nb = Circle({\n  x: 300,\n  y: 0,\n  radius: 40,\n  until: 8,\n})\n\na.move({\n  x: 0,\n  at: 1,\n  duration: 1,\n})\n\na.move({\n  x: 0,\n  at: 2,\n  duration: 2,\n})\n\na.move({\n  y: 0,\n  at: 0,\n  duration: 4,\n})\n"
+   },
+   "typed": {
+    "acts": [
+     {
+      "verb": "move",
+      "start": 1,
+      "end": 2,
+      "changes": {
+       "x": 0
+      }
+     },
+     {
+      "verb": "move",
+      "start": 2,
+      "end": 4,
+      "changes": {
+       "x": 150
+      }
+     },
+     {
+      "verb": "move",
+      "start": 0,
+      "end": 4,
+      "changes": {
+       "y": 0
+      }
+     }
+    ],
+    "decl": {
+     "x": -300,
+     "y": 0
+    }
+   },
+   "err": null
+  },
+  "KEY2": {
+   "here": {
+    "state": "here",
+    "disabled": false,
+    "title": "Remove the key here. Right-click: its ease"
+   },
+   "acts": [
+    {
+     "verb": "move",
+     "start": 1,
+     "end": 4,
+     "changes": {
+      "x": 150
+     }
+    },
+    {
+     "verb": "move",
+     "start": 0,
+     "end": 4,
+     "changes": {
+      "y": 0
+     }
+    }
+   ],
+   "state": {
+    "state": "keyed",
+    "disabled": false,
+    "title": "Key here: an animation from the key before to this value"
+   },
+   "src": "a = Rect({\n  x: -300,\n  y: 0,\n  width: 100,\n  height: 60,\n  until: 8,\n})\n\nb = Circle({\n  x: 300,\n  y: 0,\n  radius: 40,\n  until: 8,\n})\n\na.move({\n  x: 150,\n  at: 1,\n  duration: 3,\n})\n\na.move({\n  y: 0,\n  at: 0,\n  duration: 4,\n})\n",
+   "err": null
+  },
+  "KEY3": {
+   "inside": {
+    "state": "keyed",
+    "disabled": false,
+    "title": "Key here: an animation from the key before to this value"
+   },
+   "cut": {
+    "acts": [
+     {
+      "verb": "move",
+      "start": 1,
+      "end": 1.5,
+      "changes": {
+       "x": -150
+      }
+     },
+     {
+      "verb": "move",
+      "start": 1.5,
+      "end": 2,
+      "changes": {
+       "x": 0
+      }
+     }
+    ],
+    "selection": [
+     "a"
+    ],
+    "selectedActions": 0,
+    "state": {
+     "state": "here",
+     "disabled": false,
+     "title": "Remove the key here. Right-click: its ease"
+    }
+   },
+   "start": {
+    "state": "here",
+    "disabled": true,
+    "title": "The start: the declaration is this key"
+   },
+   "outside": {
+    "state": "keyed",
+    "disabled": true,
+    "title": "Outside its life"
+   },
+   "err": null
+  },
+  "ARROWS1": {
+   "enabled0": {
+    "prev": true,
+    "next": true
+   },
+   "next": 2,
+   "prev": {
+    "time": 2,
+    "playing": false
+   },
+   "prev2": 0,
+   "enabledAtStart": {
+    "prev": false,
+    "next": true
+   },
+   "yArrows": {
+    "prev": true,
+    "next": false
+   },
+   "err": null
+  },
+  "EASE1": {
+   "items": [
+    "ramps ✓",
+    "linear",
+    "bounce",
+    "back",
+    "elastic",
+    "snap",
+    "custom"
+   ],
+   "picked": true,
+   "written": {
+    "src": true,
+    "menuGone": true
+   },
+   "clipItems": [
+    "Jump to code",
+    "Go to start 0:01:00",
+    "Go to end 0:02:00",
+    "Name",
+    "Ease bounce▸",
+    "Return",
+    "Links",
+    "Save preset",
+    "Delete"
+   ],
+   "sub": [],
+   "err": null
+  },
+  "GROUP1": {
+   "shown": {
+    "row": "group1Groupa · b",
+    "head": "group1Groupa · b",
+    "rows": [
+     null,
+     "x",
+     "y",
+     "rotation",
+     null,
+     "scale",
+     null,
+     "opacity"
+    ],
+    "diamonds": 5,
+    "groups": 0
+   },
+   "made": {
+    "groups": [
+     {
+      "name": "group1",
+      "members": "a b",
+      "x": 50
+     }
+    ],
+    "selection": [
+     "group1"
+    ],
+    "prospective": false
+   },
+   "keyed": {
+    "groups": [
+     {
+      "name": "group1",
+      "acts": [
+       {
+        "verb": "rotate",
+        "start": 0,
+        "end": 3,
+        "changes": {
+         "rotation": 0,
+         "pivotX": -5,
+         "pivotY": 0
+        }
+       }
+      ]
+     }
+    ],
+    "selection": [
+     "group1"
+    ],
+    "src": "a = Rect({\n  x: -300,\n  y: 0,\n  width: 100,\n  height: 60,\n  until: 8,\n})\n\nb = Circle({\n  x: 300,\n  y: 0,\n  radius: 40,\n  until: 8,\n})\n\ngroup1 = Group({\n  members: 'a b',\n})\n\na.move({\n  x: 0,\n  at: 1,\n  duration: 1,\n})\n\ngroup1.rotate({\n  rotation: 0,\n  pivotX: -5,\n  pivotY: 0,\n  at: 0,\n  duration: 3,\n})\n"
+   },
+   "err": null
+  },
+  "MERGE1": {
+   "single": [],
+   "both": [
+    "Merge 2"
+   ],
+   "merged": true,
+   "acts": [
+    {
+     "verb": "move",
+     "start": 1,
+     "end": 2,
+     "changes": {
+      "x": 100,
+      "y": 50
+     }
+    }
+   ],
+   "b": [
+    {
+     "verb": "move",
+     "start": 2,
+     "end": 3,
+     "changes": {
+      "x": 0
+     }
+    }
+   ],
+   "src": "a = Rect({\n  x: -300,\n  y: 0,\n  width: 100,\n  height: 60,\n  until: 8,\n})\n\nb = Circle({\n  x: 300,\n  y: 0,\n  radius: 40,\n  until: 8,\n})\n\nslide = a.move({\n  x: 100,\n  y: 50,\n  at: 1,\n  duration: 1,\n})\n\nb.move({\n  x: 0,\n  at: slide.end,\n  duration: 1,\n})\n",
+   "selectedActions": [
+    {
+     "object": "a",
+     "index": 0
+    }
+   ],
+   "err": null,
+   "warnings": []
+  },
+  "MERGE2": {
+   "spans": {
+    "acts": [
+     {
+      "verb": "to",
+      "start": 1,
+      "end": 3,
+      "changes": {
+       "x": 100,
+       "opacity": 0.5
+      }
+     }
+    ],
+    "src": "a = Rect({\n  x: -300,\n  y: 0,\n  width: 100,\n  height: 60,\n  until: 8,\n})\n\na.to({\n  x: 100,\n  opacity: 0.5,\n  at: 1,\n  duration: 2,\n  ease: 'bounce',\n})\n\n"
+   },
+   "rels": {
+    "acts": [
+     {
+      "verb": "move",
+      "start": 1,
+      "end": 2,
+      "changes": {
+       "x": 150
+      }
+     }
+    ],
+    "relative": true,
+    "src": "a = Rect({\n  x: -300,\n  y: 0,\n  width: 100,\n  height: 60,\n  until: 8,\n})\n\na.move({\n  x: 150,\n  at: 1,\n  duration: 1,\n  relative: true,\n})\n\n"
+   },
+   "err": null
+  },
+  "MORPH1": {
+   "count": 1,
+   "points": [
+    [
+     0,
+     100
+    ],
+    [
+     -120,
+     -50
+    ],
+    [
+     60,
+     -50
+    ]
+   ],
+   "src": "s = Shape({\n  x: 0,\n  y: 0,\n  points: [[0, 50], [-60, -50], [60, -50]],\n  until: 8,\n})\n\ns.morph({\n  to: `\n    M 0 100\n    L -120 -50\n    L 60 -50\n    Z\n  `,\n  at: 1,\n  duration: 1,\n})\n\n",
+   "err": null
+  }
+ },
+ "volatile": {}
+}

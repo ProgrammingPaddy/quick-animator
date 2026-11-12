@@ -1,0 +1,142 @@
+{
+ "results": {
+  "ROW1": {
+   "mask": [
+    "chevron.open",
+    "glyph.mask",
+    "name:spot",
+    "badge.mask:mask",
+    "dim.members:below except backdrop",
+    "dim.kind:Circle",
+    "eye"
+   ],
+   "plain": [
+    "chevron.none",
+    "glyph",
+    "name:badge",
+    "dim.kind:Rect",
+    "eye"
+   ],
+   "kinds": [
+    [
+     "badge",
+     226,
+     232
+    ],
+    [
+     "spot",
+     226,
+     232
+    ],
+    [
+     "logo",
+     226,
+     232
+    ],
+    [
+     "title",
+     226,
+     232
+    ],
+    [
+     "backdrop",
+     226,
+     232
+    ]
+   ],
+   "kindsHeld": [
+    [
+     "badge",
+     226,
+     232
+    ],
+    [
+     "spot",
+     226,
+     232
+    ],
+    [
+     "logo",
+     226,
+     232
+    ],
+    [
+     "title",
+     226,
+     232
+    ]
+   ],
+   "scopeWidth": 37,
+   "group": [
+    "tick-slot",
+    "chevron.none",
+    "glyph",
+    "name:cards",
+    "dim.members:bar1 · bar2",
+    "dim.kind:Group",
+    "eye"
+   ],
+   "inverted": [
+    "tick-slot",
+    "chevron.open",
+    "glyph.mask",
+    "name:spot",
+    "badge.mask:mask",
+    "dim.members:below except backdrop",
+    "dim.kind:Circle",
+    "eye"
+   ]
+  },
+  "BLANK1": {
+   "target": "object-list",
+   "afterBlank": [],
+   "afterBlankWithAction": {
+    "selection": [],
+    "actions": []
+   },
+   "afterRow": [
+    "logo"
+   ],
+   "afterHead": [
+    "logo"
+   ]
+  },
+  "EXPORT2": {
+   "pref": false,
+   "default": {
+    "badge": "#10b981",
+    "outsideMask": "#24324a"
+   },
+   "withHidden": {
+    "badge": "#24324a",
+    "outsideMask": "#f59e0b"
+   },
+   "prefRow": {
+    "label": "Hidden objects",
+    "checked": false
+   },
+   "prefOn": {
+    "store": true,
+    "stored": true
+   },
+   "dialogOn": [
+    "Hidden",
+    "2 left out: badge, spot"
+   ],
+   "dialogOff": [
+    "Output",
+    "1920 × 1080, 60 fps, on #1c1c1c"
+   ],
+   "end": {
+    "prefs": "{\"objectLength\":2,\"timeHints\":true,\"clipOpacity\":true,\"recentColors\":4}"
+   }
+  },
+  "SHOWOFF1": {
+   "stored": null,
+   "on": false,
+   "button": false,
+   "edges": 0
+  }
+ },
+ "volatile": {}
+}

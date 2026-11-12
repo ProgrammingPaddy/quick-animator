@@ -221,9 +221,9 @@ export function drawText(ctx: CanvasRenderingContext2D, layout: TextLayout, fill
   layout.units.char.forEach((unit, i) => {
     const s = states[i]
     if (!s || s.opacity <= 0.0005 || s.scale === 0) return
-    // A character shown in place of its own sits centered in its slot (D269); a blank draws nothing.
+    // A character shown in place of its own sits centered in its slot (D269); a blank draws nothing, and the break after a line has no slot to show anything in, whatever a function gives it (D289).
     const shown = s.text ?? unit.text
-    if (/^\s*$/.test(shown)) return
+    if (unit.text === '\n' || /^\s*$/.test(shown)) return
     // The character's center, then its state about that center; its own offset goes up for a positive dy.
     const cx = ox + unit.left + unit.width / 2 + s.dx
     const cy = oy + unit.baseline + (descent - ascent) / 2 - s.dy
@@ -259,7 +259,7 @@ export function unitOverflow(layout: TextLayout, states: UnitState[]): { x: numb
   const { ascent, descent, width, height } = layout
   layout.units.char.forEach((unit, i) => {
     const s = states[i]
-    if (!s || s.opacity <= 0.0005 || /^\s*$/.test(s.text ?? unit.text)) return
+    if (!s || s.opacity <= 0.0005 || unit.text === '\n' || /^\s*$/.test(s.text ?? unit.text)) return
     const cx = unit.left + unit.width / 2 + s.dx
     const cy = unit.baseline + (descent - ascent) / 2 - s.dy
     // The turned and scaled box of the character, by its half diagonal.

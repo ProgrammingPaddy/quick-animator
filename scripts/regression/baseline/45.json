@@ -1,0 +1,444 @@
+{
+ "results": {
+  "DRAFT1": {
+   "open": {
+    "fill": "none",
+    "strokeWidth": 3,
+    "closed": false
+   },
+   "closed": {
+    "fill": "#4f8cff",
+    "stroke": "#ffffff",
+    "strokeWidth": 3,
+    "closed": true,
+    "src": true,
+    "noneGone": true,
+    "folded": 1
+   },
+   "line": {
+    "fill": "none",
+    "strokeWidth": 3,
+    "closed": false,
+    "tool": "select"
+   },
+   "err": null
+  },
+  "CLOSE1": {
+   "polyMenu": [
+    "Shape>[Smooth shape,Straighten shape]"
+   ],
+   "opened": {
+    "closed": false,
+    "fill": "#4f8cff",
+    "segs": "MLLL",
+    "menu": [
+     "Shape>[Smooth shape,Straighten shape]"
+    ]
+   },
+   "reclosed": {
+    "closed": true,
+    "fill": "#4f8cff",
+    "segs": "MLLLZ"
+   },
+   "lineMenu": [
+    "Add point",
+    "Curve segment",
+    "Shape>[Smooth shape,Straighten shape,Close line]"
+   ],
+   "closedLine": {
+    "closed": true,
+    "fill": "none",
+    "strokeWidth": 3,
+    "segs": "MLLZ"
+   },
+   "ringBefore": {
+    "segs": "MCCCCZ",
+    "anchors": 4
+   },
+   "ringOpen": {
+    "closed": false,
+    "segs": "MCCC",
+    "anchors": 4,
+    "fill": "#f59e0b"
+   },
+   "err": null
+  },
+  "KIND1": {
+   "straightMenu": [
+    "Smooth point",
+    "Delete point"
+   ],
+   "smoothed": {
+    "kinds": [
+     "corner",
+     "smooth",
+     "corner",
+     "straight"
+    ],
+    "segs": "MCCLZ",
+    "round": 1,
+    "menu": [
+     "Corner point",
+     "Straighten point",
+     "Delete point"
+    ]
+   },
+   "cornered": {
+    "kinds": [
+     "corner",
+     "corner",
+     "corner",
+     "straight"
+    ],
+    "inAimsAtPrev": true,
+    "outAimsAtNext": true,
+    "round": 0,
+    "menu": [
+     "Smooth point",
+     "Straighten point",
+     "Delete point"
+    ]
+   },
+   "straight": {
+    "kinds": [
+     "straight",
+     "straight",
+     "straight",
+     "straight"
+    ],
+    "segs": "MLLLZ"
+   },
+   "allSmooth": {
+    "kinds": [
+     "smooth",
+     "smooth",
+     "smooth",
+     "smooth"
+    ],
+    "segs": "MCCCCZ",
+    "anchors": 4,
+    "round": 4
+   },
+   "triBefore": {
+    "kind": "points",
+    "k0": "straight"
+   },
+   "triAfter": {
+    "kind": "curves",
+    "kinds": [
+     "smooth",
+     "corner",
+     "corner"
+    ],
+    "segs": "MCLCZ",
+    "pointsGone": true
+   },
+   "undone": {
+    "kind": "points",
+    "hasPoints": true,
+    "curvesGone": true
+   },
+   "err": null
+  },
+  "SEG1": {
+   "lineMenu": [
+    "Add point",
+    "Curve segment",
+    "Shape>[Smooth shape,Straighten shape]"
+   ],
+   "curved": {
+    "segs": "MCLLZ",
+    "bows": true,
+    "kinds": [
+     "corner",
+     "corner",
+     "straight",
+     "straight"
+    ],
+    "menu": [
+     "Add point",
+     "Straighten segment",
+     "Shape>[Smooth shape,Straighten shape]"
+    ]
+   },
+   "straight": {
+    "segs": "MLLLZ"
+   },
+   "closeCurved": {
+    "segs": "MLLLCZ",
+    "anchors": 4,
+    "closed": true
+   },
+   "closeStraight": {
+    "segs": "MLLLZ",
+    "anchors": 4
+   },
+   "tri": {
+    "kind": "curves",
+    "segs": "MCLZ"
+   },
+   "err": null
+  },
+  "HANDLE1": {
+   "altFromStart": {
+    "kind": "corner",
+    "outMoved": true,
+    "inKept": true,
+    "anchorKept": true
+   },
+   "corner": {
+    "kind": "corner",
+    "outMoved": true,
+    "inKept": true
+   },
+   "altMid": {
+    "plainTurned": true,
+    "altKeptStart": true,
+    "releasedTurned": true,
+    "inLineAfter": true,
+    "kind": "smooth"
+   },
+   "err": null
+  },
+  "ENDS1": {
+   "straight": {
+    "kinds": [
+     "end",
+     "straight",
+     "end"
+    ],
+    "endMenu": [
+     "Close line",
+     "Delete point"
+    ],
+    "midMenu": [
+     "Smooth point",
+     "Close line",
+     "Delete point"
+    ],
+    "round": 0
+   },
+   "curved": {
+    "kinds": [
+     "end",
+     "corner",
+     "end"
+    ],
+    "endMenu": [
+     "Straighten point",
+     "Close line",
+     "Delete point"
+    ],
+    "midMenu": [
+     "Smooth point",
+     "Straighten point",
+     "Close line",
+     "Delete point"
+    ],
+    "round": 0
+   },
+   "smoothed": {
+    "kinds": [
+     "end",
+     "smooth",
+     "end"
+    ],
+    "round": 1,
+    "segs": "MCC"
+   },
+   "err": null
+  },
+  "MODE1": {
+   "withShape": "edit",
+   "withNone": "create",
+   "withRect": "create",
+   "withTwo": "create",
+   "err": null
+  },
+  "MENU5": {
+   "poly": [
+    "Jump to code",
+    "Rename",
+    "Shape>[Smooth shape,Straighten shape]",
+    "Path>[Add path]",
+    "Save preset",
+    "Classes",
+    "Mask>[Add mask,Use as mask]",
+    "Hide",
+    "Attach to screen",
+    "Collision>[Anchor,Enable passthrough]",
+    "Duplicate",
+    "Delete"
+   ],
+   "line": [
+    "Jump to code",
+    "Rename",
+    "Shape>[Smooth shape,Straighten shape,Close line]",
+    "Path>[Add path]",
+    "Save preset",
+    "Classes",
+    "Mask>[Add mask,Use as mask]",
+    "Hide",
+    "Attach to screen",
+    "Collision>[Anchor,Enable passthrough]",
+    "Duplicate",
+    "Delete"
+   ],
+   "rect": [
+    "Jump to code",
+    "Rename",
+    "Shape>[Convert to shape]",
+    "Path>[Add path]",
+    "Save preset",
+    "Classes",
+    "Mask>[Add mask,Use as mask]",
+    "Hide",
+    "Attach to screen",
+    "Collision>[Anchor,Enable passthrough]",
+    "Duplicate",
+    "Delete"
+   ],
+   "err": null
+  },
+  "FOLD1": {
+   "start": 4,
+   "steps": {
+    "point": 4,
+    "smooth": 4,
+    "corner": 4,
+    "segment": 4,
+    "open": 4,
+    "close": 4,
+    "drag": 4,
+    "pathHandle": 1,
+    "pathStraight": 1
+   },
+   "movedSrc": true,
+   "pathStart": 1,
+   "err": null
+  },
+  "BOX1": {
+   "top": {
+    "points": [
+     0,
+     1
+    ],
+    "selection": [
+     "poly"
+    ],
+    "shown": true
+   },
+   "extended": {
+    "points": [
+     0,
+     1,
+     2
+    ]
+   },
+   "moved": {
+    "anchors": [
+     [
+      -100,
+      -120
+     ],
+     [
+      100,
+      -120
+     ],
+     [
+      100,
+      80
+     ],
+     [
+      -100,
+      100
+     ]
+    ],
+    "points": [
+     0,
+     1,
+     2
+    ]
+   },
+   "clicked": {
+    "points": [],
+    "selection": []
+   },
+   "other": {
+    "selection": [
+     "tri"
+    ],
+    "points": []
+   },
+   "found": {
+    "selection": [
+     "poly"
+    ]
+   },
+   "err": null
+  },
+  "PATH1": {
+   "before": {
+    "kind": "points",
+    "k1": "straight",
+    "s1": "line",
+    "pointMenu": [
+     "Smooth point",
+     "Path>[Smooth path,Straighten path]",
+     "Delete point"
+    ],
+    "lineMenu": [
+     "Add point",
+     "Curve segment",
+     "Path>[Smooth path,Straighten path]"
+    ]
+   },
+   "smoothed": {
+    "kind": "curves",
+    "kinds": [
+     "end",
+     "smooth",
+     "end"
+    ],
+    "s1": "curve",
+    "round": 1,
+    "pointMenu": [
+     "Corner point",
+     "Straighten point",
+     "Path>[Smooth path,Straighten path]",
+     "Delete point"
+    ],
+    "anchors": [
+     [
+      -300,
+      0
+     ],
+     [
+      0,
+      200
+     ],
+     [
+      300,
+      0
+     ]
+    ]
+   },
+   "seg": {
+    "s1": "line",
+    "s2": "curve",
+    "kinds": [
+     "end",
+     "corner",
+     "end"
+    ],
+    "lineMenu": [
+     "Add point",
+     "Curve segment",
+     "Path>[Smooth path,Straighten path]"
+    ]
+   },
+   "err": null
+  }
+ },
+ "volatile": {}
+}

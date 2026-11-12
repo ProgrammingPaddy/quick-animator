@@ -115,7 +115,8 @@ export function objectSnippetAttrs(className: string): { name: string; value: st
   const schema = classes[className]
   if (!schema) return []
   const length = useStore.getState().prefs.objectLength
-  const wanted = className === 'Group' ? ['members'] : ['x', 'y', ...(DEFINING[className] ?? []), 'fill', 'at', 'until']
+  // A camera is where it looks and how close; its life is the whole scene until a cut is wanted (D357).
+  const wanted = className === 'Group' ? ['members'] : className === 'Camera' ? ['x', 'y', 'zoom'] : ['x', 'y', ...(DEFINING[className] ?? []), 'fill', 'at', 'until']
   const out: { name: string; value: string }[] = []
   for (const name of wanted) {
     const attr = schema.attrs.find((a) => a.name === name)

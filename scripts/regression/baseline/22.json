@@ -1,0 +1,157 @@
+{
+ "results": {
+  "FADE1": {
+   "aAfter": {
+    "fades": 0,
+    "shown": 1
+   },
+   "bOne": {
+    "attr": 0.5,
+    "fades": 1
+   },
+   "bNone": {
+    "fades": 0,
+    "shown": 1
+   },
+   "err": null
+  },
+  "HOLD1": {
+   "contentEnd": 2,
+   "storeEnd": 2,
+   "a": [
+    true,
+    true,
+    true
+   ],
+   "b": [
+    true,
+    false
+   ],
+   "c": true,
+   "drawn": {
+    "a": true,
+    "b": false,
+    "c": true
+   },
+   "err": null
+  },
+  "ASPECT1": {
+   "handle": true,
+   "width": 397,
+   "height": 232,
+   "x": -321,
+   "y": 100,
+   "ratio": 1.711,
+   "expectRatio": 1.714,
+   "leftEdge": -519.5,
+   "expectLeft": -520,
+   "err": null
+  },
+  "MEMBERS1": {
+   "title": "▾gGroupa · b",
+   "members": "a · b"
+  },
+  "DIAG1": {
+   "order0": [
+    "a",
+    "b",
+    "g"
+   ],
+   "before": {
+    "at": 0,
+    "until": 3
+   },
+   "after": {
+    "life": {
+     "at": 1,
+     "until": 4
+    },
+    "order": [
+     "b",
+     "a",
+     "g"
+    ],
+    "aAbove": true
+   },
+   "undone": {
+    "life": {
+     "at": 0,
+     "until": 3
+    },
+    "order": [
+     "a",
+     "b",
+     "g"
+    ]
+   },
+   "err": null
+  },
+  "CLICK2": {
+   "clicked": {
+    "time": 2.5,
+    "selected": [
+     {
+      "object": "a",
+      "index": 0
+     }
+    ]
+   },
+   "afterDrag": {
+    "time": 2.5,
+    "acts": [
+     [
+      "move",
+      1.5,
+      2.5
+     ]
+    ]
+   },
+   "err": null
+  },
+  "SEL1": {
+   "pressedAt": -200,
+   "time": 1.5,
+   "declX": -400,
+   "dest": {
+    "x": 0
+   },
+   "selected": [
+    {
+     "object": "a",
+     "index": 1
+    }
+   ],
+   "err": null
+  },
+  "SEL2": {
+   "jumped": 2,
+   "after": {
+    "count": 1,
+    "dest": {
+     "x": 131
+    },
+    "declX": -400,
+    "time": 2
+   },
+   "restored": 1.5,
+   "err": null
+  },
+  "SEL3": {
+   "acts": [
+    [
+     "to",
+     1,
+     2
+    ]
+   ],
+   "err": null
+  },
+  "CURSOR1": {
+   "cursor": "no handle"
+  },
+  "OFF": {
+   "tool": "select"
+  }
+ },
+ "volatile": {}
+}

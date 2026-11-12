@@ -106,8 +106,8 @@ export const ANIMATION_PRESETS: readonly AnimationPreset[] = [
   { id: 'linesIn', label: 'Lines in', title: 'Each line slides in from the left as it fades in, 0.15 s apart', verb: 'to', duration: 0.5, place: 'start', family: 'Text' },
   { id: 'fadeOutByWord', label: 'Fade out by word', title: 'The words fade out one after another over the last moments', verb: 'fade', duration: 0.3, place: 'end', family: 'Text' },
   { id: 'codeTyping', label: 'Code typing', title: 'The characters are typed in, the gaps between them uneven', verb: 'fade', duration: 0.02, place: 'start', family: 'Text' },
-  { id: 'enchanted', label: 'Enchanted', title: 'Every letter its own hue, turning once in 8 s, and a wiggle, for 4 s; then back as it was', verb: 'to', duration: 4, place: 'start', family: 'Text' },
-  { id: 'slotMachine', label: 'Slot machine', title: 'Every character spins from the start and lands on its own, the first soon, the last after 2 s more', verb: 'to', duration: 3, place: 'start', family: 'Text' },
+  { id: 'enchanted', label: 'Enchanted', title: 'Every letter its own turning hue and a wiggle, for 4 s, then back as it was', verb: 'to', duration: 4, place: 'start', family: 'Text' },
+  { id: 'slotMachine', label: 'Slot machine', title: 'Every character spins, then they land one after another over 2 s', verb: 'to', duration: 3, place: 'start', family: 'Text' },
   // Miscellaneous (D272): for any object.
   {
     id: 'colorChange',

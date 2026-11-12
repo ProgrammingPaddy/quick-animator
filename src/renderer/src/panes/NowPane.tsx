@@ -8,12 +8,12 @@ import { LinkIcon } from '../components/LinkIcon'
 import { actionLinks, objectLinks } from '../model/links'
 import { hasPathData, parsePathData, pathAnchors } from '../model/pathData'
 import { maskNamed } from '../model/masks'
-import { EASE_NAMES, GROUP, MASK_ATTRS, PIVOT_PARAMS, schemaOf, type AttrSchema, type AttrType, type AttrValue } from '../model/registry'
-import { basePivot, definingAction, isVisibleAt, pathCurves, pathShape, shownValue, valueAt, withWritten, writesFrom } from '../model/sample'
+import { CAMERA, EASE_NAMES, GROUP, MASK_ATTRS, PIVOT_PARAMS, schemaOf, type AttrSchema, type AttrType, type AttrValue } from '../model/registry'
+import { basePivot, cameraAt, definingAction, isVisibleAt, pathCurves, pathShape, shownValue, valueAt, withWritten, writesFrom } from '../model/sample'
 import { DEFAULT_STAGGER, UNIT_KINDS } from '../model/text'
 import type { Action, SceneModel, SceneObject } from '../model/types'
 import { askSystemFonts } from '../project/fonts'
-import { bakeActionProp, bakeObjectProp, canEdit, createGroup, easeMenuItems, frameSeconds, jumpToKey, keyActionsAt, keyBeside, keyState, prospectiveGroup, roundSeconds, setActionFrom, setActionProp, setAttrsAt, setLifetime, setObjectProp, toggleKey, type KeyState } from '../project/operations'
+import { bakeActionProp, bakeObjectProp, canEdit, createGroup, easeMenuItems, frameSeconds, jumpToKey, keyActionsAt, keyBeside, keyState, prospectiveGroup, roundSeconds, setActionFrom, setActionProp, setAttached, setAttrsAt, setLifetime, setObjectProp, toggleKey, type KeyState } from '../project/operations'
 import { useStore } from '../state/store'
 import { timecode } from '../state/time'
 
@@ -27,13 +27,16 @@ function formatValue(value: unknown): string {
 const RANGES: Record<string, { min: number; max: number; step: number }> = {
   opacity: { min: 0, max: 1, step: 0.01 },
   scale: { min: 0, max: 3, step: 0.01 },
+  zoom: { min: 0.1, max: 8, step: 0.01 },
 }
 
 /** Attributes that hold lists of names, never code (D183). */
 const NAME_LISTS = new Set(['class', 'members', 'masks'])
+/** Read when the scene is, and so never a link: what makes a mask (D331), and what holds a thing on the screen (D362). */
+const NEVER_LINKS: ReadonlySet<string> = new Set([...MASK_ATTRS, 'attached'])
 
 function stepFor(attr: string): number {
-  if (attr === 'scale' || attr === 'opacity') return 0.05
+  if (attr === 'scale' || attr === 'opacity' || attr === 'zoom') return 0.05
   return 1
 }
 
@@ -369,6 +372,9 @@ export function NowPane() {
 function ObjectView({ model, obj, attrs, time, editable, openLinks, make }: { model: SceneModel; obj: SceneObject; attrs: AttrSchema[]; time: number; editable: boolean; openLinks: (key: string) => void; make?: () => string | null }) {
   const visible = make ? true : isVisibleAt(model, obj, time)
   const isMask = !make && !!maskNamed(model, obj.name)
+  // A camera, alive, has the picture or is under the one that has it (D358).
+  const over = obj.className === CAMERA && visible ? cameraAt(model, time) : null
+  const cameraSays = over ? (over === obj ? 'has the picture' : `under ${over.name}`) : null
   const links = objectLinks(obj)
   const locked = !editable || obj.codeDriven || (!obj.decl && !make)
   const fps = useStore((s) => s.settings.fps)
@@ -389,7 +395,7 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks, make }: { mo
         <span className="dim">{obj.className}</span>
         {isMask && <span className="badge mask">mask</span>}
         <span className={`dim ${visible ? '' : 'hidden-now'}`} title={make ? 'Not made yet: a value or a key makes it' : undefined}>
-          {make ? String(obj.attrs['members'] ?? '').split(/\s+/).filter(Boolean).join(' · ') : visible ? (isMask ? '' : 'visible') : time < obj.at ? `does not exist until ${obj.at} s` : obj.until !== null && time >= obj.until ? `does not exist after ${obj.until} s` : isMask ? 'hides all: opacity is 0' : 'not visible: opacity is 0'}
+          {make ? String(obj.attrs['members'] ?? '').split(/\s+/).filter(Boolean).join(' · ') : cameraSays !== null ? cameraSays : visible ? (isMask ? '' : 'visible') : time < obj.at ? `does not exist until ${obj.at} s` : obj.until !== null && time >= obj.until ? `does not exist after ${obj.until} s` : isMask ? 'hides all: opacity is 0' : 'not visible: opacity is 0'}
         </span>
         {obj.codeDriven && <span className="badge">code</span>}
       </div>
@@ -432,6 +438,8 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks, make }: { mo
                 const shown = fresh && real ? shownValue(...withWritten(fresh, real, definer, attr.name, next, definer && writesFrom(definer, attr.name, time) ? 'from' : 'to'), attr.name, time) : next
                 setAttrsAt(name, { [attr.name]: typeof shown === 'number' ? shown : next }, time)
               }
+              // Held on the screen or let go, a thing stays where it shows (D362).
+              else if (attr.name === 'attached' && typeof next === 'boolean') setAttached([name], next)
               else if (defining?.stmt && !defining.classAction && next !== null) setActionProp({ object: name, index: obj.actions.indexOf(defining) }, attr.name, next)
               else setObjectProp(name, attr.name, (next === '' && NAME_LISTS.has(attr.name)) || (next === false && attr.name === 'inverted') ? null : next)
             }
@@ -514,7 +522,7 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks, make }: { mo
               control = <Field type={attr.type} name={attr.name} value={value} model={model} disabled={locked} doc={attr.doc} range={RANGES[attr.name]} step={stepFor(attr.name)} options={attr.options} families={isText && attr.name === 'font' ? families : undefined} multiline={isText && attr.name === 'text'} onValue={writeValue} onCode={writeCode} />
             }
             return (
-              <Row key={attr.name} name={attr.name} status={status} className={defining ? 'animated' : status === 'default' ? 'default' : ''} onLink={locked || make || NAME_LISTS.has(attr.name) ? undefined : () => openLinks(attr.name)} linkTitle={`Link ${attr.name} to something else`} keys={keys}>
+              <Row key={attr.name} name={attr.name} status={status} className={defining ? 'animated' : status === 'default' ? 'default' : ''} onLink={locked || make || NAME_LISTS.has(attr.name) || NEVER_LINKS.has(attr.name) ? undefined : () => openLinks(attr.name)} linkTitle={`Link ${attr.name} to something else`} keys={keys}>
                 {control}
               </Row>
             )
@@ -529,7 +537,7 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks, make }: { mo
 /** The pane's sections for an object's values (D330, D346): when it exists, where it is, how big, its colors, a mask's own, its lists, then what its class adds. */
 const SECTIONS: [string, string[]][] = [
   ['Lifetime', ['at', 'until']],
-  ['Position', ['x', 'y', 'z', 'rotation', 'pivotX', 'pivotY']],
+  ['Position', ['x', 'y', 'z', 'zoom', 'rotation', 'pivotX', 'pivotY', 'attached']],
   ['Size', ['width', 'height', 'radius', 'scale', 'fontSize']],
   ['Color', ['fill', 'stroke', 'strokeWidth', 'fillOpacity', 'strokeOpacity', 'opacity']],
   ['Mask', ['masks', 'inverted']],

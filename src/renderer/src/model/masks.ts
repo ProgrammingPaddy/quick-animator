@@ -1,5 +1,5 @@
 import { groupMembers } from './groups'
-import { CLASS_NAMES, GROUP } from './registry'
+import { CAMERA, CLASS_NAMES, GROUP } from './registry'
 import type { Mask, SceneModel, SceneObject } from './types'
 
 /** The words a mask's list holds beside names (D331, D345): everything beneath it in the layers, everything over it, the word before the names it lets out, and the word for a mask that masks nothing. */
@@ -39,8 +39,9 @@ export function formatScope(scope: MaskScope): string {
  * nothing.
  */
 export function maskWord(model: SceneModel, owner: SceneObject, word: string): string[] | null {
-  if (word === MASK_BELOW) return model.objects.filter((o) => o.id < owner.id && o.className !== GROUP).map((o) => o.name)
-  if (word === MASK_ABOVE) return model.objects.filter((o) => o.id > owner.id && o.className !== GROUP).map((o) => o.name)
+  // A camera draws nothing, so it is no layer beneath a mask or over it (D357).
+  if (word === MASK_BELOW) return model.objects.filter((o) => o.id < owner.id && o.className !== GROUP && o.className !== CAMERA).map((o) => o.name)
+  if (word === MASK_ABOVE) return model.objects.filter((o) => o.id > owner.id && o.className !== GROUP && o.className !== CAMERA).map((o) => o.name)
   const obj = model.objects.find((o) => o.name === word)
   if (obj) return obj.className === GROUP ? groupMembers(model, obj.name) : [obj.name]
   const members = model.objects.filter((o) => o.className !== GROUP && (o.className === word || o.classes.includes(word)))

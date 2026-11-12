@@ -1,0 +1,225 @@
+{
+ "results": {
+  "FOLD1": {
+   "template": true,
+   "closer": true,
+   "lines": 12,
+   "folded": 1,
+   "frame": [
+    -300,
+    0,
+    120,
+    100
+   ],
+   "editable": "curves",
+   "row": "M 0 50 L -60 -50 L 60 -50 Z",
+   "status": "3 anchors",
+   "codeMark": 0,
+   "err": null
+  },
+  "PICK1": {
+   "object": [
+    "a"
+   ],
+   "group": [
+    "pair"
+   ],
+   "cls": [
+    "c",
+    "d"
+   ],
+   "extended": [
+    "c",
+    "d",
+    "e"
+   ],
+   "toggled": [
+    "e"
+   ],
+   "gp": {
+    "selected": [
+     "pair:0"
+    ],
+    "src": true,
+    "anchors": [
+     [
+      -325,
+      100
+     ],
+     [
+      -390,
+      100
+     ],
+     [
+      -392,
+      112
+     ],
+     [
+      -300,
+      250
+     ]
+    ],
+    "middle": [
+     -325,
+     100
+    ]
+   },
+   "cp": {
+    "src": true,
+    "relative": true,
+    "selected": [
+     "c:0"
+    ],
+    "classAction": true,
+    "editable": true,
+    "anchors": [
+     [
+      200,
+      -100
+     ],
+     [
+      300,
+      50
+     ]
+    ],
+    "dAnchors": [
+     [
+      400,
+      -100
+     ],
+     [
+      500,
+      50
+     ]
+    ]
+   },
+   "edited": {
+    "src": true,
+    "anchors": [
+     [
+      200,
+      -100
+     ],
+     [
+      320,
+      80
+     ]
+    ]
+   },
+   "err": null
+  },
+  "OUTLINE1": {
+   "inSelect": {
+    "outlines": 1,
+    "handles": 9,
+    "selection": [
+     "e"
+    ]
+   },
+   "inPath": {
+    "outlines": 1,
+    "handles": 0,
+    "selection": [
+     "e"
+    ]
+   },
+   "inObject": {
+    "outlines": 1,
+    "handles": 0,
+    "selection": [
+     "e"
+    ]
+   },
+   "inShape": {
+    "outlines": 0,
+    "handles": 0,
+    "selection": [
+     "e"
+    ]
+   },
+   "back": {
+    "outlines": 1,
+    "handles": 9,
+    "selection": [
+     "e"
+    ]
+   },
+   "err": null
+  },
+  "NAME1": {
+   "names": [
+    "plain",
+    "rounded",
+    "ring",
+    "egg",
+    "testDrawingRect1",
+    "testDrawingText1",
+    "turned",
+    "donut",
+    "wave",
+    "testDrawingShape1",
+    "testDrawingShape2",
+    "testDrawingCircle1",
+    "testDrawing"
+   ],
+   "classes": [
+    null
+   ],
+   "classRow": [],
+   "err": null
+  },
+  "STROKE1": {
+   "opened": {
+    "closed": false,
+    "fill": "#4f8cff",
+    "strokeInSrc": false
+   },
+   "closed": {
+    "closed": true,
+    "fill": "#4f8cff",
+    "strokeInSrc": false
+   },
+   "err": null
+  },
+  "PERF1": {
+   "importMs": 373,
+   "count": 61,
+   "chars": 84619,
+   "lines": 2588,
+   "dragOff": {
+    "avg": 11,
+    "max": 12
+   },
+   "dragOn": {
+    "avg": 11,
+    "max": 13
+   },
+   "pointDrag": {
+    "avg": 8,
+    "max": 10
+   },
+   "err": null
+  },
+  "DROP2": {
+   "overAllowed": true,
+   "count": 13,
+   "names": [
+    "plain",
+    "rounded",
+    "ring"
+   ],
+   "err": null
+  },
+  "OFF": {
+   "tool": "select"
+  }
+ },
+ "volatile": {
+  "PERF1": [
+   "importMs",
+   "dragOff",
+   "dragOn",
+   "pointDrag"
+  ]
+ }
+}

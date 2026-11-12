@@ -1,0 +1,133 @@
+{
+ "results": {
+  "MARK3": {
+   "parsed": [
+    {
+     "name": "intro",
+     "label": "Intro",
+     "time": 2
+    },
+    {
+     "name": null,
+     "label": null,
+     "time": 4
+    }
+   ],
+   "flags": [
+    "1 Intro",
+    "2"
+   ],
+   "moveAt": 2,
+   "labeled": {
+    "src": true,
+    "flags": [
+     "1 Intro",
+     "2 Beat"
+    ]
+   },
+   "cleared": true,
+   "asked": true,
+   "after": [
+    [
+     2,
+     "Intro"
+    ],
+    [
+     4,
+     null
+    ],
+    [
+     1,
+     "Hook"
+    ]
+   ],
+   "numbers": [
+    "2 Intro",
+    "3",
+    "1 Hook"
+   ],
+   "warnings": [],
+   "err": null
+  },
+  "OPAC1": {
+   "fillOp": 0.4,
+   "strokeOp": 0.2,
+   "imported": {
+    "fill": "#ff0000",
+    "fillOpacity": 0.5,
+    "stroke": "#00ff00",
+    "strokeOpacity": 0.25,
+    "opacity": null
+   },
+   "err": null
+  },
+  "SHAPESTYLE1": {
+   "swatches": 2,
+   "drawing": {
+    "stroke": "#00ffcc",
+    "width": 5,
+    "fill": "none"
+   },
+   "closed": {
+    "fill": "#ff8800",
+    "fillOpacity": 0.6,
+    "stroke": "#00ffcc",
+    "strokeOpacity": 0.3
+   },
+   "edit": {
+    "fields": 3
+   },
+   "err": null
+  },
+  "PENCIL2": {
+   "plain": null,
+   "during": 1,
+   "still": 1,
+   "ahead": 2,
+   "lineInfo": {
+    "fill": "none",
+    "stroke": "#ffcc00",
+    "width": 12,
+    "writeOn": [
+     {
+      "from": 0,
+      "to": 1,
+      "start": 1,
+      "end": 2,
+      "ease": "linear"
+     }
+    ]
+   },
+   "shown": 2,
+   "restored": 1,
+   "err": null
+  },
+  "PICKER1": {
+   "parts": {
+    "square": true,
+    "hue": true,
+    "hex": "#4f8cff",
+    "project": [
+     "#4f8cff"
+    ]
+   },
+   "written": "#123456",
+   "closed": true,
+   "recent": [
+    "#123456",
+    "#ffffff"
+   ],
+   "paintWells": 1,
+   "err": null
+  },
+  "CLOSE1": {
+   "items": [
+    "Close line",
+    "Delete point"
+   ],
+   "closed": true,
+   "err": null
+  }
+ },
+ "volatile": {}
+}

@@ -1,0 +1,123 @@
+{
+ "results": {
+  "FOLLOW1": {
+   "o0": [
+    "a",
+    "b",
+    "g"
+   ],
+   "partWay": {
+    "top": 710,
+    "expect": 710,
+    "dragging": true,
+    "order": [
+     "a",
+     "b",
+     "g"
+    ],
+    "line": false
+   },
+   "past": {
+    "top": 686,
+    "expect": 686,
+    "order": [
+     "b",
+     "a",
+     "g"
+    ],
+    "dragging": true
+   },
+   "settled": {
+    "top": 706,
+    "expectLevelTop": 706,
+    "dragging": false,
+    "order": [
+     "b",
+     "a",
+     "g"
+    ]
+   },
+   "undone": [
+    "a",
+    "b",
+    "g"
+   ],
+   "err": null
+  },
+  "MENU3": {
+   "clip": [
+    "Jump to code",
+    "Go to start",
+    "Go to end",
+    "Rename",
+    "Classes",
+    "Begin at",
+    "End at",
+    "No end",
+    "Links",
+    "Hide",
+    "Duplicate",
+    "Save preset",
+    "Delete"
+   ],
+   "action": [
+    "Jump to code",
+    "Go to start",
+    "Go to end",
+    "Name",
+    "Ease",
+    "Return",
+    "Links",
+    "Save preset",
+    "Delete"
+   ],
+   "object": [
+    "Jump to code",
+    "Rename",
+    "Shape",
+    "Path",
+    "Save preset",
+    "Classes",
+    "Mask",
+    "Hide",
+    "Attach to screen",
+    "Collision",
+    "Duplicate",
+    "Delete"
+   ]
+  },
+  "PUSHT1": {
+   "p": [
+    {
+     "verb": "move",
+     "start": 0,
+     "end": 1,
+     "changes": {
+      "x": 200,
+      "y": 0
+     }
+    }
+   ],
+   "q": [
+    {
+     "verb": "move",
+     "start": 0.4333,
+     "end": 1,
+     "changes": {
+      "x": 400,
+      "y": 0
+     },
+     "easeIn": 0,
+     "easeOut": 0.3
+    }
+   ],
+   "expectQStart": 0.43,
+   "err": null
+  },
+  "OFF": {
+   "collide": false,
+   "push": false
+  }
+ },
+ "volatile": {}
+}

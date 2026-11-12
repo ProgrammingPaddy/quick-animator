@@ -61,7 +61,7 @@ ${body} })()`
 const MATRIX = `
 await window.__quickAnimator.openProject('${PROJECT}'); await tick(800);
 const r = window.__quickAnimator.getRenderer();
-S().setTool('select'); S().setTransformMode('move'); if (S().collide) S().setCollide(false); S().setPreviewSnap({ on: false, edges: false });
+S().setTool('select'); S().setTransformMode('move'); if (S().collide) S().setCollide(false); S().setPreviewSnap({ on: false, edges: false }); S().setPreviewView('preview'); await tick(400);
 const nl = String.fromCharCode(10);
 const decl = ['b = Rect({', '  x: -300,', '  y: 0,', '  width: 100,', '  height: 60,', '})', '', 'c = Circle({', '  x: 500,', '  y: -400,', '  radius: 20,', '})', ''].join(nl);
 const scene = (...acts) => decl + acts.map(a => nl + a + nl).join('');
@@ -79,6 +79,8 @@ const one = async (label, src, time, tx, ty, extra) => {
   await setSource(src); S().select([]); S().setTime(time); await tick(150);
   const g = geom(); const f0 = r.frameOf('b');
   await drag(g, [{ x: f0.x, y: f0.y }, { x: tx, y: ty }], extra ?? {}); await tick(150);
+  // Shift that came with the pointer is let go, or its look ahead stays open and takes the playhead of the cases after it.
+  if (extra?.shiftKey) { window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: 'ShiftLeft', bubbles: true, cancelable: true })); await tick(100); }
   const last = obj('b').actions.slice(-1)[0];
   // A Shift drag makes an animation and the playhead comes back: the object shows the drag at that animation's end.
   const at = extra?.shiftKey && last ? last.end : S().time;

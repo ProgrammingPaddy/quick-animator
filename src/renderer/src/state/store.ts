@@ -20,9 +20,9 @@ export type ObjectKind = 'Rect' | 'Circle' | 'Text' | 'Shape' | 'Mask'
 export const OBJECT_KINDS: ObjectKind[] = ['Rect', 'Circle', 'Text', 'Shape', 'Mask']
 
 /** The timeline's sections (D339), in the order they come unless the preferences say another. */
-export const TIMELINE_SECTIONS = ['objects', 'groups', 'classes', 'masks'] as const
+export const TIMELINE_SECTIONS = ['objects', 'groups', 'classes', 'masks', 'cameras'] as const
 export type TimelineSection = (typeof TIMELINE_SECTIONS)[number]
-export const SECTION_LABEL: Record<TimelineSection, string> = { objects: 'Objects', groups: 'Groups', classes: 'Classes', masks: 'Masks' }
+export const SECTION_LABEL: Record<TimelineSection, string> = { objects: 'Objects', groups: 'Groups', classes: 'Classes', masks: 'Masks', cameras: 'Cameras' }
 
 /** The sections in the order the preferences give, with any they leave out after, in the usual order. */
 export function sectionOrder(saved: readonly string[] | undefined): TimelineSection[] {
@@ -30,8 +30,11 @@ export function sectionOrder(saved: readonly string[] | undefined): TimelineSect
   return [...known, ...TIMELINE_SECTIONS.filter((s) => !known.includes(s))]
 }
 
-/** The preview's tool (D203): Select, the default, acts on objects and on the selected path's points; Object places one of the chosen kind per click (D163); Path starts a path on an object, draws points, and moves the path and its points. A tool stays until put away. */
-export type Tool = 'select' | 'object' | 'path' | 'shape' | 'pencil' | 'paint'
+/** The preview's tool (D203): Select, the default, acts on objects and on the selected path's points; Object places one of the chosen kind per click (D163); Path starts a path on an object, draws points, and moves the path and its points; Camera moves the camera that has the picture and nothing else (D361). A tool stays until put away. */
+export type Tool = 'select' | 'object' | 'path' | 'shape' | 'pencil' | 'paint' | 'camera'
+/** What the preview shows (D359): the scene as it is worked on, what the camera sees, or the two side by side. */
+export type PreviewView = 'preview' | 'both' | 'camera'
+export const PREVIEW_VIEWS: readonly PreviewView[] = ['preview', 'both', 'camera']
 /** What a press picks (D247). */
 export type Pick = 'object' | 'group' | 'class'
 
@@ -309,6 +312,18 @@ const ANCHOR_KEY = 'quick-animator.anchor'
 const SHOW_PATHS_KEY = 'quick-animator.showPaths'
 const OBJECTS_VIEW_KEY = 'quick-animator.objectsView'
 const SHOW_MASKS_KEY = 'quick-animator.showMasks'
+const PREVIEW_VIEW_KEY = 'quick-animator.previewView'
+const PREVIEW_SPLIT_KEY = 'quick-animator.previewSplit'
+
+/** The share of the preview's width the Preview view takes beside the Camera view, as kept (D359). */
+function loadSplit(): number {
+  try {
+    const n = Number(localStorage.getItem(PREVIEW_SPLIT_KEY))
+    return Number.isFinite(n) && n >= 0.2 && n <= 0.8 ? n : 0.5
+  } catch {
+    return 0.5
+  }
+}
 
 function loadChoice<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   try {
@@ -486,6 +501,10 @@ interface State {
   showMasks: boolean
   /** The Objects pane's view (D338): the layers, top first, or the objects by type. */
   objectsView: 'layers' | 'type'
+  /** What the preview shows (D359): Preview, Both, or Camera; kept between sessions. */
+  previewView: PreviewView
+  /** In Both, the share of the preview's width the Preview view takes, 0.2 to 0.8; kept (D359). */
+  previewSplit: number
   /** The marker whose text is being typed on the ruler, by its index (D307). */
   markerEdit: number | null
   setMarkerEdit: (index: number | null) => void
@@ -558,6 +577,10 @@ interface State {
   setHidden: (names: string[], hidden: boolean) => void
   toggleShowMasks: () => void
   setObjectsView: (view: 'layers' | 'type') => void
+  setPreviewView: (view: PreviewView) => void
+  /** The next of Preview, Both, Camera (D359). */
+  cyclePreviewView: () => void
+  setPreviewSplit: (share: number) => void
   setPathPoints: (indices: number[]) => void
   setAddKind: (kind: ObjectKind) => void
   setAddPreset: (addPreset: string | null) => void
@@ -643,6 +666,8 @@ function createAppStore() {
       hidden: [],
       showMasks: loadChoice<'on' | 'off'>(SHOW_MASKS_KEY, ['on', 'off'], 'off') === 'on',
       objectsView: loadChoice<'layers' | 'type'>(OBJECTS_VIEW_KEY, ['layers', 'type'], 'layers'),
+      previewView: loadChoice<PreviewView>(PREVIEW_VIEW_KEY, PREVIEW_VIEWS, 'preview'),
+      previewSplit: loadSplit(),
       markerEdit: null,
       recentColors: loadColors(),
       shapeStyle: loadShapeStyle(),
@@ -798,6 +823,21 @@ function createAppStore() {
           saveChoice(SHOW_MASKS_KEY, s.showMasks ? 'off' : 'on')
           return { showMasks: !s.showMasks }
         }),
+      setPreviewView: (previewView) => {
+        saveChoice(PREVIEW_VIEW_KEY, previewView)
+        set({ previewView })
+      },
+      cyclePreviewView: () =>
+        set((s) => {
+          const previewView = PREVIEW_VIEWS[(PREVIEW_VIEWS.indexOf(s.previewView) + 1) % PREVIEW_VIEWS.length]!
+          saveChoice(PREVIEW_VIEW_KEY, previewView)
+          return { previewView }
+        }),
+      setPreviewSplit: (share) => {
+        const previewSplit = Math.min(0.8, Math.max(0.2, share))
+        saveChoice(PREVIEW_SPLIT_KEY, String(previewSplit))
+        set({ previewSplit })
+      },
       setObjectsView: (objectsView) => {
         saveChoice(OBJECTS_VIEW_KEY, objectsView)
         set({ objectsView })

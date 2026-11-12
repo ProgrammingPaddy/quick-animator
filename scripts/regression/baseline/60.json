@@ -1,0 +1,137 @@
+{
+ "results": {
+  "MARK1": {
+   "parsed": [
+    {
+     "name": "intro",
+     "time": 2
+    }
+   ],
+   "moveAt": 2,
+   "label": "1 intro",
+   "moved": {
+    "time": 3.5,
+    "moveAt": 3.5,
+    "src": true
+   },
+   "added": [
+    [
+     "intro",
+     3.5
+    ],
+    [
+     null,
+     5
+    ]
+   ],
+   "afterDelete": 1,
+   "lines": 1,
+   "warnings": [],
+   "err": null
+  },
+  "MARK2": {
+   "dragged": 3,
+   "clicked": 3,
+   "snapped": 3,
+   "err": null
+  },
+  "TIMED1": {
+   "at15": [
+    50,
+    0
+   ],
+   "at2": [
+    100,
+    0
+   ],
+   "at25": [
+    100,
+    150
+   ],
+   "at3": [
+    100,
+    300
+   ],
+   "err": null
+  },
+  "DRAWN1": {
+   "half": 0.5,
+   "full": 1,
+   "before": 0,
+   "countHalf": 114,
+   "countFull": 120,
+   "countStart": 0,
+   "err": null
+  },
+  "PENCIL1": {
+   "during": {
+    "time": 1,
+    "sketch": 1
+   },
+   "path": null,
+   "back": 1,
+   "added": 1,
+   "lineInfo": {
+    "className": "Shape",
+    "closed": false,
+    "smooth": true,
+    "fill": "none",
+    "strokeWidth": 3,
+    "points": 3,
+    "writeOn": [
+     {
+      "drawn": 1,
+      "from": 0,
+      "start": 1,
+      "ease": "linear"
+     }
+    ]
+   },
+   "err": null
+  },
+  "STROKE1": {
+   "shape": {
+    "stroke": "#ff00ff",
+    "width": 5
+   },
+   "rect": {
+    "stroke": null,
+    "notice": "Only a Shape has an outline; Convert to shape first"
+   },
+   "end": 3,
+   "change": [
+    {
+     "stroke": "#00ffff",
+     "start": 2,
+     "end": 3
+    }
+   ],
+   "err": null
+  },
+  "PLACE1": {
+   "buttons": [
+    "Rect",
+    "Circle",
+    "Text",
+    "Mask",
+    "Badge"
+   ],
+   "chosen": "test-badge",
+   "placed": {
+    "className": "Circle",
+    "x": 0,
+    "y": 200,
+    "radius": 30
+   },
+   "err": null
+  },
+  "CURSOR1": {
+   "paint": "url(\"data:image/svg+xml,%3Csvg xmlns='ht",
+   "dropper": "url(\"data:image/svg+xml,%3Csvg xmlns='ht",
+   "pencil": "url(\"data:image/svg+xml,%3Csvg xmlns='ht",
+   "distinct": 3,
+   "err": null
+  }
+ },
+ "volatile": {}
+}

@@ -16,7 +16,7 @@ my-animation/
 Omitted keys take these values. The content lasts from 0 to the end of its last action or
 lifetime; `hold`, seconds kept after that, holds the final frame on screen in playback and export:
 an object removed at the content end stays on through the hold.
-`background` is the color inside the frame, behind everything; exports with alpha leave it out.
+`background` is the color behind everything, filling the picture whatever a camera does; exports with alpha leave it out.
 
 ## The scene file
 
@@ -46,7 +46,7 @@ slide = box.move({
 
 ## Coordinates and units
 
-The origin is the center of the camera frame. `x` grows to the right, `y` grows upward. Units are
+The origin is the middle of the scene, where the frame sits unless a camera looks elsewhere (see The camera). `x` grows to the right, `y` grows upward. Units are
 pixels at project resolution. `rotation` is in degrees, counterclockwise; a rotate to 720 turns
 twice, and a negative angle turns the other way. Time is in seconds. Objects draw in cast order:
 a later declaration draws on top of an earlier one.
@@ -62,6 +62,7 @@ Every object has these attributes, with these defaults:
 | `scale` | 1 | size multiplier |
 | `opacity` | 1 | 0 is invisible, 1 solid; see Lifetime and visibility |
 | `fill` | `'#ffffff'` | color, as `'#rrggbb'` |
+| `attached` | false | held on the screen: placed by the picture, not the scene, whatever the camera does; see The camera |
 | `class` | `''` | class names separated by spaces, see Classes |
 | `at` | 0 | when the object begins, in seconds or a time reference; before it the object does not exist |
 | `until` | the end | when the object is removed; omitted, it lasts to the end of the content |
@@ -73,8 +74,9 @@ Every object has these attributes, with these defaults:
 | `Text` | `text` `'Text'`, lines broken by `\n`; `fontSize` 48; `font` `'Segoe UI'`, an installed family or a file in `assets/fonts` by its name; `weight` 400; `italic` false; `align` `'center'`; `lineHeight` 1.2; `letterSpacing` 0. See Text |
 | `Shape` | `points` `[]`, the corners around `x, y`; `curves` `''`, SVG path data, drawn instead of the points when set; `closed` true; `smooth` false; `stroke` `'#ffffff'`, `strokeWidth` 0. See Shapes |
 | `Group` | only these: `members` `''`; `x`, `y` 0, how far the group has shifted its members; `rotation` 0 and `scale` 1, how far it has turned and scaled them; `pivotX`, `pivotY`, what its own rotation and scale pivot on, unset the center of the members' box at time zero. See Groups |
+| `Camera` | only these: `x`, `y` 0, the point of the scene at the middle of the picture; `zoom` 1; `rotation` 0, the roll; `class`, `at`, `until`. It is not drawn. See The camera |
 
-Every class also takes `masks` and `inverted`, which make an object a mask; see Masks.
+Every class but Camera also takes `masks` and `inverted`, which make an object a mask; see Masks.
 
 An omitted attribute takes its default. An unknown attribute is reported and ignored.
 
@@ -428,8 +430,10 @@ opens; a font from the web is such a file put there.
 
 An action of a Text can run on its units instead of the whole: `by: 'char'`, `'word'`, or
 `'line'`, each unit in turn, `stagger` seconds after the one before, 0.05 unless written, or
-the seconds a function of the unit's index gives, `stagger: (i) => 0.04 + (i % 3) / 100`; a
-space is no character. A unit's natural state is no offset, full size, solid, the text's fill,
+the seconds a function of the unit's index gives, `stagger: (i) => 0.04 + (i % 3) / 100`.
+Every character is a unit, a space and the break after a line too, so a character's index is its
+index in the text; a blank draws nothing, and a space belongs to no word. A unit's natural state
+is no offset, full size, solid, the text's fill,
 and its own text: `x`, `y`, and `rotation` are offsets from where it sits, `scale` and
 `opacity` factors on what it is, `fill` its own color, `text` what it shows. Unit actions stack
 as an object's do: the latest begun has the say and begins from what the earlier ones left, or
@@ -444,9 +448,9 @@ its envelope as on an object, the turn held and returned by `hold` and `return` 
 is; so `fill:
 (progress, index, letter, seconds, cycle = 8) => Color.hue(seconds / cycle + index / 12)`
 colors every letter its own hue, the wheel turned once every `cycle` seconds, and `text:
-(progress, index, letter, seconds, count, settle = 2) => (seconds < 0.4 + (index / count) *
-settle ? Text.scramble(index, seconds) : letter)` spins every character from the start and
-lands them one after another. `Color.hue(hue, saturation, lightness)` is a color a fraction of the way round the
+(progress, index, letter, seconds, count, settle = 2) => (letter !== ' ' && seconds < 0.4 +
+(index / count) * settle ? Text.scramble(index, seconds) : letter)` spins every character from
+the start and lands them one after another, the spaces left as they are. `Color.hue(hue, saturation, lightness)` is a color a fraction of the way round the
 wheel, as `'#rrggbb'`; `Text.scramble(index, seconds, alphabet)` a letter or digit that
 changes as the seconds go, the same for the same index and moment. A `path` by unit is its
 shape as changes from the unit's place, `orient` turning the unit. The action lasts until the
@@ -552,7 +556,8 @@ inside an action it cuts it there, the razor's cut; pressed on a key it removes 
 that began there begins where the removed one did. A plain change made after an action's end,
 a drag, a nudge, or a value typed, writes the same new action from that end to the playhead,
 carrying every attribute changed; only the playhead at the end edits the end itself, and before
-any action the declaration is what changes. A Shift-drag is the pinned action at the playhead,
+any action the declaration is what changes. Where a drag's change goes is decided for its place,
+`x` and `y` together, whichever of the two has moved, and only what moved is written. A Shift-drag is the pinned action at the playhead,
 as always, and fills no gap. A right-click on the diamond sets the ease of
 the action that arrives at the key, in the words of the pane; the timeline's clip menu has the
 same under Ease. Two or more clips of one object, selected, merge from the clip's menu into one
@@ -685,9 +690,10 @@ made: the Objects pane and the Selected pane show it with a group's values, and 
 changed or key pressed there writes the group, `group1 = Group({ members: 'a b' })`, and goes to
 it, as a Shift-drag on several objects does; selecting alone writes nothing. The members of a
 group, all selected, are still themselves, not the group: what is done to them as one goes to the
-group they already are, and moving them in time moves them alone. In the timeline a group's clip
-moves and trims everything it carries, its own animations moving with them, and a copy of a group
-copies the objects it carries.
+group they already are. In the timeline a group's clip moves and trims everything it carries, and
+a copy of a group copies the objects it carries. Whatever is moved in time, a group or a class
+whose members all move goes with them, its own animations moving by the same time; one with a
+member left behind stays where it is.
 
 ## Masks
 
@@ -782,6 +788,98 @@ mask hides it; a click rewrites the list the shortest way, a name added or dropp
 under Type, by name. In the preview, Show Masks draws the edges of the masks on what is selected,
 or of every mask when nothing is. In the timeline, masks have a section of their own.
 
+## The camera
+
+A camera frames the picture: what it sees is what an export shows. It is an object, and it is
+not drawn.
+
+```js
+camera = Camera({
+  x: 0,
+  y: 0,
+  zoom: 1,
+})
+
+camera.move({
+  x: 600,
+  at: 1,
+  duration: 2,
+})
+
+camera.to({
+  zoom: 2,
+  at: 3,
+  duration: 1,
+})
+```
+
+| Attribute | Default | Meaning |
+|-----------|---------|---------|
+| `x`, `y` | 0 | the point of the scene at the middle of the picture |
+| `zoom` | 1 | how close: 1 shows the project's size as it is, 2 twice as close, 0.5 twice as much |
+| `rotation` | 0 | the roll, in degrees, counterclockwise; what is seen turns the other way |
+| `class`, `at`, `until` | | as on any object |
+
+A camera has no `scale`, `opacity`, or `fill`. `move`, `rotate`, and `path` act on it as on any
+object, and `to` changes its zoom, alone or with its place. Links work on it too: `x: () => ball.x`
+follows a ball. A scene with no camera shows the frame at the scene's middle, which is what a
+camera at 0, 0 with a zoom of 1 sees, so a scene needs a camera only when the picture moves.
+
+Several cameras: of the cameras alive at a moment, the one declared last has the picture, as a
+later object draws over an earlier one. A cut is a second camera with a life:
+
+```js
+wide = Camera({
+  x: 0,
+  y: 0,
+  zoom: 1,
+})
+
+close = Camera({
+  x: 350,
+  y: 40,
+  zoom: 2,
+  at: 3,
+  until: 5,
+})
+```
+
+`wide` has the picture until 3, `close` from 3 to 5, and `wide` again after it. Each is where it
+is throughout, moving or still, whether or not it has the picture. With no camera alive at a
+moment, the picture is the scene's middle.
+
+Held on the screen: `attached: true` on any object, or on a group for everything it carries,
+places it by the picture instead of the scene. Its `x, y` are from the middle of the picture, in
+the project's pixels, and no camera's move, zoom, or roll changes where it shows. It keeps its
+place in the cast, so one declared early is a backdrop and one declared late an overlay, a title
+or a counter:
+
+```js
+caption = Text({
+  text: 'Chapter one',
+  x: -620,
+  y: -440,
+  attached: true,
+})
+```
+
+`attached` is read when the scene is: it is `true` or left out, never a link, and not animated.
+
+The background: `background` in `project.json` is behind everything and fills the picture
+whatever the camera does.
+
+In the GUI. The preview's header switches what the pane shows: Preview, the scene as it is worked
+on, with the frame of the camera that has the picture drawn in it; Camera, what that camera sees;
+or Both, side by side; C goes to the next. The Camera tool, the last in the palette, moves the
+camera that has the picture at the playhead, and makes one in a scene that has none: in the
+Camera view a drag moves the picture and the wheel zooms; in the Preview view a drag moves the
+frame, a corner zooms, the handle above rolls; Shift makes the change an animation, as with any
+object. With Select, a camera is picked by its frame's line or by its name at the frame's corner.
+The timeline has a Cameras section, the clips stacked as the cast has them and lit where each
+has the picture; the razor on a camera's clip writes a second camera from there, framed as the
+first was at that moment. In the Objects pane the cameras are under Type, and the Layers end in
+the Background, with the project's color. Right-click an object for Attach to screen.
+
 ## Links
 
 An attribute can follow another object's attribute with a function: `x: () => box.x + 20`. It is
@@ -798,7 +896,8 @@ The Selected pane shows an object's values in sections: Lifetime, Position, Size
 then what the class adds under its name; a mask has a Mask section too, its list and `inverted`.
 The Objects pane lists the objects as layers, in drawing order with the top first, where a row
 dragged up or down moves its declaration, or by type, with the groups, the classes, and the masks
-after the kinds; see Masks for what it shows of them. The eye on a row, and Hide in a right-click,
+and the cameras after the kinds, and the Background at the foot of the layers; see Masks and The
+camera for what it shows of them. The eye on a row, and Hide in a right-click,
 hide an object in the view alone: nothing of it is in the file, and an export shows everything,
 unless the preferences leave hidden objects out of exports.
 
@@ -919,4 +1018,4 @@ title.fade({
 ## Coming
 
 orbits (a turn around a point, as its own verb), objects attached to another's path, the motion of a drag kept as a path, `link` actions, `Image`, `Video`, `Line`, `Polygon`,
-object states such as `startsMoving`, per-character text animation, soft edges on any object, the camera, 3D.
+object states such as `startsMoving`, per-character text animation, soft edges on any object, one camera on at several times without a copy, depth for the camera, 3D.

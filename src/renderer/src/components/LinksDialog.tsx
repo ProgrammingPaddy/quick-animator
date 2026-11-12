@@ -78,8 +78,8 @@ interface TargetRow {
   groups?: () => Group[]
 }
 
-/** Never a link target: lifetimes and name lists live elsewhere, and a link to itself would chase its own tail. */
-const NOT_LINKABLE = new Set(['at', 'until', 'class', 'members'])
+/** Never a link target: lifetimes and name lists live elsewhere, a mask's list and whether it is inverted are read when the scene is (D331), and a link to itself would chase its own tail. */
+const NOT_LINKABLE = new Set(['at', 'until', 'class', 'members', 'masks', 'inverted', 'attached'])
 
 function formatShown(value: unknown): string {
   if (typeof value === 'number') return String(Math.round(value * 100) / 100)

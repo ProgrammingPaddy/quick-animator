@@ -1,9 +1,9 @@
 import * as THREE from 'three'
 import { groupMembers } from '../model/groups'
-import { GROUP } from '../model/registry'
+import { CAMERA, GROUP } from '../model/registry'
 import { maskDrawnBy, maskFor, masksOn } from '../model/masks'
 import { hasPathData } from '../model/pathData'
-import { containers, existsAt, groupBox, opacityAt, parseColor, shapePieces, textPadding, textStyleAt, textUnitStates, valueAt, worldPose, type Pose, type ShapePiece } from '../model/sample'
+import { cameraAt, camerasOf, containers, existsAt, groupBox, isAttached, opacityAt, parseColor, shapePieces, textPadding, textStyleAt, textUnitStates, valueAt, viewAt, viewOf, worldPose, type Pose, type ShapePiece } from '../model/sample'
 import { SHAPE } from '../model/registry'
 import { drawText, estimateMeasure, fontSpec, layoutOf, sameUnitStates, textMeasure, unitOverflow, type TextMeasure, type TextStyle, type UnitState } from '../model/text'
 import { fontsVersion } from '../project/fonts'
@@ -53,6 +53,9 @@ const unitPlane = new THREE.PlaneGeometry(1, 1)
 const unitCircle = new THREE.CircleGeometry(0.5, 96)
 /** Canvas pixels per world pixel for text, so it stays crisp when zoomed in. */
 const TEXT_SCALE = 2
+/** The most a Text is drawn closer for a camera that zooms in on it, and the longest side its canvas may have, in pixels (D357). */
+const TEXT_SHARP_MAX = 8
+const TEXT_CANVAS_MAX = 8192
 
 /** One white pixel: what a material multiplies by while no mask hides its object. */
 const UNMASKED = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1)
@@ -699,9 +702,64 @@ function ringGeometry(): THREE.BufferGeometry {
   return new THREE.BufferGeometry().setFromPoints(points)
 }
 
+const cameraLineMaterial = new THREE.MeshBasicMaterial({ color: 0x9a9a9a, depthTest: false, transparent: true, opacity: 0.85 })
+/** The color of the camera that has the picture, wherever it is marked (D358). */
+const cameraLiveMaterial = new THREE.MeshBasicMaterial({ color: 0xeab308, depthTest: false, transparent: true, opacity: 0.95 })
+
+/** The frame of a camera that is alive, over the scene, so it shows whatever is drawn under it (D361): a solid lit line for the one that has the picture, a dashed one for the others. */
+class FrameLine {
+  readonly group = new THREE.Group()
+  private readonly segments: THREE.Mesh[] = []
+
+  set(frame: Frame, pixel: number, live: boolean): void {
+    this.group.visible = true
+    this.group.position.set(frame.x, frame.y, 0)
+    this.group.rotation.z = (frame.rotation * Math.PI) / 180
+    const w = frame.width / 2
+    const h = frame.height / 2
+    const corners = [
+      { x: -w, y: h },
+      { x: w, y: h },
+      { x: w, y: -h },
+      { x: -w, y: -h },
+      { x: -w, y: h },
+    ]
+    const pieces = live ? corners.slice(1).map((b, i) => [corners[i]!, b] as [{ x: number; y: number }, { x: number; y: number }]) : dashes(corners, DASH_PX * pixel, GAP_PX * pixel)
+    while (this.segments.length < pieces.length) {
+      const mesh = new THREE.Mesh(unitPlane, cameraLineMaterial)
+      mesh.renderOrder = ORDER - 2
+      this.group.add(mesh)
+      this.segments.push(mesh)
+    }
+    this.segments.forEach((mesh, i) => {
+      const piece = pieces[i]
+      mesh.visible = !!piece
+      if (!piece) return
+      const [a, b] = piece
+      mesh.material = live ? cameraLiveMaterial : cameraLineMaterial
+      mesh.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, 0.45)
+      mesh.rotation.z = Math.atan2(b.y - a.y, b.x - a.x)
+      // A solid side runs a line's width past its corners, so they meet square.
+      mesh.scale.set(Math.hypot(b.x - a.x, b.y - a.y) + (live ? LINE_PX * pixel : 0), LINE_PX * pixel, 1)
+    })
+  }
+
+  hide(): void {
+    this.group.visible = false
+  }
+}
+
 /** Draws the scene model at a time into a Three.js group, draws the selection gizmo above it, and picks. */
 export class SceneRenderer {
   readonly group = new THREE.Group()
+  /** Everything drawn over the scene for the one working on it, the selection, the handles, the guides, the paths, the edges of masks, the frames of cameras: kept apart, so the scene can be drawn without it (D360). */
+  private readonly overlay = new THREE.Group()
+  /** The project's size, which a camera's frame is cut from (D357). */
+  private composition = { width: 1920, height: 1080 }
+  /** The frames of the cameras alive right now, by name, and which of them has the picture (D358). */
+  private readonly cameraFrames = new Map<string, Frame>()
+  private liveCamera: string | null = null
+  private readonly cameraLines: FrameLine[] = []
   private readonly items = new Map<string, Item>()
   private readonly outlines: Outline[] = []
   private readonly gizmoOutline = new Outline()
@@ -731,8 +789,8 @@ export class SceneRenderer {
   private follow: { name: string; point: { x: number; y: number } } | null = null
   /** Each mask's picture (D337): the meshes that draw it, kept out of the scene and drawn to a texture of their own. */
   private readonly maskRoots = new Map<string, THREE.Group>()
-  /** The textures: one per mask by its name, and one per set of masks that hide an object together. */
-  private readonly maskTargets = new Map<string, THREE.WebGLRenderTarget>()
+  /** The textures, for each renderer that draws the scene, the view's, the Camera view's, an export's: one per mask by its name, and one per set of masks that hide an object together. */
+  private readonly maskTargetsBy = new Map<THREE.WebGLRenderer, Map<string, THREE.WebGLRenderTarget>>()
   /** The size of what is being drawn into, in pixels, which every material reads the mask picture by. */
   private readonly maskSize = { value: new THREE.Vector2(1, 1) }
   /** This frame's masks: the ones that exist now and are on, and for each set of them that hides an object together, what it hides. */
@@ -754,12 +812,63 @@ export class SceneRenderer {
     for (let i = 0; i < RESIZE_HANDLES.length; i++) {
       const marker = new Marker(unitPlane)
       this.resizeHandles.push(marker)
-      this.group.add(marker.group)
+      this.overlay.add(marker.group)
     }
     this.stem = new THREE.Mesh(unitPlane, lightMaterial)
     this.stem.renderOrder = ORDER + 1
     this.stem.visible = false
-    this.group.add(this.gizmoOutline.group, this.rotateRing, this.rotateHandle.group, this.anchorCross.group, this.stem, this.guides.group, this.pathLine.group, this.shapeHandles.group)
+    this.overlay.add(this.gizmoOutline.group, this.rotateRing, this.rotateHandle.group, this.anchorCross.group, this.stem, this.guides.group, this.pathLine.group, this.shapeHandles.group)
+    this.group.add(this.overlay)
+  }
+
+  /** The project's size (D357): what a camera's frame is cut from. */
+  setComposition(width: number, height: number): void {
+    this.composition = { width, height }
+  }
+
+  /** The cameras alive right now, with the frame each cuts from the scene, and whether it has the picture (D358, D361). */
+  cameras(): { name: string; frame: Frame; live: boolean }[] {
+    return [...this.cameraFrames].map(([name, frame]) => ({ name, frame, live: name === this.liveCamera }))
+  }
+
+  /** The camera whose frame's line runs within `reach` of a place in the scene, the nearest when several do, or null (D361): a camera is picked by its line, never by what it frames. */
+  pickCamera(world: { x: number; y: number }, reach: number): string | null {
+    let best: string | null = null
+    let bestDistance = Infinity
+    for (const [name, f] of this.cameraFrames) {
+      const a = (-f.rotation * Math.PI) / 180
+      const dx = world.x - f.x
+      const dy = world.y - f.y
+      const ox = Math.abs(dx * Math.cos(a) - dy * Math.sin(a)) - f.width / 2
+      const oy = Math.abs(dx * Math.sin(a) + dy * Math.cos(a)) - f.height / 2
+      const distance = ox <= 0 && oy <= 0 ? Math.min(-ox, -oy) : Math.hypot(Math.max(ox, 0), Math.max(oy, 0))
+      if (distance <= reach && distance < bestDistance) {
+        best = name
+        bestDistance = distance
+      }
+    }
+    return best
+  }
+
+  /** The textures one renderer's drawings read the masks from. */
+  private targetsOf(renderer: THREE.WebGLRenderer): Map<string, THREE.WebGLRenderTarget> {
+    let targets = this.maskTargetsBy.get(renderer)
+    if (!targets) {
+      targets = new Map()
+      this.maskTargetsBy.set(renderer, targets)
+    }
+    return targets
+  }
+
+  /**
+   * Draw the scene as last updated through a camera, with nothing of the gizmos (D360): what the
+   * Camera view shows, the masks' pictures made for it first.
+   */
+  drawThrough(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    this.overlay.visible = false
+    this.renderMasks(renderer, camera)
+    renderer.render(this.group, camera)
+    this.overlay.visible = true
   }
 
   /** Where a mask's picture is kept: its objects' meshes, apart from the scene. */
@@ -803,7 +912,7 @@ export class SceneRenderer {
       )
       edge.renderOrder = ORDER - 1
       edge.visible = false
-      this.group.add(edge)
+      this.overlay.add(edge)
       this.maskEdges.push(edge)
     }
     return this.maskEdges[index]!
@@ -871,6 +980,7 @@ export class SceneRenderer {
    * this just before: the view, and the export.
    */
   renderMasks(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    const targets = this.targetsOf(renderer)
     const needed = new Set<Mask>()
     for (const set of this.maskSets.values()) for (const mask of set.masks) needed.add(mask)
     for (const { mask } of this.outlined) needed.add(mask)
@@ -879,10 +989,10 @@ export class SceneRenderer {
       const size = renderer.getDrawingBufferSize(this.maskSize.value)
       const target = (key: string, samples: number): THREE.WebGLRenderTarget => {
         used.add(key)
-        let t = this.maskTargets.get(key)
+        let t = targets.get(key)
         if (!t) {
           t = new THREE.WebGLRenderTarget(size.x, size.y, { samples, depthBuffer: false, stencilBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, generateMipmaps: false })
-          this.maskTargets.set(key, t)
+          targets.set(key, t)
         } else if (t.width !== size.x || t.height !== size.y) t.setSize(size.x, size.y)
         return t
       }
@@ -898,7 +1008,7 @@ export class SceneRenderer {
       }
       for (const [key, set] of this.maskSets) {
         const only = set.masks[0]!
-        let picture = this.maskTargets.get(only.name)!.texture
+        let picture = targets.get(only.name)!.texture
         if (set.masks.length > 1 || only.inverted) {
           // A name holds no space, so a set's key is no mask's.
           const joined = target(`set ${key}`, 0)
@@ -908,7 +1018,7 @@ export class SceneRenderer {
           renderer.autoClear = false
           joinMaterial.uniforms['size']!.value.copy(size)
           for (const mask of set.masks) {
-            joinMaterial.uniforms['map']!.value = this.maskTargets.get(mask.name)!.texture
+            joinMaterial.uniforms['map']!.value = targets.get(mask.name)!.texture
             joinMaterial.uniforms['inverted']!.value = mask.inverted ? 1 : 0
             renderer.render(joinQuad, screenCamera)
           }
@@ -940,15 +1050,15 @@ export class SceneRenderer {
       edge.position.set((box.left + box.right) / 2, (box.top + box.bottom) / 2, 0.55)
       edge.scale.set(box.right - box.left + 2 * margin, box.top - box.bottom + 2 * margin, 1)
       const uniforms = (edge.material as THREE.ShaderMaterial).uniforms
-      uniforms['map']!.value = this.maskTargets.get(mask.name)!.texture
+      uniforms['map']!.value = targets.get(mask.name)!.texture
       uniforms['ratio']!.value = renderer.getPixelRatio()
       uniforms['strength']!.value = strength
     })
     for (let i = this.outlined.length; i < this.maskEdges.length; i++) this.maskEdges[i]!.visible = false
-    for (const [key, t] of this.maskTargets) {
+    for (const [key, t] of targets) {
       if (used.has(key)) continue
       t.dispose()
-      this.maskTargets.delete(key)
+      targets.delete(key)
     }
   }
 
@@ -959,14 +1069,14 @@ export class SceneRenderer {
 
   /** Let go of the mask pictures. */
   dispose(): void {
-    for (const t of this.maskTargets.values()) t.dispose()
-    this.maskTargets.clear()
+    for (const targets of this.maskTargetsBy.values()) for (const t of targets.values()) t.dispose()
+    this.maskTargetsBy.clear()
   }
 
   private outline(index: number): Outline {
     while (this.outlines.length <= index) {
       const outline = new Outline()
-      this.group.add(outline.group)
+      this.overlay.add(outline.group)
       this.outlines.push(outline)
     }
     return this.outlines[index]!
@@ -986,7 +1096,8 @@ export class SceneRenderer {
     const seen = new Set<string>()
     if (model) {
       model.objects.forEach((obj, index) => {
-        if (obj.className === GROUP) return
+        // A group and a camera draw nothing of their own (D124, D357).
+        if (obj.className === GROUP || obj.className === CAMERA) return
         seen.add(obj.name)
         const item = this.ensure(obj)
         // A mask's picture is drawn apart, to a texture of its own, and nowhere else (D337).
@@ -1020,11 +1131,34 @@ export class SceneRenderer {
     }
     this.planMasks(model, time, keepAliveFrom)
 
+    // The cameras alive now, each with the frame it cuts from the scene (D357, D361): its line over the scene, solid and lit for the one that has the picture, which is the view's own frame, dashed for the others.
+    this.cameraFrames.clear()
+    this.liveCamera = null
+    if (model) {
+      this.liveCamera = cameraAt(model, time, keepAliveFrom)?.name ?? null
+      for (const camera of camerasOf(model)) {
+        if (!existsAt(model, camera, time) && !(keepAliveFrom !== undefined && existsAt(model, camera, keepAliveFrom))) continue
+        const v = viewOf(model, camera, time)
+        this.cameraFrames.set(camera.name, { x: v.x, y: v.y, rotation: v.rotation, width: this.composition.width / v.zoom, height: this.composition.height / v.zoom })
+      }
+    }
+    const dashed = [...this.cameraFrames]
+    while (this.cameraLines.length < dashed.length) {
+      const line = new FrameLine()
+      this.overlay.add(line.group)
+      this.cameraLines.push(line)
+    }
+    this.cameraLines.forEach((line, i) => {
+      const entry = dashed[i]
+      if (entry) line.set(entry[1], pixel, entry[0] === this.liveCamera)
+      else line.hide()
+    })
+
     // An anchored object wears a small diamond at its center, so what a push cannot move is seen (D161).
     const pinned = anchored.filter((n) => this.shown(n))
     while (this.anchorMarks.length < pinned.length) {
       const mark = new Marker(unitPlane)
-      this.group.add(mark.group)
+      this.overlay.add(mark.group)
       this.anchorMarks.push(mark)
     }
     this.anchorMarks.forEach((mark, i) => {
@@ -1122,7 +1256,7 @@ export class SceneRenderer {
   setOtherPaths(curves: { points: { x: number; y: number }[]; dashed: boolean }[], pixel: number): void {
     while (this.otherLines.length < curves.length) {
       const line = new PathLine()
-      this.group.add(line.group)
+      this.overlay.add(line.group)
       this.otherLines.push(line)
     }
     this.otherLines.forEach((line, i) => {
@@ -1163,6 +1297,8 @@ export class SceneRenderer {
 
   /** Whether an object draws anything right now: its fill, or a Shape's stroke alone (D238). */
   private shown(name: string): boolean {
+    // A camera shows as its frame while it is alive (D361).
+    if (this.cameraFrames.has(name)) return true
     const item = this.items.get(name)
     return !!item && (item.mesh.visible || !!item.stroke?.visible)
   }
@@ -1179,6 +1315,9 @@ export class SceneRenderer {
   }
 
   frameOf(name: string): Frame | null {
+    // A camera's frame is what it cuts from the scene (D357).
+    const framed = this.cameraFrames.get(name)
+    if (framed) return framed
     const item = this.items.get(name)
     if (item) {
       // A Shape with no fill is its stroke (D238).
@@ -1455,7 +1594,13 @@ export class SceneRenderer {
     const color = parseColor(fill) ? fill : '#ffffff'
     // Redrawn when the look or the characters' states change, not for every frame of a unit animation that leaves them still.
     const still = item.drawnStates !== undefined && sameUnitStates(item.drawnStates, states)
-    const key = [layout.width, layout.height, style.text, style.fontSize, style.font, style.weight, style.italic, style.align, style.lineHeight, style.letterSpacing, color, fontsVersion.current].join('\u0000')
+    // A camera closer than the scene's own size magnifies the picture of the text: it is drawn for the next doubling at or past that zoom, so it is redrawn at a few zooms and not at every frame of one (D357). Held on the screen, no camera magnifies it.
+    const zoom = isAttached(model, obj) ? 1 : viewAt(model, time).zoom
+    const pad0 = textPadding(style)
+    const longest = Math.max(layout.width, layout.height) + 2 * pad0
+    const sharp = zoom <= 1 ? 1 : Math.max(1, Math.min(TEXT_SHARP_MAX, 2 ** Math.ceil(Math.log2(zoom) - 1e-9), Math.floor(TEXT_CANVAS_MAX / (longest * TEXT_SCALE))))
+    const scale = TEXT_SCALE * sharp
+    const key = [layout.width, layout.height, style.text, style.fontSize, style.font, style.weight, style.italic, style.align, style.lineHeight, style.letterSpacing, color, fontsVersion.current, sharp].join('\u0000')
     if (item.textKey === key && still) return
     item.textKey = key
     item.drawnStates = states
@@ -1465,8 +1610,8 @@ export class SceneRenderer {
     const over = states ? unitOverflow(layout, states) : { x: 0, y: 0 }
     const marginX = pad + over.x
     const marginY = pad + over.y
-    const width = Math.max(1, Math.ceil((layout.width + 2 * marginX) * TEXT_SCALE))
-    const height = Math.max(1, Math.ceil((layout.height + 2 * marginY) * TEXT_SCALE))
+    const width = Math.max(1, Math.ceil((layout.width + 2 * marginX) * scale))
+    const height = Math.max(1, Math.ceil((layout.height + 2 * marginY) * scale))
     const material = item.mesh.material as THREE.MeshBasicMaterial
     let canvas = item.textCanvas
     if (!canvas || canvas.width !== width || canvas.height !== height) {
@@ -1486,9 +1631,9 @@ export class SceneRenderer {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     ctx.clearRect(0, 0, width, height)
-    drawText(ctx, layout, color, states, TEXT_SCALE, marginX, marginY)
+    drawText(ctx, layout, color, states, scale, marginX, marginY)
     if (material.map) material.map.needsUpdate = true
-    item.drawn = { width: width / TEXT_SCALE, height: height / TEXT_SCALE }
+    item.drawn = { width: width / scale, height: height / scale }
   }
 }
 

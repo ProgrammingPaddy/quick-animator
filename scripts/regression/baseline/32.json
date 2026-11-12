@@ -1,0 +1,200 @@
+{
+ "results": {
+  "PRIO1": {
+   "before": {
+    "at05": [
+     -278,
+     0
+    ],
+    "at15": [
+     -105,
+     100
+    ],
+    "at19": [
+     -5,
+     195
+    ],
+    "at3": [
+     211,
+     0
+    ],
+    "at5": [
+     300,
+     0
+    ],
+    "acts": [
+     [
+      "move",
+      0,
+      4
+     ],
+     [
+      "move",
+      1,
+      2
+     ]
+    ]
+   },
+   "after": {
+    "order": true,
+    "selected": [
+     {
+      "object": "p",
+      "index": 0
+     }
+    ],
+    "at15": [
+     -107,
+     0
+    ],
+    "at3": [
+     211,
+     0
+    ],
+    "at5": [
+     300,
+     0
+    ],
+    "acts": [
+     [
+      "move",
+      1,
+      2
+     ],
+     [
+      "move",
+      0,
+      4
+     ]
+    ]
+   },
+   "defining": 0,
+   "undone": true,
+   "err": null
+  },
+  "LANES2": {
+   "stacked": true,
+   "during": [
+    [
+     "p:0",
+     759
+    ],
+    [
+     "p:1",
+     725
+    ]
+   ],
+   "after": [
+    [
+     "p:0",
+     "bmove"
+    ],
+    [
+     "p:1",
+     "amove"
+    ]
+   ],
+   "order": true,
+   "selected": [
+    {
+     "object": "p",
+     "index": 0
+    }
+   ],
+   "y15": 0,
+   "err": null
+  },
+  "TOOLS2": {
+   "selectModes": [
+    "Transform",
+    "Move",
+    "Rotate",
+    "Resize"
+   ],
+   "objectModes": [
+    "Rect",
+    "Circle",
+    "Text",
+    "Mask"
+   ],
+   "pathModes": [
+    "Edit",
+    "Move path"
+   ],
+   "pressedObject": {
+    "selected": [
+     {
+      "object": "p",
+      "index": 0
+     }
+    ],
+    "points": [
+     [
+      -300,
+      0
+     ],
+     [
+      0,
+      200
+     ],
+     [
+      300,
+      0
+     ]
+    ]
+   },
+   "tail": {
+    "points": [
+     [
+      -300,
+      0
+     ],
+     [
+      0,
+      200
+     ],
+     [
+      310,
+      10
+     ]
+    ],
+    "count": 3
+   },
+   "movedAll": [
+    [
+     -280,
+     20
+    ],
+    [
+     20,
+     220
+    ],
+    [
+     330,
+     30
+    ]
+   ],
+   "tool": "select",
+   "err": null
+  },
+  "SHOW1": {
+   "objectOn": 2,
+   "objectOff": 0,
+   "selectedOff": 1,
+   "selectedOn": 2,
+   "pathTool": 2,
+   "hidden": {
+    "lines": 1,
+    "keys": [
+     "p:1"
+    ]
+   },
+   "cleared": 0,
+   "err": null
+  },
+  "OFF": {
+   "tool": "select"
+  }
+ },
+ "volatile": {}
+}

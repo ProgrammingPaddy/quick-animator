@@ -1,0 +1,102 @@
+{
+ "results": {
+  "DESELECT1": {
+   "before": {
+    "mode": "edit",
+    "selected": [
+     "poly"
+    ]
+   },
+   "after": {
+    "selected": [],
+    "points": [],
+    "tool": "shape"
+   },
+   "err": null
+  },
+  "EDGES1": {
+   "edges": [
+    0,
+    1,
+    2,
+    2.5,
+    3
+   ],
+   "steps": [
+    1,
+    2,
+    2.5,
+    3,
+    null,
+    null
+   ],
+   "back": 2,
+   "keyNext": 2,
+   "keyPrev": 1,
+   "links": [
+    "0:01:00",
+    "0:02:00"
+   ],
+   "linkEnd": 2,
+   "err": null
+  },
+  "HOTKEY1": {
+   "spacePlays": true,
+   "spaceAfter": false,
+   "pAfter": true,
+   "pReset": false,
+   "spaceReset": true,
+   "saved": {},
+   "err": null
+  },
+  "PREFS1": {
+   "tabs": [
+    "General",
+    "Hotkeys"
+   ],
+   "rowCount": 40,
+   "scopes": [
+    "Everywhere",
+    "Preview",
+    "Timeline",
+    "Code"
+   ],
+   "conflicts": [
+    [
+     "Duplicate",
+     "Also Select all"
+    ],
+    [
+     "Select all",
+     "Also Duplicate"
+    ]
+   ],
+   "chips": 1,
+   "resets": 1,
+   "fixed": 13,
+   "err": null
+  },
+  "TITLEBAR1": {
+   "actions": [
+    "File ▾",
+    "Preferences",
+    "Help"
+   ],
+   "items": [
+    "Open",
+    "New",
+    "Import",
+    "Export Ctrl+E"
+   ],
+   "icons": [
+    "Undo",
+    "Redo"
+   ],
+   "titles": [
+    "Undo (Ctrl+Z)",
+    "Redo (Ctrl+Shift+Z, Ctrl+Y)"
+   ]
+  }
+ },
+ "volatile": {}
+}

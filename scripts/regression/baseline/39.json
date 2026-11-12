@@ -1,0 +1,447 @@
+{
+ "results": {
+  "SHAPE1": {
+   "model": {
+    "tri": 3,
+    "star": 10,
+    "blobCurve": 97,
+    "lineOpen": false,
+    "warnings": [],
+    "err": null
+   },
+   "frames": {
+    "tri": [
+     -300,
+     0,
+     120,
+     100
+    ],
+    "line": [
+     300,
+     0,
+     206,
+     106
+    ],
+    "blob": [
+     0,
+     -252,
+     169,
+     109
+    ],
+    "star": [
+     0,
+     250,
+     152,
+     145
+    ]
+   },
+   "picks": {
+    "triInside": "tri",
+    "triAbove": null,
+    "lineApex": "line",
+    "lineGap": null,
+    "starCenter": "star"
+   },
+   "glyph": "M8 2.2l5.6 4.2-2.1 6.6H4.5L2.4 6.4z",
+   "pane": {
+    "points": "[[0, 60], [-60, -40], [60, -40]]",
+    "status": "3 points",
+    "closed": true,
+    "stroke": true,
+    "handlesInSelect": 0
+   },
+   "stopped": {
+    "boxY": 80,
+    "above": true
+   },
+   "err": null
+  },
+  "CENTER1": {
+   "world": [
+    [
+     -50,
+     -50
+    ],
+    [
+     50,
+     -50
+    ],
+    [
+     0,
+     50
+    ]
+   ],
+   "frame0": [
+    0,
+    0,
+    100,
+    100
+   ],
+   "turned": {
+    "frame": [
+     0,
+     0,
+     100,
+     100
+    ],
+    "world": [
+     [
+      50,
+      -50
+     ],
+     [
+      50,
+      50
+     ],
+     [
+      -50,
+      0
+     ]
+    ]
+   },
+   "after": [
+    [
+     -90,
+     -50
+    ],
+    [
+     50,
+     -50
+    ],
+    [
+     0,
+     50
+    ]
+   ],
+   "written": {
+    "points": [
+     [
+      60,
+      100
+     ],
+     [
+      200,
+      100
+     ],
+     [
+      150,
+      200
+     ]
+    ],
+    "x": -20,
+    "y": 0,
+    "center": {
+     "x": 130,
+     "y": 150
+    }
+   },
+   "err": null
+  },
+  "DRAW1": {
+   "hint0": "Click to start a shape",
+   "hint1": "Click for corners, drag to draw; the first point closes and fills, Escape leaves a line",
+   "open": {
+    "count": 3,
+    "closed": false,
+    "strokeWidth": 3
+   },
+   "closed": {
+    "x": 200,
+    "y": 200,
+    "curves": "\n    M -100 -100\n    L 100 -100\n    L 100 100\n    Z\n  ",
+    "closed": true,
+    "stroke": "#ffffff",
+    "tool": "shape",
+    "hint": "Click to start a shape"
+   },
+   "line": {
+    "x": -400,
+    "y": 250,
+    "curves": "\n    M -100 -50\n    L 100 50\n  ",
+    "closed": false,
+    "strokeWidth": 3,
+    "tool": "select"
+   },
+   "drawn": {
+    "count": 3,
+    "cubics": 2
+   },
+   "entered": {
+    "closed": true,
+    "count": 3,
+    "tool": "shape"
+   },
+   "objects": [
+    "b",
+    "c",
+    "shape1",
+    "shape2",
+    "shape3"
+   ],
+   "err": null
+  },
+  "EDIT3": {
+   "selectHandles": 0,
+   "handles": 3,
+   "moved": {
+    "points": [
+     [
+      0,
+      130
+     ],
+     [
+      -60,
+      -40
+     ],
+     [
+      60,
+      -40
+     ]
+    ],
+    "x": -300,
+    "y": 35,
+    "world": [
+     [
+      -300,
+      120
+     ],
+     [
+      -360,
+      -50
+     ],
+     [
+      -240,
+      -50
+     ]
+    ],
+    "othersKept": true
+   },
+   "inserted": {
+    "count": 4,
+    "points": [
+     [
+      0,
+      130
+     ],
+     [
+      -60,
+      -40
+     ],
+     [
+      0,
+      -80
+     ],
+     [
+      60,
+      -40
+     ]
+    ]
+   },
+   "picked": [
+    1
+   ],
+   "deleted": {
+    "count": 3,
+    "picked": []
+   },
+   "pointMenu": [
+    "Smooth point",
+    "Delete point"
+   ],
+   "bodyMenu": [
+    "Jump to code",
+    "Rename",
+    "Shape▸",
+    "Path▸",
+    "Save preset",
+    "Classes",
+    "Mask▸",
+    "Hide",
+    "Attach to screen",
+    "Collision▸",
+    "Duplicate",
+    "Delete"
+   ],
+   "toggled": {
+    "closed": true,
+    "smooth": true,
+    "frameClosed": false
+   },
+   "err": null
+  },
+  "CONVERT1": {
+   "before": {
+    "b": [
+     -300,
+     0,
+     200,
+     100
+    ],
+    "c": [
+     300,
+     0,
+     120,
+     120
+    ]
+   },
+   "after": {
+    "b": {
+     "className": "Shape",
+     "points": [
+      [
+       -100,
+       -50
+      ],
+      [
+       100,
+       -50
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       -100,
+       50
+      ]
+     ],
+     "frame": [
+      -300,
+      0,
+      200,
+      100
+     ]
+    },
+    "c": {
+     "className": "Shape",
+     "curves": 4,
+     "frame": [
+      300,
+      0,
+      120,
+      120
+     ]
+    },
+    "src": true,
+    "warnings": 0
+   },
+   "gen": {
+    "rect": [
+     [
+      -100,
+      -60
+     ],
+     [
+      100,
+      -60
+     ],
+     [
+      100,
+      60
+     ],
+     [
+      -100,
+      60
+     ]
+    ],
+    "polygon": 6,
+    "circle": 4,
+    "star": 10,
+    "marks": 4,
+    "frameA": [
+     -400,
+     0,
+     200,
+     120
+    ],
+    "err": null
+   },
+   "err": null
+  },
+  "RESIZE2": {
+   "scaled": {
+    "points": [
+     [
+      0,
+      50
+     ],
+     [
+      -90,
+      -50
+     ],
+     [
+      90,
+      -50
+     ]
+    ],
+    "x": -270,
+    "y": 0,
+    "width": 180,
+    "height": 100,
+    "leftBefore": -360,
+    "leftAfter": -360
+   },
+   "starScaled": {
+    "scale": 1.28,
+    "src": true
+   },
+   "err": null
+  },
+  "TOOL1": {
+   "kinds": [
+    "Rect",
+    "Circle",
+    "Text",
+    "Mask"
+   ],
+   "modes": [
+    "Create",
+    "Edit"
+   ],
+   "palette": [
+    "Select",
+    "Object",
+    "Path",
+    "Shape",
+    "Pencil",
+    "Paint",
+    "Camera"
+   ],
+   "tools": [
+    "Object",
+    "Group",
+    "Class",
+    "Starts at playhead",
+    "Chain",
+    "Grid",
+    "Show Paths",
+    "Show Masks",
+    "Edges",
+    "Collision",
+    "38%",
+    "Fit"
+   ],
+   "nowEmpty": "Nothing selected.",
+   "empties": {
+    "objects": "No objects yet."
+   },
+   "prefs": {
+    "labels": [
+     "Object default duration",
+     "Final frame hold",
+     "Hidden objects",
+     "Code pane",
+     "Recent colors",
+     "Timeline",
+     "Timeline sections"
+    ],
+    "note": false
+   },
+   "err": null
+  },
+  "OFF": {
+   "tool": "select"
+  }
+ },
+ "volatile": {}
+}

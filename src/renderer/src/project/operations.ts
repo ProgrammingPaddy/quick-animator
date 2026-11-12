@@ -3,16 +3,16 @@ import { findDependents, type Dependent } from '../model/dependents'
 import { appendStatement, blockText, formatNumber, formatValue, insertDeclaration, lineEdit, moveStatementEdits, removeProp, removeStatements, setProp, setPropFrom, setPropText, setTimeProp, type TextEdit } from '../model/edits'
 import { DEFAULT_EASE_FRACTION, namedEasings } from '../model/easing'
 import { isMember } from '../model/evaluate'
-import { activeMembers, groupFor, groupMembers, memberRef, normalizeSelection, withCarried } from '../model/groups'
+import { activeMembers, classSpan, groupFor, groupMembers, memberRef, movedInTime, normalizeSelection, withCarried } from '../model/groups'
 import { isMaskList, MASK_BELOW, maskDrawnBy, maskFor, maskNamed, maskWord, scopeRenamed, scopeWith } from '../model/masks'
-import { attrSchema, classes, EASE_NAMES, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
+import { attrSchema, CAMERA, classes, EASE_NAMES, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
 import { absoluteAt, actionCourse, anchorTime, memberBox, pathCutAt, pathFrame, pathHolds, pathShift, pointsCenter, positionAt, progressAt, rawFromWorld, morphInForce, morphRunning, morphTargetSegs, shapeCurves, shapeOwnFromWorld, shapeOwnPoints, shapeSegsAt, travelFrame, type Point, type ShapePiece } from '../model/sample'
 import { anchorCurved, anchorKind, closePath, cornerAnchors, curveSegment, dragAnchorHandle, ellipsePathData, flattenPathData, formatCurves, hasPathData, moveAnchor, openPath, parsePathData, pathAnchors, pathDataBounds, polygonPathData, removeAnchor, scalePathData, segmentKind, serializePathData, smoothAnchors, smoothPathData, splitSegment, straightenAll, straightenAnchors, straightenSegment, translatePathData, type Anchor, type AnchorKind, type Seg } from '../model/pathData'
 import { insertPointsEdit, pointText, removePointEdit, setPointEdit, shapeLiteral, stringLiteral, type ShapeLiteral } from '../model/pathEdits'
 import { readSvg, scaleImported, type ImportedItem } from './svgImport'
 import { identifierEdits, nameProblem, renameMembers, replaceIdentifiers } from '../model/rename'
 import { currentWritten, definingAction, shownValue, valueAt, withWritten, writesFrom, writtenValues } from '../model/sample'
-import { begun, containers, journeyOf, ownBounds, unitTurns, worldPose, writtenSpan } from '../model/sample'
+import { begun, cameraAt, camerasOf, containers, journeyOf, NO_VIEW, ownBounds, unitTurns, viewOf, worldPose, writtenSpan, type View } from '../model/sample'
 import type { Action, ActionInfo, BlockInfo, ClassAction, Mask, PropInfo, Range, SceneModel, SceneObject } from '../model/types'
 import { useStore, type ActionRef, type Clip, type ClipAction, type ClipObject, type MenuItem, type Pin, type SelectionState, type ObjectKind } from '../state/store'
 
@@ -73,9 +73,9 @@ export function uniqueName(base: string, from = 1): string {
   return `${base}${n}`
 }
 
-/** How a written number is rounded: whole pixels, tenths of a degree, hundredths for factors. */
+/** How a written number is rounded: whole pixels, tenths of a degree, hundredths for factors, a camera's zoom among them. */
 function roundAttr(attr: string, value: number): number {
-  if (attr === 'scale' || attr === 'opacity') return Math.round(value * 100) / 100
+  if (attr === 'scale' || attr === 'opacity' || attr === 'zoom') return Math.round(value * 100) / 100
   if (attr === 'rotation') return Math.round(value * 10) / 10
   return Math.round(value)
 }
@@ -101,8 +101,9 @@ export function frameSeconds(fps: number): number {
 
 /** The dimension attributes the GUI writes for a class of object: width and height when it has them, else what it has. */
 export function resizeAttrs(className: string): string[] {
-  // A group resizes by scaling around its anchor (D124).
+  // A group resizes by scaling around its anchor (D124); a camera's frame is sized by its zoom (D361).
   if (className === GROUP) return ['scale']
+  if (className === CAMERA) return ['zoom']
   const has = (a: string) => classes[className]?.attrs.some((s) => s.name === a)
   if (has('width') && has('height')) return ['width', 'height']
   return RESIZE_ATTRS.filter(has)
@@ -128,6 +129,8 @@ export function verbFor(attrs: string[]): Verb {
 export function resizedValues(className: string, base: Record<string, number>, fx: number, fy: number): Record<string, number> {
   const uniform = Math.abs(fx - 1) >= Math.abs(fy - 1) ? fx : fy
   if (className === GROUP) return { scale: (base['scale'] || 1) * uniform }
+  // A camera's frame made larger shows more: the zoom goes the other way (D361).
+  if (className === CAMERA) return { zoom: (base['zoom'] || 1) / (uniform || 1) }
   if (className === 'Rect' || className === 'Circle') return { width: (base['width'] ?? 0) * fx, height: (base['height'] ?? 0) * fy }
   if (className === 'Text') return { fontSize: (base['fontSize'] ?? 0) * uniform }
   return {}
@@ -155,6 +158,59 @@ export function addObject(className: ObjectKind, x: number, y: number, at = stat
   // A Shape's points stay folded until wanted (D204, D244).
   if (className === SHAPE) foldShapes()
   return name
+}
+
+/** A new camera's block (D250, D361): where it looks and how close, its roll when it has one, and when it begins and ends when that is not the whole scene. */
+function cameraBlock(name: string, view: View, at: number, until: number | null): string {
+  const attrs: Record<string, AttrValue> = { x: Math.round(view.x), y: Math.round(view.y), zoom: roundAttr('zoom', view.zoom) }
+  if (Math.abs(view.rotation) >= 0.05) attrs['rotation'] = roundAttr('rotation', view.rotation)
+  if (at > 0) attrs['at'] = roundSeconds(at)
+  if (until !== null) attrs['until'] = roundSeconds(until)
+  return blockText(`${name} = ${CAMERA}`, attrs)
+}
+
+/**
+ * The camera the Camera tool moves (D361): the one that has the picture at the playhead. A scene
+ * with no camera gets one, framing the scene as it is, so nothing changes until it is moved.
+ * Null, with a word why, when there are cameras and none is alive here, or the one that is comes
+ * from code.
+ */
+export function cameraInHand(): string | null {
+  const { model, time } = state()
+  if (!model) return null
+  const live = cameraAt(model, time)
+  if (live) {
+    if (live.decl && !live.codeDriven) return live.name
+    useStore.getState().setNotice(`${live.name} is made by code: edit it in the code pane.`)
+    return null
+  }
+  if (camerasOf(model).length > 0) {
+    useStore.getState().setNotice('No camera at the playhead.')
+    return null
+  }
+  const name = freeName('camera')
+  applyEdits([insertDeclaration(model.lastDeclEnd, cameraBlock(name, NO_VIEW, 0, null))], objectsSelected([name]))
+  return name
+}
+
+/**
+ * The razor on a camera's clip (D363): a second camera from there, framing what the first frames
+ * at that moment, declared right after it, so it is over it, and lasting as long. Nothing shows
+ * until it is reframed, and then it is a cut. Returns its name.
+ */
+export function cutCamera(name: string, at: number): string | null {
+  const { model, fps } = state()
+  const camera = model?.objects.find((o) => o.name === name && o.className === CAMERA)
+  if (!model || !camera?.decl || camera.codeDriven) return null
+  const slack = frameSeconds(fps) / 2
+  if (at <= camera.at + slack || (camera.until !== null && at >= camera.until - slack)) {
+    useStore.getState().setNotice('A cut at the edge of a clip changes nothing.')
+    return null
+  }
+  const copy = numberedCopies(model, [name], 2)[name]!
+  const end = camera.decl.range.to
+  applyEdits([{ from: end, to: end, insert: `\n\n${cameraBlock(copy, viewOf(model, camera, at), at, camera.until)}` }], objectsSelected([copy]))
+  return copy
 }
 
 /**
@@ -198,17 +254,18 @@ function midAnimationStart(name: string, attrs: string[], time: number): number 
  * another of the edit's values is still in the middle of something: a path that carries the
  * other axis, whose own end would not show at this time (D313, D224), or the animation the piece
  * was cut from, which would otherwise get a second piece (D318), or a value no animation defines
- * at all (D328). The animation that ends here
- * takes those values on, as they show, so what is written next goes to it. Null when there is
- * nothing to take on.
+ * at all (D328), or one whose own animation was over by the time this one began (D356). The
+ * animation that ends here takes those values on, as they show, so what is written next goes to
+ * it. It is looked for among what decides with the edit as well, `together`: a place is one
+ * thing, so the animation that moved the other axis counts. Null when there is nothing to take on.
  */
-function axesToJoin(name: string, attrs: string[], time: number): { ref: ActionRef; values: Record<string, number> } | null {
+function axesToJoin(name: string, attrs: string[], time: number, together: string[] = []): { ref: ActionRef; values: Record<string, number> } | null {
   const { model, fps } = state()
   const obj = model?.objects.find((o) => o.name === name)
   if (!model || !obj?.decl) return null
   const slack = frameSeconds(fps) / 2
   const inside = (a: Action): boolean => time > a.start + slack && time < a.end - slack
-  const piece = attrs.map((attr) => definingAction(obj, attr, time)).find((a) => !!a?.stmt && !a.classAction && a.verb !== 'path' && !a.timing.relative && Math.abs(a.end - time) <= slack)
+  const piece = [...attrs, ...together].map((attr) => definingAction(obj, attr, time)).find((a) => !!a?.stmt && !a.classAction && a.verb !== 'path' && !a.timing.relative && Math.abs(a.end - time) <= slack)
   if (!piece) return null
   const values: Record<string, number> = {}
   for (const attr of attrs) {
@@ -218,9 +275,10 @@ function axesToJoin(name: string, attrs: string[], time: number): { ref: ActionR
     const path = attr === 'x' || attr === 'y' ? pathHolds(obj, attr, time) : null
     const definer = definingAction(obj, attr, time)
     const sameCut = !!definer?.stmt && !definer.classAction && definer.verb !== 'path' && inside(definer) && Math.abs(definer.start - piece.start) <= slack
-    // A value no animation defines joins too (D328): a plain change at a key's time belongs to the key, not to the declaration.
+    // A value no animation defines joins too (D328): a plain change at a key's time belongs to the key, not to the declaration. So does one whose animation was over when this one began (D356): the change belongs to the key, not to the end of what came before.
     const bare = !definer
-    if ((path && inside(path)) || sameCut || bare) values[attr] = roundAttr(attr, value)
+    const over = !!definer && definer !== piece && definer.end <= piece.start + slack
+    if ((path && inside(path)) || sameCut || bare || over) values[attr] = roundAttr(attr, value)
   }
   return Object.keys(values).length > 0 ? { ref: { object: name, index: obj.actions.indexOf(piece) }, values } : null
 }
@@ -232,9 +290,11 @@ function axesToJoin(name: string, attrs: string[], time: number): { ref: ActionR
  * the animation's start to this time is written first, with the values as they are, and is what
  * then gets edited: it meets the edited state, and the one it was cut from goes on from the state
  * at its own first frame (D263). What gets written is whatever makes the shown values true, with
- * everything stacked on top left in place (D122).
+ * everything stacked on top left in place (D122). An entry's `together` names attributes that
+ * decide with its own where the change is written, changed or not: a drag's place is `x` and
+ * `y` (D356). They are not written.
  */
-export function setAttrsAtMany(entries: { name: string; attrs: Record<string, number> }[], time: number, options: { before?: boolean } = {}): boolean {
+export function setAttrsAtMany(entries: { name: string; attrs: Record<string, number>; together?: string[] }[], time: number, options: { before?: boolean } = {}): boolean {
   const slack = frameSeconds(state().fps) / 2
   const done = new Set<ClassAction>()
   for (const { name, attrs } of entries) {
@@ -249,16 +309,31 @@ export function setAttrsAtMany(entries: { name: string; attrs: Record<string, nu
       overrideClassAction(name, obj.actions.indexOf(action))
     }
   }
-  const joins = entries.map(({ name, attrs }) => axesToJoin(name, Object.keys(attrs), time)).filter((j) => j !== null)
+  const joins = entries.map(({ name, attrs, together }) => axesToJoin(name, Object.keys(attrs), time, together)).filter((j) => j !== null)
   const joined = (name: string, attr: string): boolean => joins.some((j) => j.ref.object === name && attr in j.values)
-  const pieces = entries.map(({ name, attrs }) => ({ name, attrs: Object.keys(attrs), from: midAnimationStart(name, Object.keys(attrs).filter((attr) => !joined(name, attr)), time) })).filter((p) => p.from !== null)
+  /**
+   * What decides where an entry's change goes: what it changes and has not joined, with what goes
+   * together with it (D356), unless one of its own values is already at the end of an animation of
+   * its own, the one this edit or the gesture before it wrote: the place has its key here then.
+   */
+  const deciding = (name: string, attrs: Record<string, number>, together: string[] | undefined): string[] => {
+    const own = Object.keys(attrs).filter((attr) => !joined(name, attr))
+    if (!together) return own
+    const obj = findObject(name)
+    const keyed = !!obj && Object.keys(attrs).some((attr) => {
+      const a = definingAction(obj, attr, time)
+      return !!a?.stmt && !a.classAction && Math.abs(a.end - time) <= slack
+    })
+    return keyed ? own : [...new Set([...own, ...together.filter((attr) => !joined(name, attr))])]
+  }
+  const pieces = entries.map(({ name, attrs, together }) => ({ name, attrs: Object.keys(attrs), from: midAnimationStart(name, deciding(name, attrs, together), time) })).filter((p) => p.from !== null)
   // After an animation's end, a plain change is a new animation from that end to this time, as a key is (D328); only the playhead at the end edits the end itself. Not for the value before an animation, which its lane handle sets.
   const gaps = options.before
     ? []
     : entries
-        .map(({ name, attrs }) => {
+        .map(({ name, attrs, together }) => {
           const open = Object.keys(attrs).filter((attr) => !joined(name, attr))
-          return { name, attrs: open, from: gapStart(name, open, time) }
+          return { name, attrs: open, from: open.length > 0 ? gapStart(name, deciding(name, attrs, together), time) : null }
         })
         .filter((g) => g.from !== null && !pieces.some((p) => p.name === g.name))
   const own = (pieces.length > 0 || joins.length > 0 || gaps.length > 0) && !gestureOpen()
@@ -568,6 +643,11 @@ function pivotFor(model: SceneModel, obj: SceneObject, block: Record<string, Att
 function startingValues(model: SceneModel, obj: SceneObject, verb: Verb, time: number): Record<string, AttrValue> {
   const attrs: Record<string, AttrValue> = {}
   const allowed = VERB_ATTRS[verb]
+  // A camera's `to` is its zoom, the one thing of its framing no other verb changes (D357).
+  if (!allowed && obj.className === CAMERA) {
+    const zoom = valueAt(model, obj, 'zoom', time)
+    return { zoom: typeof zoom === 'number' ? roundAttr('zoom', zoom) : 1 }
+  }
   if (!allowed) return attrs
   const schema = classes[obj.className]
   for (const attr of allowed) {
@@ -2192,8 +2272,8 @@ type EasePlan = { easeIn: number; easeOut: number } | { ease: string }
 function easePlans(action: Action, at: number, functional: boolean): { first: EasePlan; second: EasePlan } {
   const fraction = formatNumber((at - action.start) / journeyOf(action))
   const code = easeCode(action)
-  // A path keeps its whole line on both pieces, so each runs the stretch of the ease that is its own, the progress along the line carrying on.
-  if (action.verb === 'path') return { first: { ease: `Ease.along(${code}, 0, ${fraction})` }, second: { ease: `Ease.along(${code}, ${fraction}, 1)` } }
+  // A path that keeps its whole line on both pieces, a formula's or a class's, has each run the stretch of the ease that is its own, the progress along the line carrying on. A path whose line is cut is cut as values written out are: each piece runs its own line on its part of the ease.
+  if (action.verb === 'path' && functional) return { first: { ease: `Ease.along(${code}, 0, ${fraction})` }, second: { ease: `Ease.along(${code}, ${fraction}, 1)` } }
   if (functional) return { first: { ease: `Ease.share(${code}, 0, ${fraction})` }, second: { ease: action.timing.relative ? `Ease.share(${code}, ${fraction}, 1)` : `Ease.part(${code}, ${fraction}, 1)` } }
   const ease = action.timing.ease
   const plain = !(typeof ease === 'string' && namedEasings[ease]) && typeof ease !== 'function'
@@ -2607,13 +2687,35 @@ export function placeObjects(entries: { name: string; at: number; from?: Lifetim
   applyEdits(entries.flatMap((entry) => placeEdits(entry.name, entry.at, entry.from)))
 }
 
+/** Where a class's animation began when a move in time started: its start, and its `delay`, which `at` leaves out. */
+export interface ClassStart {
+  id: number
+  start: number
+  delay: number
+}
+
+/** The animations of these classes that a move in time takes along: those with a written `at` (D353, D354). */
+export function classStartsOf(model: SceneModel, classNames: readonly string[]): ClassStart[] {
+  return model.classActions.flatMap((c) => {
+    if (!classNames.includes(c.className) || !c.stmt || c.stmt.props.find((p) => p.key === 'at')?.kind !== 'literal') return []
+    const span = classSpan(c)
+    return span ? [{ id: c.id, start: span.start, delay: activeMembers(c)[0]?.timing.delay ?? 0 }] : []
+  })
+}
+
 /**
  * Several lives moved in time by one amount, in one step (D319, D353): each object as
- * `placeObject` moves one, and a group, which has no life of its own, by its own animations
- * with a written `at`.
+ * `placeObject` moves one, a group, which has no life of its own, by its own animations with a
+ * written `at`, and a class by its statements, `classes` holding where each began.
  */
-export function shiftLives(entries: { name: string; from: LifetimeOrigin }[], shift: number): void {
-  applyEdits(entries.flatMap((entry) => placeEdits(entry.name, entry.from.at + shift, entry.from, shift)))
+export function shiftLives(entries: { name: string; from: LifetimeOrigin }[], shift: number, classes: ClassStart[] = []): void {
+  const { source, model } = state()
+  const edits = entries.flatMap((entry) => placeEdits(entry.name, entry.from.at + shift, entry.from, shift))
+  for (const c of classes) {
+    const stmt = model?.classActions[c.id]?.stmt
+    if (stmt) edits.push(timeProp(source, stmt, 'at', roundSeconds(Math.max(0, c.start + roundSeconds(shift) - c.delay))))
+  }
+  applyEdits(edits)
 }
 
 function placeEdits(name: string, at: number, from?: LifetimeOrigin, by?: number): TextEdit[] {
@@ -2735,6 +2837,45 @@ export function setObjectProp(name: string, key: string, value: AttrValue | null
   if (edit) applyEdits([edit])
 }
 
+/** Whether a thing says it is held on the screen (D362). */
+export function attachedNow(name: string): boolean {
+  return findObject(name)?.attrs['attached'] === true
+}
+
+/**
+ * Hold things on the screen, or let them go (D362), each staying where it shows at the playhead:
+ * its place, its turn, and its size are written for the other space, the picture's or the
+ * scene's, in the same undo step.
+ */
+export function setAttached(names: string[], on: boolean): void {
+  const { model, time } = state()
+  if (!model) return
+  const targets = names.map((name) => model.objects.find((o) => o.name === name)).filter((o): o is SceneObject => !!o?.decl && !o.codeDriven && o.className !== CAMERA && !!attrSchema(o.className, 'attached'))
+  if (targets.length === 0) return
+  const shown = targets.map((obj) => ({ name: obj.name, pose: worldPose(model, obj, time), group: obj.className === GROUP }))
+  const own = !gestureOpen()
+  if (own) beginGesture()
+  for (const obj of targets) setObjectProp(obj.name, 'attached', on ? true : null)
+  // A group's place is a shift of what it carries, which the camera's own shift changes with it; its turn and its size stay its own.
+  setAttrsAtMany(
+    shown.map(({ name, pose, group }): { name: string; attrs: Record<string, number> } => ({ name, attrs: group ? { x: pose.x, y: pose.y } : { x: pose.x, y: pose.y, rotation: pose.rotation, scale: pose.scale } })),
+    time,
+  )
+  if (own) endGesture()
+}
+
+/** The menu's item that holds things on the screen, or lets them go (D362). */
+export function attachMenuItems(targets: string[]): MenuItem[] {
+  const { model } = state()
+  const able = targets.filter((name) => {
+    const obj = model?.objects.find((o) => o.name === name)
+    return !!obj?.decl && !obj.codeDriven && obj.className !== CAMERA && !!attrSchema(obj.className, 'attached')
+  })
+  if (able.length === 0) return []
+  const all = able.every(attachedNow)
+  return [{ label: all ? 'Detach from screen' : 'Attach to screen', run: () => setAttached(able, !all) }]
+}
+
 /** Unlink an object's attribute: what the link replaced comes back, or, when nothing is remembered, the default (D189). */
 export function restoreObjectProp(name: string, key: string): void {
   const { source, model } = state()
@@ -2821,10 +2962,9 @@ export function unlinkLifetime(objectName: string, key: 'at' | 'until'): void {
 export function nudgeObjectsInTime(names: string[], frames: number): void {
   const { model, fps } = state()
   if (!model) return
-  // A group stands for what it carries, and its own animations go with them (D353).
-  const moved = withCarried(model, names)
-    .map((name) => model.objects.find((o) => o.name === name))
-    .filter((o): o is SceneObject => !!o?.decl && !o.codeDriven)
+  // A group stands for what it carries, and a group or a class whose members all move goes with them, by its own animations (D353, D354).
+  const taken = movedInTime(model, names)
+  const moved = taken.names.map((name) => model.objects.find((o) => o.name === name)).filter((o): o is SceneObject => !!o)
   if (moved.length === 0) return
   const lives = moved.filter((o) => o.className !== GROUP)
   // Together or not at all: the earliest of them stops at the start of time, and the rest with it.
@@ -2835,6 +2975,7 @@ export function nudgeObjectsInTime(names: string[], frames: number): void {
   shiftLives(
     moved.map((o) => ({ name: o.name, from: { at: o.at, until: o.until, actions: Object.fromEntries(o.actions.map((a, index) => [o.name + ':' + index, { start: a.start, end: a.end }])) } })),
     shift,
+    classStartsOf(model, taken.classes),
   )
   endGesture()
 }

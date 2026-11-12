@@ -1,0 +1,330 @@
+{
+ "results": {
+  "GAP1": {
+   "first": {
+    "acts": [
+     {
+      "verb": "move",
+      "start": 1,
+      "end": 2,
+      "changes": {
+       "x": 0
+      }
+     },
+     {
+      "verb": "move",
+      "start": 2,
+      "end": 4,
+      "changes": {
+       "x": 150,
+       "y": 60
+      }
+     }
+    ],
+    "time": 4,
+    "selection": [
+     "a"
+    ],
+    "selectedActions": 0,
+    "shown": [
+     150,
+     60
+    ]
+   },
+   "second": {
+    "acts": [
+     {
+      "verb": "move",
+      "start": 1,
+      "end": 2,
+      "changes": {
+       "x": 0
+      }
+     },
+     {
+      "verb": "move",
+      "start": 2,
+      "end": 4,
+      "changes": {
+       "x": 190,
+       "y": 60
+      }
+     }
+    ],
+    "count": 2
+   },
+   "err": null
+  },
+  "GAP2": {
+   "atEnd": {
+    "acts": [
+     {
+      "verb": "move",
+      "start": 1,
+      "end": 2,
+      "changes": {
+       "x": 50
+      }
+     }
+    ],
+    "decl": {
+     "x": -300,
+     "y": 0
+    }
+   },
+   "noAnimation": {
+    "acts": [],
+    "decl": {
+     "x": 240,
+     "y": 30
+    }
+   },
+   "typedNew": {
+    "acts": [
+     {
+      "verb": "move",
+      "start": 1,
+      "end": 2,
+      "changes": {
+       "x": 0
+      }
+     }
+    ]
+   },
+   "typedX": {
+    "acts": [
+     {
+      "verb": "move",
+      "start": 1,
+      "end": 2,
+      "changes": {
+       "x": 0
+      }
+     },
+     {
+      "verb": "move",
+      "start": 2,
+      "end": 5,
+      "changes": {
+       "x": 200
+      }
+     }
+    ]
+   },
+   "err": null
+  },
+  "GAP3": {
+   "jumped": 5,
+   "shifted": {
+    "acts": [
+     {
+      "verb": "move",
+      "start": 1,
+      "end": 2,
+      "changes": {
+       "x": 0
+      }
+     },
+     {
+      "verb": "move",
+      "start": 4,
+      "end": 5,
+      "changes": {
+       "x": 100,
+       "y": 0
+      }
+     }
+    ],
+    "time": 4
+   },
+   "nudged": {
+    "acts": [
+     {
+      "verb": "move",
+      "start": 1,
+      "end": 2,
+      "changes": {
+       "x": 0
+      }
+     },
+     {
+      "verb": "move",
+      "start": 2,
+      "end": 4,
+      "changes": {
+       "x": 20,
+       "y": 0
+      }
+     }
+    ]
+   },
+   "err": null
+  },
+  "GAP4": {
+   "classy": {
+    "acts": [
+     {
+      "verb": "move",
+      "start": 1,
+      "end": 2,
+      "changes": {
+       "x": 0
+      }
+     },
+     {
+      "verb": "move",
+      "start": 2,
+      "end": 4,
+      "changes": {
+       "x": 100
+      }
+     }
+    ],
+    "src": "a = Rect({\n  x: -300,\n  y: 0,\n  width: 100,\n  height: 60,\n  class: 'bars',\n  until: 8,\n})\n\nall('bars').move({\n  x: 0,\n  at: 1,\n  duration: 1,\n})\n\na.move({\n  x: 100,\n  at: 2,\n  duration: 2,\n})\n"
+   },
+   "pathed": {
+    "acts": [
+     {
+      "verb": "path",
+      "start": 0,
+      "end": 2,
+      "changes": {
+       "shape": [
+        [
+         -300,
+         0
+        ],
+        [
+         0,
+         200
+        ],
+        [
+         300,
+         0
+        ]
+       ]
+      }
+     },
+     {
+      "verb": "move",
+      "start": 2,
+      "end": 4,
+      "changes": {
+       "x": 300,
+       "y": -100
+      }
+     }
+    ],
+    "srcShape": true,
+    "time": 4
+   },
+   "err": null
+  },
+  "LANE1": {
+   "handles": [
+    "opacity-handle start",
+    "opacity-handle end",
+    "opacity-handle start",
+    "opacity-handle end"
+   ],
+   "acts": [
+    {
+     "verb": "fade",
+     "start": 1,
+     "end": 2,
+     "changes": {
+      "opacity": 0.5
+     }
+    },
+    {
+     "verb": "fade",
+     "start": 4,
+     "end": 5,
+     "changes": {
+      "opacity": 0
+     }
+    }
+   ],
+   "err": null
+  },
+  "SHIFT2": {
+   "past": {
+    "time": 5
+   },
+   "pastDrag": {
+    "acts": [
+     {
+      "verb": "move",
+      "start": 1,
+      "end": 2,
+      "changes": {
+       "x": 0
+      }
+     },
+     {
+      "verb": "move",
+      "start": 4,
+      "end": 5,
+      "changes": {
+       "x": 100,
+       "y": 0
+      }
+     }
+    ],
+    "time": 4
+   },
+   "before": {
+    "time": 2
+   },
+   "beforeDrag": {
+    "acts": [
+     {
+      "verb": "move",
+      "start": 1,
+      "end": 2,
+      "changes": {
+       "x": 100
+      }
+     }
+    ],
+    "time": 0.5
+   },
+   "err": null
+  },
+  "PANE2": {
+   "rect": [
+    "#Lifetime",
+    "at",
+    "until",
+    "#Position",
+    "x",
+    "y",
+    "z",
+    "rotation",
+    "attached",
+    "#Size",
+    "width",
+    "height",
+    "scale",
+    "#Color",
+    "fill",
+    "opacity",
+    "#Classes",
+    "class"
+   ],
+   "text": [
+    "Lifetime",
+    "Position",
+    "Size",
+    "Color",
+    "Classes",
+    "Text"
+   ],
+   "head": "group1Groupa · b",
+   "row": "group1Groupa · b",
+   "gap": null,
+   "err": null
+  }
+ },
+ "volatile": {}
+}

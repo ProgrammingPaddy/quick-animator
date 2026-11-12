@@ -1,0 +1,495 @@
+{
+ "results": {
+  "CROSS1": {
+   "before": {
+    "lives": {
+     "bar1": [
+      0,
+      2
+     ],
+     "bar2": [
+      1,
+      3
+     ],
+     "badge": [
+      0,
+      4
+     ]
+    },
+    "bar1Move": [
+     0.5
+    ],
+    "cards": [
+     0.5
+    ],
+    "bar": [
+     1
+    ],
+    "err": null
+   },
+   "moved": {
+    "lives": {
+     "bar1": [
+      1,
+      3
+     ],
+     "bar2": [
+      2,
+      4
+     ],
+     "badge": [
+      0,
+      4
+     ]
+    },
+    "bar1Move": [
+     1.5
+    ],
+    "cards": [
+     1.5
+    ],
+    "bar": [
+     2
+    ],
+    "err": null
+   },
+   "undone": {
+    "lives": {
+     "bar1": [
+      0,
+      2
+     ],
+     "bar2": [
+      1,
+      3
+     ],
+     "badge": [
+      0,
+      4
+     ]
+    },
+    "bar1Move": [
+     0.5
+    ],
+    "cards": [
+     0.5
+    ],
+    "bar": [
+     1
+    ],
+    "err": null
+   }
+  },
+  "CROSS2": {
+   "before": {
+    "lives": {
+     "bar1": [
+      0,
+      2
+     ],
+     "bar2": [
+      1,
+      3
+     ],
+     "badge": [
+      0,
+      4
+     ]
+    },
+    "bar1Move": [
+     0.5
+    ],
+    "cards": [
+     0.5
+    ],
+    "bar": [
+     1
+    ],
+    "err": null
+   },
+   "moved": {
+    "lives": {
+     "bar1": [
+      1,
+      3
+     ],
+     "bar2": [
+      2,
+      4
+     ],
+     "badge": [
+      0,
+      4
+     ]
+    },
+    "bar1Move": [
+     1.5
+    ],
+    "cards": [
+     1.5
+    ],
+    "bar": [
+     2
+    ],
+    "err": null
+   },
+   "undone": {
+    "lives": {
+     "bar1": [
+      0,
+      2
+     ],
+     "bar2": [
+      1,
+      3
+     ],
+     "badge": [
+      0,
+      4
+     ]
+    },
+    "bar1Move": [
+     0.5
+    ],
+    "cards": [
+     0.5
+    ],
+    "bar": [
+     1
+    ],
+    "err": null
+   }
+  },
+  "CROSS3": {
+   "together": {
+    "lives": {
+     "bar1": [
+      1,
+      3
+     ],
+     "bar2": [
+      2,
+      4
+     ],
+     "badge": [
+      0,
+      4
+     ]
+    },
+    "bar1Move": [
+     1.5
+    ],
+    "cards": [
+     1.5
+    ],
+    "bar": [
+     2
+    ],
+    "err": null,
+    "selection": [
+     "bar1",
+     "bar2"
+    ]
+   },
+   "undone": {
+    "lives": {
+     "bar1": [
+      0,
+      2
+     ],
+     "bar2": [
+      1,
+      3
+     ],
+     "badge": [
+      0,
+      4
+     ]
+    },
+    "bar1Move": [
+     0.5
+    ],
+    "cards": [
+     0.5
+    ],
+    "bar": [
+     1
+    ],
+    "err": null
+   },
+   "oneAlone": {
+    "lives": {
+     "bar1": [
+      1,
+      3
+     ],
+     "bar2": [
+      1,
+      3
+     ],
+     "badge": [
+      0,
+      4
+     ]
+    },
+    "bar1Move": [
+     1.5
+    ],
+    "cards": [
+     0.5
+    ],
+    "bar": [
+     1
+    ],
+    "err": null
+   }
+  },
+  "CROSS4": {
+   "before": {
+    "lives": {
+     "bar1": [
+      0,
+      2
+     ],
+     "bar2": [
+      1,
+      3
+     ],
+     "badge": [
+      0,
+      4
+     ]
+    },
+    "bar1Move": [
+     0.5
+    ],
+    "cards": [
+     0.5
+    ],
+    "bar": [
+     1
+    ],
+    "err": null,
+    "everything": [
+     0.25
+    ],
+    "wide": [
+     0.2
+    ]
+   },
+   "barsMoved": {
+    "lives": {
+     "bar1": [
+      1,
+      3
+     ],
+     "bar2": [
+      2,
+      4
+     ],
+     "badge": [
+      0,
+      4
+     ]
+    },
+    "bar1Move": [
+     1.5
+    ],
+    "cards": [
+     1.5
+    ],
+    "bar": [
+     2
+    ],
+    "err": null,
+    "everything": [
+     0.25
+    ],
+    "wide": [
+     0.2
+    ]
+   },
+   "allNudged": {
+    "lives": {
+     "bar1": [
+      1.5,
+      3.5
+     ],
+     "bar2": [
+      2.5,
+      4.5
+     ],
+     "badge": [
+      0.5,
+      4.5
+     ]
+    },
+    "bar1Move": [
+     2
+    ],
+    "cards": [
+     2
+    ],
+    "bar": [
+     2.5
+    ],
+    "err": null,
+    "everything": [
+     0.75
+    ],
+    "wide": [
+     0.7
+    ]
+   },
+   "groupDragged": {
+    "lives": {
+     "bar1": [
+      2.5,
+      4.5
+     ],
+     "bar2": [
+      3.5,
+      5.5
+     ],
+     "badge": [
+      1.5,
+      5.5
+     ]
+    },
+    "bar1Move": [
+     3
+    ],
+    "cards": [
+     3
+    ],
+    "bar": [
+     3.5
+    ],
+    "err": null,
+    "everything": [
+     1.75
+    ],
+    "wide": [
+     1.7
+    ],
+    "selection": [
+     "everything"
+    ]
+   },
+   "wideDragged": {
+    "lives": {
+     "bar1": [
+      1.5,
+      3.5
+     ],
+     "bar2": [
+      2.5,
+      4.5
+     ],
+     "badge": [
+      0.5,
+      4.5
+     ]
+    },
+    "bar1Move": [
+     2
+    ],
+    "cards": [
+     2
+    ],
+    "bar": [
+     2.5
+    ],
+    "err": null,
+    "everything": [
+     0.75
+    ],
+    "wide": [
+     0.7
+    ]
+   }
+  },
+  "CROSS5": {
+   "nudged": {
+    "lives": {
+     "bar1": [
+      1,
+      3
+     ],
+     "bar2": [
+      2,
+      4
+     ],
+     "badge": [
+      0,
+      4
+     ]
+    },
+    "bar1Move": [
+     1.5
+    ],
+    "cards": [
+     1.5
+    ],
+    "bar": [
+     2
+    ],
+    "err": null
+   },
+   "undone": {
+    "lives": {
+     "bar1": [
+      0,
+      2
+     ],
+     "bar2": [
+      1,
+      3
+     ],
+     "badge": [
+      0,
+      4
+     ]
+    },
+    "bar1Move": [
+     0.5
+    ],
+    "cards": [
+     0.5
+    ],
+    "bar": [
+     1
+    ],
+    "err": null
+   },
+   "snapOn": {
+    "lives": {
+     "bar1": [
+      0.5,
+      2.5
+     ],
+     "bar2": [
+      1.5,
+      3.5
+     ],
+     "badge": [
+      0,
+      4
+     ]
+    },
+    "bar1Move": [
+     1
+    ],
+    "cards": [
+     1
+    ],
+    "bar": [
+     1.5
+    ],
+    "err": null,
+    "line": false
+   }
+  }
+ },
+ "volatile": {}
+}

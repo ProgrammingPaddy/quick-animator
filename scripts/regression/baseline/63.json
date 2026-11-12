@@ -1,0 +1,172 @@
+{
+ "results": {
+  "AFTERSHIFT1": {
+   "chain": {
+    "rest": 2,
+    "time": 2,
+    "shown": [
+     -140,
+     40
+    ],
+    "acts": [
+     [
+      1,
+      2,
+      -140,
+      40
+     ]
+    ],
+    "declX": -300
+   },
+   "plain": {
+    "back": 1,
+    "time": 1,
+    "shown": [
+     -260,
+     0
+    ],
+    "acts": [
+     [
+      1,
+      2,
+      -200
+     ]
+    ],
+    "declX": -260
+   },
+   "middle": {
+    "time": 1.5,
+    "want": [
+     -220,
+     30
+    ],
+    "shown": [
+     -220,
+     30
+    ],
+    "count": 2
+   },
+   "after": {
+    "time": 3.5,
+    "want": [
+     -150,
+     0
+    ],
+    "shown": [
+     -150,
+     0
+    ],
+    "acts": [
+     [
+      1,
+      2,
+      -200
+     ],
+     [
+      2,
+      3.5,
+      -150
+     ]
+    ]
+   },
+   "pinEnd": {
+    "time": 2,
+    "shown": [
+     -180,
+     0
+    ],
+    "acts": [
+     [
+      1,
+      2,
+      -180
+     ]
+    ]
+   },
+   "err": null
+  },
+  "LANES1": {
+   "stacked": [],
+   "all": "111111111111111",
+   "sample": [
+    {
+     "at": 0,
+     "lanes": 1,
+     "overlap": [
+      5.551115123125783e-17,
+      0
+     ]
+    },
+    {
+     "at": 0.1,
+     "lanes": 1,
+     "overlap": [
+      0,
+      1.1102230246251565e-16
+     ]
+    },
+    {
+     "at": 0.2,
+     "lanes": 1,
+     "overlap": [
+      0,
+      0
+     ]
+    },
+    {
+     "at": 0.3,
+     "lanes": 1,
+     "overlap": [
+      1.1102230246251565e-16,
+      0
+     ]
+    }
+   ],
+   "err": null
+  },
+  "RULER1": {
+   "afterRuler": {
+    "selection": [
+     "a"
+    ],
+    "time": 3
+   },
+   "afterBlank": [],
+   "during": {
+    "box": true,
+    "selection": [
+     "b"
+    ]
+   },
+   "wide": [
+    "a",
+    "b",
+    "c"
+   ],
+   "kept": {
+    "selection": [
+     "a",
+     "b",
+     "c"
+    ],
+    "box": false
+   },
+   "added": [
+    "a",
+    "b"
+   ],
+   "cleared": [],
+   "err": null
+  },
+  "JOINS1": {
+   "triangles": 58,
+   "outerMiss": 0,
+   "outerAll": 55,
+   "twice": 0,
+   "innerAll": 570,
+   "capMiss": 0,
+   "err": null
+  }
+ },
+ "volatile": {}
+}

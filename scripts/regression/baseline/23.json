@@ -1,0 +1,230 @@
+{
+ "results": {
+  "FADEL1": {
+   "before": [
+    [
+     "fade",
+     1,
+     1.5
+    ]
+   ],
+   "left": [
+    [
+     "fade",
+     0.5,
+     1.5
+    ]
+   ],
+   "right": [
+    [
+     "fade",
+     1.3333,
+     1.5
+    ]
+   ],
+   "err": null
+  },
+  "LEVEL2": {
+   "o0": [
+    "a",
+    "b",
+    "g"
+   ],
+   "up": {
+    "order": [
+     "b",
+     "a",
+     "g"
+    ],
+    "line": false,
+    "aAbove": true
+   },
+   "down": {
+    "order": [
+     "a",
+     "b",
+     "g"
+    ]
+   },
+   "released": [
+    "b",
+    "a",
+    "g"
+   ],
+   "undone": [
+    "a",
+    "b",
+    "g"
+   ],
+   "err": null
+  },
+  "CLASSLANE1": {
+   "lanes": [
+    "objects",
+    "classes"
+   ],
+   "members": "a · b",
+   "bars": [
+    "barsrisefade"
+   ],
+   "handles": 2,
+   "aClasses": "bars",
+   "cClasses": false,
+   "aDerived": 1,
+   "span": [
+    "0",
+    "4"
+   ],
+   "selectedAfterTitleClick": [
+    "a",
+    "b"
+   ],
+   "err": null
+  },
+  "CLASSFADE1": {
+   "before": [
+    [
+     "fade",
+     1,
+     2
+    ]
+   ],
+   "after": {
+    "a": [
+     [
+      "fade",
+      0.5,
+      2
+     ]
+    ],
+    "b": [
+     [
+      "fade",
+      0.5,
+      2
+     ]
+    ]
+   },
+   "err": null
+  },
+  "ANCHOR1": {
+   "marks": 1,
+   "visible": true,
+   "at": [
+    -300,
+    0
+   ],
+   "frame": [
+    -300,
+    0
+   ],
+   "clipSays": true,
+   "paneBadge": true,
+   "after": {
+    "visible": false,
+    "clipSays": false
+   }
+  },
+  "MENU1": {
+   "lane": [
+    {
+     "label": "Add",
+     "keyword": "0:00:25",
+     "children": [
+      "Rect",
+      "Circle",
+      "Text",
+      "Shape",
+      "Mask"
+     ]
+    }
+   ],
+   "clip": [
+    "Jump to code",
+    "Go to start",
+    "Go to end",
+    "Rename",
+    "Classes",
+    "Begin at",
+    "End at",
+    "No end",
+    "Links",
+    "Hide",
+    "Duplicate",
+    "Save preset",
+    "Delete"
+   ],
+   "blank": [
+    {
+     "label": "Add",
+     "children": [
+      "Rect",
+      "Circle",
+      "Text",
+      "Shape",
+      "Mask"
+     ]
+    }
+   ],
+   "object": [
+    "Jump to code",
+    "Rename",
+    "Shape",
+    "Path",
+    "Save preset",
+    "Classes",
+    "Mask",
+    "Hide",
+    "Attach to screen",
+    "Collision",
+    "Duplicate",
+    "Delete"
+   ]
+  },
+  "TOOL1": {
+   "kinds": [
+    [
+     "Rect",
+     false
+    ],
+    [
+     "Circle",
+     true
+    ],
+    [
+     "Text",
+     false
+    ],
+    [
+     "Mask",
+     false
+    ]
+   ],
+   "first": [
+    "Circle",
+    -500,
+    -300
+   ],
+   "toolAfterOne": "object",
+   "n2": 2,
+   "toolAfterEscape": "select",
+   "made": [
+    [
+     "Circle",
+     -500,
+     -300
+    ],
+    [
+     "Circle",
+     500,
+     -300
+    ]
+   ],
+   "err": null
+  },
+  "OFF": {
+   "tool": "select"
+  }
+ },
+ "volatile": {}
+}

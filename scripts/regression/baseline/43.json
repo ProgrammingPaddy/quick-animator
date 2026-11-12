@@ -1,0 +1,66 @@
+{
+ "results": {
+  "FOLDPTS1": {
+   "before": 0,
+   "oneLine": {
+    "folded": 1,
+    "gutter": true
+   },
+   "placed": {
+    "multiline": true,
+    "folded": 2,
+    "count": 3
+   },
+   "drawn": {
+    "closed": true,
+    "anchors": 3,
+    "multiline": true,
+    "folded": 3
+   },
+   "edited": {
+    "points": [
+     [
+      0,
+      100
+     ],
+     [
+      -60,
+      -40
+     ],
+     [
+      60,
+      -40
+     ]
+    ],
+    "oneLineKept": true
+   },
+   "err": null
+  },
+  "IMPORTED1": {
+   "imported": [
+    "test-drawing.svg"
+   ],
+   "classes": [
+    null
+   ],
+   "groups": [
+    "test-drawing.svg",
+    "test-drawing.svg"
+   ],
+   "badges": 13,
+   "badgeTitle": "Imported from test-drawing.svg",
+   "classRows": 0,
+   "found": 13,
+   "foundSample": [
+    "plain",
+    "testDrawingRect1",
+    "egg"
+   ],
+   "err": null
+  },
+  "OFF": {
+   "tool": "select"
+  }
+ },
+ "volatile": {}
+}

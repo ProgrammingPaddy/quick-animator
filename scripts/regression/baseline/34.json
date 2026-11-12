@@ -1,0 +1,155 @@
+{
+ "results": {
+  "STATES1": {
+   "states": {
+    "moving": [
+     [
+      0,
+      1
+     ],
+     [
+      2,
+      3
+     ]
+    ],
+    "right": [
+     [
+      0,
+      1
+     ]
+    ],
+    "up": [
+     [
+      2,
+      3
+     ]
+    ],
+    "left": [],
+    "still": [
+     [
+      1,
+      2
+     ],
+     [
+      3,
+      6.017
+     ]
+    ],
+    "clockwise": [
+     [
+      4,
+      5
+     ]
+    ],
+    "counter": [],
+    "growing": [
+     [
+      5,
+      6
+     ]
+    ],
+    "shrinking": [],
+    "dVisible": [
+     [
+      3.017,
+      3.517
+     ]
+    ],
+    "dFadingIn": [
+     [
+      3,
+      3.5
+     ]
+    ]
+   },
+   "resolved": {
+    "fade": 3,
+    "move": 3,
+    "warnings": [],
+    "err": null
+   },
+   "missing": {
+    "message": "d.fade at: b.moving happens 2 times, so there is no b.moving[5]",
+    "line": 40
+   },
+   "never": {
+    "message": "d.fade at: b is never turning counterclockwise"
+   },
+   "restored": true,
+   "err": null
+  },
+  "DIALOG2": {
+   "heads": [
+    "moving (2)",
+    "moving right (1)",
+    "moving up (1)",
+    "still (2)",
+    "turning (1)",
+    "turning clockwise (1)",
+    "growing (1)",
+    "visible (1)"
+   ],
+   "parts": [
+    "1 start 0:00:00",
+    "1 end 0:01:00",
+    "2 start 0:02:00",
+    "2 end 0:03:00",
+    "last end"
+   ],
+   "written": {
+    "src": true,
+    "moveStart": 3
+   },
+   "undone": true,
+   "err": null
+  },
+  "CODE1": {
+   "scrubbed": {
+    "src": true,
+    "width": 110
+   },
+   "undone": true,
+   "menu": [
+    [
+     "linear",
+     false
+    ],
+    [
+     "bounce",
+     false
+    ],
+    [
+     "back",
+     false
+    ],
+    [
+     "elastic",
+     false
+    ],
+    [
+     "snap",
+     true
+    ]
+   ],
+   "picked": {
+    "src": true,
+    "menuGone": true
+   },
+   "icons": 7,
+   "titles": [
+    "Select",
+    "Object",
+    "Path",
+    "Shape",
+    "Pencil",
+    "Paint",
+    "Camera"
+   ],
+   "err": null
+  },
+  "OFF": {
+   "tool": "select"
+  }
+ },
+ "volatile": {}
+}
