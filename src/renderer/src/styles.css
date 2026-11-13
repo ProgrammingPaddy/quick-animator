@@ -186,7 +186,7 @@ button.small:hover {
   color: var(--fg-faint);
 }
 
-/* Undo and redo as arrows at the right, before the system's window controls (D261). */
+/* The right of the bar: the room the system's window controls take. */
 .titlebar-right {
   display: flex;
   align-items: center;
@@ -199,21 +199,14 @@ button.small:hover {
   width: 0;
 }
 
-.titlebar-right button.icon {
+/* Undo and redo as arrows beside Help (D261, D383). */
+.titlebar-actions button.icon {
   width: 26px;
   height: 22px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
-  color: var(--fg-dim);
-  -webkit-app-region: no-drag;
-}
-
-.titlebar-right button.icon:hover {
-  background: var(--bg-raised);
-  color: var(--fg);
 }
 
 /* A name for a button that shows only an icon: read, never seen. */
@@ -355,17 +348,27 @@ button.small:hover {
   line-height: 20px;
 }
 
-/* The preview's options, in its pane's header (D371): the looks of the bar they came from, on the header's own ground. */
+/* The preview's options, in its pane's header (D371): at its right, in sections with a little room between them (D381), a section going to the next row whole where a row will not hold it. */
 .preview-options {
   flex: 1 1 0;
   min-width: 0;
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 3px 12px;
+}
+
+/* A section of buttons that each switch one thing: the looks of the bar they came from, on the header's own ground. */
+.preview-section {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 3px;
 }
 
-.preview-options > button,
+.preview-section > button,
 .preview-options .preview-modes button {
   height: 20px;
   padding: 0 7px;
@@ -376,12 +379,12 @@ button.small:hover {
   white-space: nowrap;
 }
 
-.preview-options > button:hover,
+.preview-section > button:hover,
 .preview-options .preview-modes button:hover {
   color: var(--fg);
 }
 
-.preview-options > button.on {
+.preview-section > button.on {
   color: var(--accent);
 }
 

@@ -1,5 +1,5 @@
 import type { FileChange, ProjectData } from '../../../shared/api'
-import { createEditor, recordSelection, resetEditorDoc, setEditorDoc } from '../code/editor'
+import { createEditor, recordSelection, recordSettings, resetEditorDoc, setEditorDoc, setSettingsSink } from '../code/editor'
 import { evaluateScene } from '../model/evaluate'
 import type { SceneModel } from '../model/types'
 import { applySelection, currentSelection, loadAnchored, loadSoft, setSelectionSink, useStore, type ProjectSettings } from '../state/store'
@@ -84,6 +84,30 @@ export function updateSettings(partial: Partial<ProjectSettings>): void {
   }, 200)
 }
 
+/** The background's color as its picker was opened on it, while the picker is open (D384). */
+let backgroundWas: string | null = null
+
+/** The background's picker opens: what is picked in it shows at once, and is one undo step when it closes (D384). */
+export function openBackground(): void {
+  backgroundWas = useStore.getState().settings.background
+}
+
+/** Set the background's color (D364): from the open picker it shows at once and is a step when the picker closes; from anywhere else, a color beside the picker, it is a step of its own (D384). */
+export function setBackground(color: string): void {
+  const now = useStore.getState().settings.background
+  if (color === now) return
+  if (backgroundWas !== null) updateSettings({ background: color })
+  else recordSettings({ background: now }, { background: color })
+}
+
+/** The background's picker closes: the color it was opened on and the one it leaves are one step of the history (D384). */
+export function closeBackground(): void {
+  const before = backgroundWas
+  backgroundWas = null
+  const after = useStore.getState().settings.background
+  if (before !== null && before !== after) recordSettings({ background: before }, { background: after })
+}
+
 export function applyProject(data: ProjectData): void {
   const scene = data.scenes[0]
   lastWritten = null
@@ -133,6 +157,8 @@ export function initProject(): void {
   createEditor((doc) => commitSource(doc, 'editor'), { onSelection: applySelection, getSelection: currentSelection })
   // Selection changes from the panes become steps of the one undo history (D90).
   setSelectionSink(recordSelection)
+  // So do changes of the project's settings made in a pane (D384): a step says what to set, and this sets it.
+  setSettingsSink(updateSettings)
   if (!window.api) {
     // No file access, for example in a plain browser: work on the sample in memory.
     if (!useStore.getState().project) {

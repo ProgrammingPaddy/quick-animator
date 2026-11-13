@@ -218,7 +218,7 @@ export function App() {
           store.setTimelineTool(store.timelineTool === 'razor' ? 'select' : 'razor')
           return
         case 'previewView':
-          // Preview, Both, Camera, in turn (D359).
+          // Preview, Camera, Side by side, in turn (D359, D381).
           e.preventDefault()
           store.cyclePreviewView()
           return

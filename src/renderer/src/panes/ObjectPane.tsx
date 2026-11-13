@@ -10,7 +10,7 @@ import { cameraAt, containers, isVisibleAt } from '../model/sample'
 import type { Action, Mask, SceneObject } from '../model/types'
 import { addCamera, addObject, lifetimeMenu, propertiesMenu, canEdit, classMaskItems, cutHereItems, createGroup, prospectiveGroup, deleteAction, deleteClass, deleteClassAction, deleteObjects, duplicateObjects, hideMenuItems, jumpToAction, jumpToClass, jumpToObject, maskedShare, maskListEditable, maskMenuItems, materializeClassAction, moveDeclaration, overrideClassAction, removeFromClass, requestRename, selectClass, selectClassAction, setMasked, ungroup } from '../project/operations'
 import { requestSavePreset } from '../project/userPresets'
-import { updateSettings } from '../project/controller'
+import { closeBackground, openBackground, setBackground } from '../project/controller'
 import { ColorPicker } from '../components/ColorPicker'
 import { isActionSelected, OBJECT_KINDS, useStore } from '../state/store'
 import { timecode } from '../state/time'
@@ -652,7 +652,7 @@ export function ObjectPane() {
                         <KindIcon kind="Background" />
                       </span>
                       <span className="name">Background</span>
-                      <ColorPicker value={background} onChange={(color) => updateSettings({ background: color })} title="Background" />
+                      <ColorPicker value={background} onChange={setBackground} onOpen={openBackground} onClose={closeBackground} title="Background" />
                     </div>
                   </li>
                 )}

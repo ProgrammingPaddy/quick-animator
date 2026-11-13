@@ -87,18 +87,6 @@
    },
    "round": [
     {
-     "view": "both",
-     "lit": [
-      "Both"
-     ],
-     "world": true,
-     "camera": true,
-     "names": [
-      "Preview",
-      "Camera wide"
-     ]
-    },
-    {
      "view": "camera",
      "lit": [
       "Camera"
@@ -106,6 +94,18 @@
      "world": false,
      "camera": true,
      "names": [
+      "Camera wide"
+     ]
+    },
+    {
+     "view": "both",
+     "lit": [
+      "Side by side"
+     ],
+     "world": true,
+     "camera": true,
+     "names": [
+      "Preview",
       "Camera wide"
      ]
     },

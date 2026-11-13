@@ -238,13 +238,19 @@ function bottomCamera(model: SceneModel, at: number): SceneObject | null {
   return camerasOf(model).find((c) => existsAt(model, c, at)) ?? null
 }
 
-/** Where the picture next changes hands after a time (D365): the camera that has it ends, or one over it begins. Null when it is kept to the end. */
-function pictureUntil(model: SceneModel, at: number): number | null {
+/**
+ * Where the picture next changes hands after a time (D365): the camera that has it ends, or one
+ * over it begins. Null when it is kept to the end. It is asked just past the time itself, so a
+ * cut that falls on it is behind and not ahead; and a camera that is only there because the
+ * scene holds its last frame, its own end being past, has no end to come (D382).
+ */
+function pictureUntil(model: SceneModel, at: number, slack: number): number | null {
+  const t = at + slack
   const all = camerasOf(model)
-  const holder = cameraAt(model, at)
+  const holder = cameraAt(model, t)
   const over = holder ? all.slice(all.indexOf(holder) + 1) : all
-  const times = over.filter((c) => c.at > at && (c.until === null || c.until > c.at)).map((c) => c.at)
-  if (holder && holder.until !== null) times.push(holder.until)
+  const times = over.filter((c) => c.at > t && (c.until === null || c.until > c.at)).map((c) => c.at)
+  if (holder && holder.until !== null && holder.until > t) times.push(holder.until)
   return times.length > 0 ? Math.min(...times) : null
 }
 
@@ -259,38 +265,33 @@ function endCameraEdit(source: string, camera: SceneObject, at: number): TextEdi
 /**
  * Where a new camera's clip ends (D365, D378): where the picture next changes hands, so the
  * shots after it are as they were, and sooner when the preferences give a camera's clip a
- * length. The length does not take it past the scene's end, which it would lengthen. Null when
- * it lasts to the end.
+ * length, which may take it past the scene's end, as a new object's may (D382). Null when it
+ * lasts to the end.
  */
 function shotEnd(model: SceneModel, t: number, slack: number): number | null {
-  const next = pictureUntil(model, t)
+  const next = pictureUntil(model, t, slack)
   const length = useStore.getState().prefs.cameraLength
   if (length === null) return next
-  let own = roundSeconds(t + length)
-  if (model.contentEnd !== null && t < model.contentEnd - slack) own = Math.min(own, model.contentEnd)
+  const own = roundSeconds(t + length)
   return next === null ? own : Math.min(next, own)
 }
 
 /**
  * A camera's clip written over every other from a time on (D365): it has the picture until its
- * end (D378). A shot it covers to that shot's own end is ended where it begins, so the two sit
- * side by side; one that outlasts it runs on under it and has the picture again after it, and
- * the camera at the bottom is never ended. Returns whether it was written; a cut that is there
- * already is left alone, with a word.
+ * end (D378). It is never refused (D382): declared last, it is over whatever is there, as any
+ * new object is. A shot it covers to that shot's own end is ended where it begins, so the two
+ * sit side by side; one that outlasts it runs on under it and has the picture again after it;
+ * the camera at the bottom is never ended, nor one whose own end is past and that is only there
+ * because the scene holds its last frame. Returns whether it was written.
  */
 function cutIn(name: string, view: View, t: number): boolean {
   const { model, source, fps } = state()
   if (!model) return false
   const slack = frameSeconds(fps) / 2
-  const next = pictureUntil(model, t)
-  if (next !== null && next <= t + slack) {
-    useStore.getState().setNotice('A cut is there already.')
-    return false
-  }
   const until = shotEnd(model, t, slack)
   const edits: TextEdit[] = [insertDeclaration(model.lastDeclEnd, cameraBlock(name, view, t, until))]
   const holder = cameraAt(model, t)
-  if (holder && holder !== bottomCamera(model, t) && t > holder.at + slack) {
+  if (holder && holder !== bottomCamera(model, t) && t > holder.at + slack && (holder.until === null || holder.until > t + slack)) {
     const holderEnd = holder.until ?? model.contentEnd ?? Infinity
     if (until === null || until >= holderEnd - slack) {
       const end = endCameraEdit(source, holder, t)

@@ -80,7 +80,9 @@
    "actions": [
     "File ▾",
     "Preferences",
-    "Help"
+    "Help",
+    "Undo",
+    "Redo"
    ],
    "items": [
     "Open",

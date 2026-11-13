@@ -559,10 +559,20 @@
      9
     ]
    ],
-   "there": {
-    "result": null,
-    "notice": "A cut is there already.",
-    "same": true
+   "nearACut": "camera3",
+   "nearACutLife": {
+    "life": [
+     [
+      8.995,
+      10.995
+     ]
+    ],
+    "notice": null,
+    "who": [
+     "camera2",
+     "camera3",
+     "camera3"
+    ]
    },
    "cutaway": "side_shot2",
    "afterCutaway": {
@@ -609,13 +619,35 @@
      "wide"
     ]
    },
-   "atTheEnd": "camera",
-   "atTheEndLife": [
-    [
-     11,
-     12
-    ]
+   "pastTheEnd": "camera",
+   "pastTheEndLife": {
+    "life": [
+     [
+      11,
+      13
+     ]
+    ],
+    "sceneEnds": 13
+   },
+   "heldThere": [
+    "camera"
    ],
+   "pastTheHeld": "camera2",
+   "pastTheHeldLife": {
+    "life": [
+     [
+      14,
+      16
+     ]
+    ],
+    "notice": null,
+    "who": [
+     "wide",
+     "camera2",
+     "camera2"
+    ],
+    "firstEnds": 13
+   },
    "open": "camera",
    "openLife": [
     [
@@ -877,26 +909,52 @@
    "error": null
   },
   "HEADER1": {
+   "sections": [
+    [
+     "Object*",
+     "Group",
+     "Class"
+    ],
+    [
+     "Preview",
+     "Camera",
+     "Side by side*"
+    ],
+    [
+     "Show Paths",
+     "Show Masks",
+     "Show Cameras"
+    ],
+    [
+     "Starts at playhead",
+     "Chain",
+     "Snap",
+     "Edges",
+     "Collision"
+    ]
+   ],
    "header": [
     "Object*",
     "Group",
     "Class",
-    "Starts at playhead",
-    "Chain",
-    "Snap",
+    "Preview",
+    "Camera",
+    "Side by side*",
     "Show Paths",
     "Show Masks",
     "Show Cameras",
+    "Starts at playhead",
+    "Chain",
+    "Snap",
     "Edges",
-    "Collision",
-    "Preview",
-    "Both*",
-    "Camera"
+    "Collision"
    ],
    "shape": {
     "height": 50,
     "rows": 2,
-    "viewsAtTheTopRight": true
+    "eachRowAtTheRight": true,
+    "roomBetween": 12,
+    "roomWithin": 3
    },
    "noGrid": true,
    "snapOn": {
@@ -910,7 +968,9 @@
     "shape": {
      "height": 50,
      "rows": 2,
-     "viewsAtTheTopRight": true
+     "eachRowAtTheRight": true,
+     "roomBetween": 12,
+     "roomWithin": 3
     }
    },
    "snapOff": {
@@ -1081,6 +1141,94 @@
      "Hide"
     ]
    },
+   "error": null
+  },
+  "PEEK1": {
+   "playhead": {
+    "peek": null,
+    "playhead": 2,
+    "box": -400,
+    "says": "0:02:00 f120",
+    "camera": "wide"
+   },
+   "pointerTool": {
+    "peek": null,
+    "playhead": 2,
+    "box": -400,
+    "says": "0:02:00 f120",
+    "camera": "wide"
+   },
+   "razorAt6": {
+    "peek": 6,
+    "playhead": 2,
+    "box": 0,
+    "says": "0:06:00 f360",
+    "camera": "wide"
+   },
+   "razorAt9": {
+    "peek": 9,
+    "playhead": 2,
+    "box": 300,
+    "says": "0:09:00 f540",
+    "camera": "shot"
+   },
+   "left": {
+    "peek": null,
+    "playhead": 2,
+    "box": -400,
+    "says": "0:02:00 f120",
+    "camera": "wide"
+   },
+   "cut": {
+    "peek": 4,
+    "playhead": 2,
+    "box": -200,
+    "says": "0:04:00 f240",
+    "camera": "wide",
+    "moves": [
+     [
+      0,
+      4
+     ],
+     [
+      4,
+      12
+     ]
+    ]
+   },
+   "putAway": {
+    "peek": null,
+    "playhead": 2,
+    "box": -400,
+    "says": "0:02:00 f120",
+    "camera": "wide"
+   },
+   "error": null
+  },
+  "BACK1": {
+   "first": "#1c1c1c",
+   "whileOpen": true,
+   "closed": {
+    "picker": false,
+    "kept": true
+   },
+   "editUndoneFirst": {
+    "box": [
+     "x: -100,"
+    ],
+    "color": true
+   },
+   "undone": true,
+   "redone": true,
+   "back": {
+    "color": true,
+    "source": true
+   },
+   "beside": {
+    "found": true,
+    "color": "#224466"
+   },
+   "besideUndone": true,
    "error": null
   }
  },

@@ -1,4 +1,4 @@
-// The camera's first and second looks (D365 to D380): every tool at work in the Camera view; the wheel and the middle button on the camera there; the Camera tool as Select for cameras; the cameras' frames shown when asked; a new camera from the menus; cuts as shots of a camera, and a clip's length; the razor on a camera's clip; Fit by the camera; the preview's options in the pane's header; and the menus folded into Lifetime and Properties.
+// The camera's first and second looks, and what followed them (D365 to D386): every tool at work in the Camera view; the wheel and the middle button on the camera there; the Camera tool as Select for cameras; the cameras' frames shown when asked; a new camera from the menus; cuts as shots of a camera, and a clip's length; the razor on a camera's clip; Fit by the camera; the preview's options in the pane's header; and the menus folded into Lifetime and Properties.
 const NL = String.fromCharCode(10)
 // A camera moved, zoomed, and rolled, so nothing in the Camera view is where the scene has it.
 const WIDE = ['', 'wide = Camera({', '  x: 200,', '  y: 100,', '  zoom: 1.5,', '  rotation: 12,', '})', '']
@@ -288,7 +288,7 @@ await shut();
 out.error = S().error;
 return out`,
 
-  // Cuts (D377, D378). Cut to offers each camera once, and not the one that has the picture. To a camera that has ended it is a new shot of it, named after it, framed as it ended, two seconds long. To the camera at the bottom, still running under the rest, it cuts the clip over it and makes nothing. A new clip never runs past the next cut, and a shot it covers to its end is ended where it begins, while one that outlasts it comes back after. The next shot of a camera takes after its latest. With no length in the preferences a clip lasts until the picture next changes hands; and no clip of a set length runs past the scene's end.
+  // Cuts (D377, D378, D382). Cut to offers each camera once, and not the one that has the picture. To a camera that has ended it is a new shot of it, named after it, framed as it ended, two seconds long. To the camera at the bottom, still running under the rest, it cuts the clip over it and makes nothing. A new clip never runs past the next cut, and a shot it covers to its end is ended where it begins, while one that outlasts it comes back after. The next shot of a camera takes after its latest. No camera is refused: not half a frame before a cut, and not past the scene's end, which a clip of a set length may lengthen. With no length in the preferences a clip lasts until the picture next changes hands.
   CUT2: `${HELP}
 const out = {};
 await start(${JSON.stringify(SHOTS)}, 'both', 'select');
@@ -310,16 +310,23 @@ out.afterAgain = { cams: cams(), who: who([8.9, 9, 10.9, 11]) };
 // The next cut is protected: a camera added half a second before that shot lasts until it.
 out.before9 = ops.addCamera(8.5); await tick(250);
 out.before9Life = cams().filter((c) => c[0] === out.before9).map((c) => [c[1], c[2]]);
-const source1 = S().source;
-out.there = { result: ops.addCamera(8.995), notice: S().notice, same: S().source === source1 };
+// Half a frame before that shot: no camera is refused (D382); it begins there, over the shot that begins at the cut.
+S().setNotice(null);
+out.nearACut = ops.addCamera(8.995); await tick(250);
+out.nearACutLife = { life: cams().filter((c) => c[0] === out.nearACut).map((c) => [c[1], c[2]]), notice: S().notice, who: who([8.99, 9, 10.9]) };
 // A long shot over the bottom camera: a cut inside it is a cutaway, and the long shot comes back after.
 await start(${JSON.stringify([...BASE, 'long = Camera({', '  x: 300,', '  y: 0,', '  zoom: 2,', '  at: 2,', '  until: 9,', '})', '', 'side = Camera({', '  x: -400,', '  y: 200,', '  zoom: 3,', '  at: 10,', '})', ''].join(NL))}, 'both', 'select');
 out.cutaway = ops.cutToCamera('side', 4); await tick(250);
 out.afterCutaway = { cams: cams(), who: who([3.9, 4, 5.9, 6, 8.9, 9]) };
-// The scene ends at 12 s: a camera added at 11 s ends there, not a second past it.
-out.atTheEnd = ops.addCamera(11); await tick(250);
-out.atTheEndLife = cams().filter((c) => c[0] === out.atTheEnd).map((c) => [c[1], c[2]]);
-await undo();
+// The scene ends at 12 s: a camera added at 11 s is two seconds long all the same, and the scene is that much longer (D382).
+out.pastTheEnd = ops.addCamera(11); await tick(250);
+out.pastTheEndLife = { life: cams().filter((c) => c[0] === out.pastTheEnd).map((c) => [c[1], c[2]]), sceneEnds: S().model.contentEnd };
+// Past the new end that camera is only held with the last frame: another added there is not refused, goes over it, and leaves its end where it is.
+out.heldThere = who([14]);
+S().setNotice(null);
+out.pastTheHeld = ops.addCamera(14); await tick(250);
+out.pastTheHeldLife = { life: cams().filter((c) => c[0] === out.pastTheHeld).map((c) => [c[1], c[2]]), notice: S().notice, who: who([13.5, 14, 15.9]), firstEnds: obj(out.pastTheEnd).until };
+await undo(); await undo();
 // No length set: a clip lasts until the picture next changes hands, which here is where side begins.
 S().setPrefs({ cameraLength: null });
 out.open = ops.addCamera(9.5); await tick(250);
@@ -413,14 +420,18 @@ out.title = fit.title;
 out.error = S().error;
 return out`,
 
-  // The preview's options in the pane's header (D371, D374): what a click picks, the pin, Chain, Snap (D370), Show Paths, Show Masks, Show Cameras, Edges, Collision, then the views, which keep the header's top right corner while the options wrap under them; the one that is on is lit; Snap brings its two numbers without the header growing; a right-click on any of it does nothing.
+  // The preview's options in the pane's header (D371, D381): four sections at its right, with a little room between them: what a click picks; what the pane shows, Preview, Camera, Side by side; what is drawn over the scene, Show Paths, Show Masks, Show Cameras (D374); and how the tools work, the pin, Chain, Snap (D370), Edges, Collision. A section goes to the next row whole; the one that is on is lit; Snap brings its two numbers without the header growing; a right-click on any of it does nothing.
   HEADER1: `${HELP}
 const out = {};
 await start(${JSON.stringify(PLAIN)}, 'both', 'select');
 S().setPick('object'); S().setPin('start'); S().setChain(false); if (S().showPaths) S().toggleShowPaths(); if (S().showMasks) S().toggleShowMasks(); if (S().showCameras) S().toggleShowCameras(); await tick(200);
 const header = document.querySelector('.pane.center .pane-header');
-const named = () => [...header.querySelectorAll('.preview-modes button, .preview-options > button, .preview-views button')].map((b) => b.textContent.trim() + (b.classList.contains('active') || b.classList.contains('on') ? '*' : ''));
-const shape = () => { const h = header.getBoundingClientRect(); const v = header.querySelector('.preview-views').getBoundingClientRect(); return { height: Math.round(h.height), rows: new Set([...header.querySelectorAll('.preview-options > *')].map((b) => Math.round(b.getBoundingClientRect().top - h.top))).size, viewsAtTheTopRight: Math.round(v.top - h.top) <= 4 && Math.round(h.right - v.right) <= 8 } };
+const text = (b) => b.textContent.trim() + (b.classList.contains('active') || b.classList.contains('on') ? '*' : '');
+const named = () => [...header.querySelectorAll('.preview-modes button, .preview-views button, .preview-section > button')].map(text);
+const parts = () => [...header.querySelectorAll('.preview-options > *')];
+// Each row of sections ends at the header's right edge, and sections on one row have a little room between them.
+const shape = () => { const h = header.getBoundingClientRect(); const boxes = parts().map((s) => s.getBoundingClientRect()); const tops = [...new Set(boxes.map((r) => Math.round(r.top - h.top)))]; return { height: Math.round(h.height), rows: tops.length, eachRowAtTheRight: tops.every((t) => Math.round(h.right - Math.max(...boxes.filter((r) => Math.round(r.top - h.top) === t).map((r) => r.right))) <= 8), roomBetween: Math.round(boxes[1].left - boxes[0].right), roomWithin: Math.round(parts()[2].children[1].getBoundingClientRect().left - parts()[2].children[0].getBoundingClientRect().right) } };
+out.sections = parts().map((s) => [...s.querySelectorAll(':scope > button')].map(text));
 out.header = named();
 out.shape = shape();
 out.noGrid = !named().some((b) => b.startsWith('Grid'));
@@ -506,6 +517,81 @@ await tick(300);
 out.endedAtThePlayhead = lines('box', ['until']);
 out.words = { attach: ops.attachMenuItems(['box']).map((i) => i.label), hide: ops.hideMenuItems(['box']).map((i) => i.label) };
 S().select([]);
+out.error = S().error;
+return out`,
+
+  // The razor shows its frame (D385): with the razor over the timeline's rows the preview draws the moment under its line, in the Preview view and the Camera view, and says its time, while the playhead stays; the pointer leaving the rows, or the razor put away, gives the preview back. With the pointer tool nothing of it happens. A cut leaves the playhead where it was.
+  PEEK1: `${HELP}
+const out = {};
+await start(${JSON.stringify([...BASE, 'box = Rect({', '  x: -600,', '  y: 300,', '  width: 240,', '  height: 140,', "  fill: '#4f8cff',", '  until: 12,', '})', '', 'box.move({', '  x: 600,', '  at: 0,', '  duration: 12,', "  ease: 'linear',", '})', '', 'shot = Camera({', '  x: 300,', '  y: 0,', '  zoom: 2,', '  at: 8,', '  until: 10,', '})', ''].join(NL))}, 'both', 'select');
+S().setTime(2); await tick(250);
+const lanes = document.querySelector('.tl-rows');
+const clip = clipOf('box', 'objects');
+const cr = clip.getBoundingClientRect();
+const per = cr.width / (Number(clip.dataset.end) - Number(clip.dataset.start));
+const x = (t) => cr.left + (t - Number(clip.dataset.start)) * per;
+const seen = () => ({ peek: S().peekTime, playhead: S().time, box: Math.round(QA.getRenderer().frameOf('box').x), says: document.querySelector('.preview-hud span')?.textContent.replace(/\\s+/g, ' '), camera: document.querySelector('.preview-camera .view-tag b')?.textContent });
+out.playhead = seen();
+pe(lanes, 'pointerover', x(6), cr.top + 10); pe(lanes, 'pointermove', x(6), cr.top + 10); await tick(250);
+out.pointerTool = seen();
+S().setTimelineTool('razor'); await tick(200);
+pe(lanes, 'pointermove', x(6), cr.top + 10); await tick(250);
+out.razorAt6 = seen();
+pe(lanes, 'pointermove', x(9), cr.top + 10); await tick(250);
+out.razorAt9 = seen();
+lanes.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, cancelable: true, relatedTarget: document.querySelector('.transport'), pointerId: 1 })); await tick(250);
+out.left = seen();
+// A cut of the box's move at 4 s.
+const anim = clip.querySelector('.clip');
+const ay = anim.getBoundingClientRect().top + 4;
+pe(anim, 'pointerover', x(4), ay); pe(anim, 'pointermove', x(4), ay); await tick(200);
+pe(anim, 'pointerdown', x(4), ay); await tick(60); pe(document.body, 'pointerup', x(4), ay); await tick(400);
+out.cut = { ...seen(), moves: obj('box').actions.map((a) => [a.start, a.end]) };
+S().setTimelineTool('select'); await tick(250);
+out.putAway = seen();
+await undo();
+out.error = S().error;
+return out`,
+
+  // The background's color in the undo history (D384): one visit to its picker, whatever is tried in it, is one step back to the color it was opened on, and one step forward again; a color clicked beside the picker is a step of its own; the scene's text is not touched; and an edit made after it is undone before it.
+  BACK1: `${HELP}
+const out = {};
+await start(${JSON.stringify(PLAIN)}, 'both', 'select');
+const source0 = S().source;
+const color = () => S().settings.background;
+const first = color();
+out.first = first;
+const well = document.querySelector('.object.background .color-swatch');
+well.click(); await tick(200);
+const square = document.querySelector('.color-picker .color-square');
+const sr = square.getBoundingClientRect();
+pe(square, 'pointerdown', sr.left + sr.width * 0.5, sr.top + sr.height * 0.5);
+pe(square, 'pointermove', sr.left + sr.width * 0.6, sr.top + sr.height * 0.4);
+pe(square, 'pointermove', sr.left + sr.width * 0.7, sr.top + sr.height * 0.3);
+pe(square, 'pointerup', sr.left + sr.width * 0.7, sr.top + sr.height * 0.3);
+await tick(200);
+out.whileOpen = color() !== first;
+document.querySelector('.timeline').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 400, clientY: 700 }));
+await tick(300);
+const picked = color();
+out.closed = { picker: !!document.querySelector('.color-picker'), kept: picked !== first };
+// An edit after it: the box moved by the app's own operation.
+ops.setObjectProp('box', 'x', 50); await tick(250);
+await undo();
+out.editUndoneFirst = { box: lines('box', ['x']), color: color() === picked };
+await undo();
+out.undone = color() === first;
+key('keydown', 'KeyY', { ctrlKey: true }); await tick(400);
+out.redone = color() === picked;
+await undo();
+out.back = { color: color() === first, source: S().source === source0 };
+// A color beside the picker, one of those used lately.
+S().rememberColor('#224466'); S().setPrefs({ recentColors: 4 }); await tick(250);
+const beside = [...document.querySelectorAll('.object.background .color-recent .swatch')].find((b) => b.title === '#224466');
+beside?.click(); await tick(300);
+out.beside = { found: !!beside, color: color() };
+await undo();
+out.besideUndone = color() === first;
 out.error = S().error;
 return out`,
 }

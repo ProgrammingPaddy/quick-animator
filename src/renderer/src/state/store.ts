@@ -34,7 +34,7 @@ export function sectionOrder(saved: readonly string[] | undefined): TimelineSect
 export type Tool = 'select' | 'object' | 'path' | 'shape' | 'pencil' | 'paint' | 'camera'
 /** What the preview shows (D359): the scene as it is worked on, what the camera sees, or the two side by side. */
 export type PreviewView = 'preview' | 'both' | 'camera'
-export const PREVIEW_VIEWS: readonly PreviewView[] = ['preview', 'both', 'camera']
+export const PREVIEW_VIEWS: readonly PreviewView[] = ['preview', 'camera', 'both']
 /** What a press picks (D247). */
 export type Pick = 'object' | 'group' | 'class'
 
@@ -503,13 +503,15 @@ interface State {
   hidden: string[]
   /** Whether the preview outlines the masks (D344, D350): those on what is selected, or with nothing selected every mask there is at the playhead; off unless turned on, and persisted. */
   showMasks: boolean
+  /** A moment the preview shows in place of the playhead's, for now (D385): the frame under the timeline's razor, which a click there would cut at. The playhead stays where it is, and playback shows its own. */
+  peekTime: number | null
   /** Whether the Preview view outlines the cameras alive at the playhead, each with its name (D374); off unless turned on, and persisted. A selected camera shows either way, and the Camera tool shows them all. */
   showCameras: boolean
   /** The Objects pane's view (D338): the layers, top first, or the objects by type. */
   objectsView: 'layers' | 'type'
-  /** What the preview shows (D359): Preview, Both, or Camera; kept between sessions. */
+  /** What the preview shows (D359): Preview, Camera, or the two side by side, `both`; kept between sessions. */
   previewView: PreviewView
-  /** In Both, the share of the preview's width the Preview view takes, 0.2 to 0.8; kept (D359). */
+  /** Side by side, the share of the preview's width the Preview view takes, 0.2 to 0.8; kept (D359). */
   previewSplit: number
   /** The marker whose text is being typed on the ruler, by its index (D307). */
   markerEdit: number | null
@@ -583,9 +585,10 @@ interface State {
   setHidden: (names: string[], hidden: boolean) => void
   toggleShowMasks: () => void
   toggleShowCameras: () => void
+  setPeekTime: (time: number | null) => void
   setObjectsView: (view: 'layers' | 'type') => void
   setPreviewView: (view: PreviewView) => void
-  /** The next of Preview, Both, Camera (D359). */
+  /** The next of Preview, Camera, Side by side (D359, D381). */
   cyclePreviewView: () => void
   setPreviewSplit: (share: number) => void
   setPathPoints: (indices: number[]) => void
@@ -673,6 +676,7 @@ function createAppStore() {
       hidden: [],
       showMasks: loadChoice<'on' | 'off'>(SHOW_MASKS_KEY, ['on', 'off'], 'off') === 'on',
       showCameras: loadChoice<'on' | 'off'>(SHOW_CAMERAS_KEY, ['on', 'off'], 'off') === 'on',
+      peekTime: null,
       objectsView: loadChoice<'layers' | 'type'>(OBJECTS_VIEW_KEY, ['layers', 'type'], 'layers'),
       previewView: loadChoice<PreviewView>(PREVIEW_VIEW_KEY, PREVIEW_VIEWS, 'preview'),
       previewSplit: loadSplit(),
@@ -831,6 +835,7 @@ function createAppStore() {
           saveChoice(SHOW_MASKS_KEY, s.showMasks ? 'off' : 'on')
           return { showMasks: !s.showMasks }
         }),
+      setPeekTime: (peekTime) => set({ peekTime }),
       toggleShowCameras: () =>
         set((s) => {
           saveChoice(SHOW_CAMERAS_KEY, s.showCameras ? 'off' : 'on')

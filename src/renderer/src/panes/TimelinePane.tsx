@@ -390,10 +390,19 @@ export function TimelinePane() {
   const setTimelineTool = useStore((s) => s.setTimelineTool)
   const razor = timelineTool === 'razor'
   const gridRef = useRef<HTMLDivElement>(null)
-  // The razor's guide goes with the razor, however it is put away (owner, 2026-10-20).
+  /** The preview shows the frame under the razor while it is over the rows (D385): the frame a click there would cut at. Null gives the preview back to the playhead. */
+  const peek = (t: number | null) => {
+    const s = useStore.getState()
+    if (s.peekTime !== t) s.setPeekTime(t)
+  }
+  // The razor's guide goes with the razor, however it is put away (owner, 2026-10-20), and so does the frame it showed.
   useEffect(() => {
-    if (!razor) setSnapLine(null)
+    if (!razor) {
+      setSnapLine(null)
+      peek(null)
+    }
   }, [razor])
+  useEffect(() => () => peek(null), [])
   const rulerRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const rowsRef = useRef<HTMLDivElement>(null)
@@ -1047,6 +1056,17 @@ export function TimelinePane() {
   }
 
   const snappedAt = (clientX: number): number => snapTime(rawTimeAt(clientX), model, null, viewRef.current.pps, useStore.getState().snap)
+
+  /** The razor over the rows: its line where a click would cut, snapped as the playhead is, and that frame in the preview (D385). */
+  const showCut = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const t = snappedAt(e.clientX)
+    setSnapLine(t)
+    peek(t)
+  }
+  const hideCut = () => {
+    setSnapLine(null)
+    peek(null)
+  }
 
   /** The razor (D264): a click on an animation slices it where the pointer is, snapped as the playhead is; a class animation becomes the object's own first. */
   const sliceHere = (obj: SceneObject, index: number) => (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -2006,7 +2026,7 @@ export function TimelinePane() {
           <Playhead kind="head" scrollTime={view.scrollTime} pps={view.pps} width={width} />
         </div>
         <div className="tl-body" ref={bodyRef}>
-          <div className={`tl-rows${razor ? ' razor' : ''}`} ref={rowsRef} onPointerDown={beginMarquee} onContextMenu={blankMenu} onPointerMove={razor ? (e) => setSnapLine(snappedAt(e.clientX)) : undefined} onPointerLeave={razor ? () => setSnapLine(null) : undefined}>
+          <div className={`tl-rows${razor ? ' razor' : ''}`} ref={rowsRef} onPointerDown={beginMarquee} onContextMenu={blankMenu} onPointerMove={razor ? showCut : undefined} onPointerLeave={razor ? hideCut : undefined}>
             {renderObjectsView()}
             <div className="tl-playhead-layer" aria-hidden="true">
               {model?.markers.map((m, i) => (

@@ -911,11 +911,12 @@ caption = Text({
 `attached` is read when the scene is: it is `true` or left out, never a link, and not animated.
 
 The background: `background` in `project.json` is behind everything and fills the picture
-whatever the camera does.
+whatever the camera does. Its color is changed on the Background row at the foot of the Objects
+pane's layers, and a change there is undone and redone as an edit to the scene is.
 
 In the GUI. The preview's header switches what the pane shows: Preview, the scene as it is worked
 on, with the frame of the camera that has the picture drawn in it; Camera, what that camera sees;
-or Both, side by side; C goes to the next. Every tool works in the Camera view as in the Preview
+or the two side by side; C goes to the next. Every tool works in the Camera view as in the Preview
 view, through the camera: what is selected, dragged, resized, drawn, or typed there is written as
 it would be in the Preview view. Fit shows the frame of the camera that has the picture. With
 any tool, the wheel over the Camera view zooms the camera at the pointer and the middle button
@@ -960,7 +961,7 @@ reference or a value link, as a small chain mark on the clip and the row, with t
 on the clip, and marks what is referred to. Right-click an animation for Links, or an object for Properties, Links:
 a searchable list of the objects, groups, classes, and animations, each opening to what it offers;
 picking one writes a time reference or a value link, `() => box.x`, and names the target if it has
-no name. The Selected pane takes code in any field and shows what a link comes to. **Coming:** `link` actions with a start and an end.
+no name. The Selected pane takes code in any field and shows what a link comes to.
 
 ## What the GUI can edit
 

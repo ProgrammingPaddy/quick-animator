@@ -7,7 +7,7 @@ import { Annotation, EditorState, RangeSet, RangeSetBuilder, StateEffect, StateF
 import { Decoration, EditorView, GutterMarker, WidgetType, drawSelection, gutterLineClass, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from '@codemirror/view'
 import type { TextEdit } from '../model/edits'
 import type { Range } from '../model/types'
-import type { SelectionState } from '../state/store'
+import type { ProjectSettings, SelectionState } from '../state/store'
 import { colorSwatches } from './colors'
 import { easePicks } from './easePicker'
 import { numberScrub } from './scrub'
@@ -46,6 +46,18 @@ const selectionEffect = StateEffect.define<{ before: SelectionState; after: Sele
 const selectionHistory = invertedEffects.of((tr) => {
   const inverted: StateEffect<unknown>[] = []
   for (const effect of tr.effects) if (effect.is(selectionEffect)) inverted.push(selectionEffect.of({ before: effect.value.after, after: effect.value.before }))
+  return inverted
+})
+/**
+ * A change of the project's settings made in a pane, the background's color (D364, D384),
+ * carried by a transaction as a selection is, so the history undoes and redoes it in its place
+ * among the edits. Whatever applies it, the first time, an undo, or a redo, the handler is given
+ * what to set.
+ */
+const settingsEffect = StateEffect.define<{ before: Partial<ProjectSettings>; after: Partial<ProjectSettings> }>()
+const settingsHistory = invertedEffects.of((tr) => {
+  const inverted: StateEffect<unknown>[] = []
+  for (const effect of tr.effects) if (effect.is(settingsEffect)) inverted.push(settingsEffect.of({ before: effect.value.after, after: effect.value.before }))
   return inverted
 })
 /** The lines with problems: the error's, in red, and the warnings', in amber (D149). */
@@ -208,13 +220,17 @@ let suppress = false
 let onChange: ((doc: string) => void) | null = null
 let onSelection: ((state: SelectionState) => void) | null = null
 let getSelection: (() => SelectionState) | null = null
+let onSettings: ((settings: Partial<ProjectSettings>) => void) | null = null
+/** How many times a step has set the project's settings: an undo that did is a step that counts. */
+let settingsSteps = 0
 
-/** Undo text edits; selection-only steps along the way are undone too but do not count. */
+/** Undo text edits; selection-only steps along the way are undone too but do not count. A step that sets the project's settings counts, as an edit does (D384). */
 function undoText(v: EditorView): boolean {
   for (let i = 0; i < 100; i++) {
     const doc = v.state.doc
+    const set = settingsSteps
     if (!undo(v)) return i > 0
-    if (v.state.doc !== doc) return true
+    if (v.state.doc !== doc || settingsSteps !== set) return true
   }
   return true
 }
@@ -222,8 +238,9 @@ function undoText(v: EditorView): boolean {
 function redoText(v: EditorView): boolean {
   for (let i = 0; i < 100; i++) {
     const doc = v.state.doc
+    const set = settingsSteps
     if (!redo(v)) return i > 0
-    if (v.state.doc !== doc) return true
+    if (v.state.doc !== doc || settingsSteps !== set) return true
   }
   return true
 }
@@ -259,6 +276,7 @@ function extensions(): Extension[] {
       joinToEvent: (tr, adjacent) => adjacent || (tr.annotation(gestureAnnotation) !== undefined && tr.annotation(gestureAnnotation) === lastGesture),
     }),
     selectionHistory,
+    settingsHistory,
     indentUnit.of('  '),
     indentOnInput(),
     bracketMatching(),
@@ -296,7 +314,15 @@ function extensions(): Extension[] {
     ]),
     EditorView.updateListener.of((update) => {
       if (update.docChanged && !suppress) onChange?.(update.state.doc.toString())
-      for (const tr of update.transactions) for (const effect of tr.effects) if (effect.is(selectionEffect)) onSelection?.(effect.value.after)
+      for (const tr of update.transactions) {
+        for (const effect of tr.effects) {
+          if (effect.is(selectionEffect)) onSelection?.(effect.value.after)
+          else if (effect.is(settingsEffect)) {
+            settingsSteps++
+            onSettings?.(effect.value.after)
+          }
+        }
+      }
     }),
   ]
 }
@@ -405,6 +431,20 @@ export function applyEdits(edits: TextEdit[], select?: SelectionState): void {
   const annotations = openGesture !== null ? [gestureAnnotation.of(openGesture), Transaction.time.of(gestureTime)] : []
   view.dispatch({ changes: edits.map((e) => ({ from: e.from, to: e.to, insert: e.insert })), effects, annotations })
   lastGesture = openGesture
+}
+
+/** What sets the project's settings when a step of the history says to (D384). */
+export function setSettingsSink(handler: (settings: Partial<ProjectSettings>) => void): void {
+  onSettings = handler
+}
+
+/** Set some of the project's settings as a step of the history (D384): undoing it sets `before` again. With no editor yet, they are just set. */
+export function recordSettings(before: Partial<ProjectSettings>, after: Partial<ProjectSettings>): void {
+  if (!view) {
+    onSettings?.(after)
+    return
+  }
+  view.dispatch({ effects: settingsEffect.of({ before, after }) })
 }
 
 /** Record a selection change from the panes as a step of the history (D90). */

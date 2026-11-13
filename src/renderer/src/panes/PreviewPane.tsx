@@ -311,7 +311,8 @@ function restingTime(gesture: { restore: number; from: number; editing?: boolean
  */
 /** The readout of the playhead time under the view: it alone follows every frame. */
 const PreviewTime = memo(function PreviewTime({ fps }: { fps: number }) {
-  const time = useStore((s) => s.time)
+  // The time of the frame that shows: the playhead's, or the one under the timeline's razor (D385).
+  const time = useStore((s) => (s.playing ? s.time : (s.peekTime ?? s.time)))
   return <span>{formatTime(time, fps)}</span>
 })
 
@@ -497,12 +498,14 @@ export function PreviewPane() {
 
     const paint = () => {
       const s = useStore.getState()
+      // The moment drawn: the playhead's, or while the timeline's razor is over the rows, the one it would cut at (D385).
+      const now = s.playing ? s.time : (s.peekTime ?? s.time)
       // While Shift looks ahead, whatever was alive where the gesture began stays drawn (D138).
       // The selection shows in every tool but the Shape tool, whose handles show it; the box's handles belong to Select alone (D208, D236, D247).
       // The cameras' frames show when asked, and always with the Camera tool, which picks by them (D373, D374).
       renderer.setView({ hidden: s.hidden, held: s.selection, showMasks: s.showMasks, showCameras: s.showCameras || s.tool === 'camera' })
       const over = overlayFor('world')
-      renderer.update(s.model, s.time, over.selection, over.mode, over.pixel, over.axes, gestureRef.current?.restore, over.anchored, over.handles)
+      renderer.update(s.model, now, over.selection, over.mode, over.pixel, over.axes, gestureRef.current?.restore, over.anchored, over.handles)
       laidOut = 'world'
       // The selected path, or the first path of the selected object, shows its shape; with the path itself selected and its points written out, each point wears a handle (D192, D194).
       // Which paths show (D205, D209): with the Path tool, every object's, but for those hidden for now; otherwise the selected object's when Paths is on; and the selected path always. The selected path carries the handles.
@@ -564,11 +567,11 @@ export function PreviewPane() {
         const o = model.objects.find((x) => x.name === s.selection[0] && x.className === SHAPE)
         if (o) {
           const editable = shapeEditable(o.name)
-          const frame = shapeWorldFrame(model, o, s.time)
+          const frame = shapeWorldFrame(model, o, now)
           const handles: ShownShape['handles'] = []
           let pieces: ShownShape['pieces'] = [{ curve: frame.curve, at: [] }]
           if (editable === 'curves') {
-            const world = (p: Point): Point => shapeWorldOf(model, o, s.time, p)
+            const world = (p: Point): Point => shapeWorldOf(model, o, now, p)
             const anchors = shapeEditAnchors(o.name)
             frame.anchors = anchors.map(world)
             pieces = shapeEditPieces(o.name).map((piece) => ({ curve: piece.curve.map(world), at: piece.at ?? [] }))
@@ -588,8 +591,8 @@ export function PreviewPane() {
       shapeRef.current = shape
       renderer.setShapeHandles(shape?.editable ? shape.frame.anchors : null, 1 / viewport.zoom, shape?.editable ? s.pathPoints : [], shape?.handles ?? [], shapeRound)
       // The frame sits where the camera that has the picture puts it (D357, D358); with none, at the scene's middle.
-      const live = s.model ? cameraAt(s.model, s.time, gestureRef.current?.restore) : null
-      const taken = live && s.model ? viewOf(s.model, live, s.time) : NO_VIEW
+      const live = s.model ? cameraAt(s.model, now, gestureRef.current?.restore) : null
+      const taken = live && s.model ? viewOf(s.model, live, now) : NO_VIEW
       viewport.setFrame(taken)
       const worldShown = s.previewView !== 'camera'
       // Each camera alive wears its name at its frame's top left corner, the one that has the picture lit (D361).

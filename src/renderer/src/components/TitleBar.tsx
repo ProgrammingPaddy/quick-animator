@@ -7,9 +7,10 @@ import icon from '../../../../resources/icon-mono.svg'
 
 /**
  * The top of the window, in place of the system title bar and the menu (D108, D261): File,
- * which drops down Open, New, Import, and Export, then Preferences and Help on the left; the app
- * and project names in the middle; undo and redo as arrows on the right, before the room left
- * for the system's window controls. The bar drags the window; its buttons do not.
+ * which drops down Open, New, Import, and Export, then Preferences and Help, then undo and redo
+ * as arrows beside Help (D383), all on the left; the app and project names in the middle; and at
+ * the right the room left for the system's window controls. The bar drags the window; its
+ * buttons do not.
  */
 export function TitleBar() {
   const project = useStore((s) => s.project)
@@ -45,14 +46,6 @@ export function TitleBar() {
         <button onClick={() => setHelp(true)} title={`Help (${key('help')})`}>
           Help
         </button>
-      </div>
-      <div className="titlebar-title" title={project?.path}>
-        <img className="app-icon" src={icon} alt="" />
-        <span className="app-name">Quick Animator</span>
-        {project && <span className="separator">{'·'}</span>}
-        {project && <span className="project-name">{project.name}</span>}
-      </div>
-      <div className="titlebar-right">
         <button className="icon" onClick={editorUndo} title={`Undo (${key('undo')})`} aria-label="Undo">
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
             <path d="M6.5 3.5 3 7l3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -67,6 +60,14 @@ export function TitleBar() {
           </svg>
           <span className="sr-only">Redo</span>
         </button>
+      </div>
+      <div className="titlebar-title" title={project?.path}>
+        <img className="app-icon" src={icon} alt="" />
+        <span className="app-name">Quick Animator</span>
+        {project && <span className="separator">{'·'}</span>}
+        {project && <span className="project-name">{project.name}</span>}
+      </div>
+      <div className="titlebar-right">
         <div className="titlebar-spacer" />
       </div>
     </div>

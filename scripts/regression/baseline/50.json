@@ -354,7 +354,8 @@
   },
   "TITLEBAR2": {
    "flushRight": 8,
-   "gapFromHelp": 1217,
+   "undoAfterHelp": 4,
+   "nothingAtTheRight": true,
    "barWidth": 1463,
    "err": null
   },

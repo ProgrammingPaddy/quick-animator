@@ -5,16 +5,18 @@ import { PREVIEW_VIEWS, useStore, type Pick, type PreviewView } from '../state/s
 const PICK_LABEL: Record<Pick, string> = { object: 'Object', group: 'Group', class: 'Class' }
 const PICK_TIP: Record<Pick, string> = { object: 'A click picks the object', group: 'A click picks the group it is in', class: 'A click picks every object of its class' }
 
-/** What the preview shows (D359), as its switch names them. */
-const VIEW_LABEL: Record<PreviewView, string> = { preview: 'Preview', both: 'Both', camera: 'Camera' }
-const VIEW_TIP: Record<PreviewView, string> = { preview: "The scene, with the camera's frame in it", both: 'The scene and what the camera sees, side by side', camera: 'What the camera sees' }
+/** What the preview shows (D359), as its switch names them: the two views side by side says so, where it said Both (D381). */
+const VIEW_LABEL: Record<PreviewView, string> = { preview: 'Preview', camera: 'Camera', both: 'Side by side' }
+const VIEW_TIP: Record<PreviewView, string> = { preview: "The scene, with the camera's frame in it", camera: 'What the camera sees', both: 'The scene and what the camera sees, side by side' }
 
 /**
- * The preview's own choices, in its pane's header (D371): what a click picks, where a Shift-drag's
- * animation sits and whether they chain, snapping to the grid and to edges, the paths, the
- * masks, and the cameras shown (D374), collision; then what the pane shows, Preview, Both, or Camera (D359). The tools and
- * what the tool in hand can do stay over the preview, with the zoom and Fit. A right-click on any
- * of it does nothing, as on the preview's own bars (D308).
+ * The preview's own choices, in its pane's header (D371), at its right, in four sections with a
+ * little room between them (D381): what a click picks; what the pane shows, Preview, Camera, or
+ * the two side by side (D359); what is drawn over the scene, the paths, the masks, and the
+ * cameras (D374); and how the tools work, where a Shift-drag's animation sits and whether they
+ * chain, snapping to the grid and to edges, collision. The tools and what the tool in hand can do
+ * stay over the preview, with the zoom and Fit. A right-click on any of it does nothing, as on
+ * the preview's own bars (D308).
  */
 export function PreviewHeader() {
   const pick = useStore((s) => s.pick)
@@ -40,15 +42,33 @@ export function PreviewHeader() {
   const hotkeys = useStore((s) => s.prefs.hotkeys ?? NO_OVERRIDES)
   const key = keysLabel('previewView', hotkeys, true)
   return (
-    <>
-      <div className="preview-options" role="group" aria-label="Preview options" onContextMenu={(e) => e.preventDefault()}>
-        <div className="preview-modes" role="group" aria-label="What a click picks">
-          {(['object', 'group', 'class'] as const).map((p) => (
-            <button key={p} className={pick === p ? 'active' : ''} onClick={() => setPick(p)} title={PICK_TIP[p]} aria-pressed={pick === p}>
-              {PICK_LABEL[p]}
-            </button>
-          ))}
-        </div>
+    <div className="preview-options" role="group" aria-label="Preview options" onContextMenu={(e) => e.preventDefault()}>
+      <div className="preview-modes" role="group" aria-label="What a click picks">
+        {(['object', 'group', 'class'] as const).map((p) => (
+          <button key={p} className={pick === p ? 'active' : ''} onClick={() => setPick(p)} title={PICK_TIP[p]} aria-pressed={pick === p}>
+            {PICK_LABEL[p]}
+          </button>
+        ))}
+      </div>
+      <div className="preview-views" role="group" aria-label="What the preview shows">
+        {PREVIEW_VIEWS.map((v) => (
+          <button key={v} className={previewView === v ? 'active' : ''} onClick={() => setPreviewView(v)} title={key ? `${VIEW_TIP[v]} (${key} for the next)` : VIEW_TIP[v]} aria-pressed={previewView === v}>
+            {VIEW_LABEL[v]}
+          </button>
+        ))}
+      </div>
+      <div className="preview-section" role="group" aria-label="What is shown over the scene">
+        <button className={showPaths ? 'on' : ''} onClick={toggleShowPaths} title={showPaths ? "Showing the selected object's paths" : 'Showing a path only while it is selected'} aria-pressed={showPaths}>
+          Show Paths
+        </button>
+        <button className={showMasks ? 'on' : ''} onClick={toggleShowMasks} title={showMasks ? 'Showing the edges of the masks on what is selected, or of every mask with nothing selected' : "Showing a mask's edge only while it is selected"} aria-pressed={showMasks}>
+          Show Masks
+        </button>
+        <button className={showCameras ? 'on' : ''} onClick={toggleShowCameras} title={showCameras ? "Showing every camera's frame" : "Showing a camera's frame only while it is selected"} aria-pressed={showCameras}>
+          Show Cameras
+        </button>
+      </div>
+      <div className="preview-section" role="group" aria-label="How the tools work">
         <button
           className="preview-toggle"
           onClick={() => {
@@ -74,15 +94,6 @@ export function PreviewHeader() {
         </button>
         {previewSnap.on && <NumberField label="Grid, in pixels" value={previewSnap.grid} unit="px" onChange={(grid) => setPreviewSnap({ grid })} />}
         {previewSnap.on && <NumberField label="Angle step, in degrees" value={previewSnap.angle} unit={'°'} onChange={(angle) => setPreviewSnap({ angle })} />}
-        <button className={showPaths ? 'on' : ''} onClick={toggleShowPaths} title={showPaths ? "Showing the selected object's paths" : 'Showing a path only while it is selected'} aria-pressed={showPaths}>
-          Show Paths
-        </button>
-        <button className={showMasks ? 'on' : ''} onClick={toggleShowMasks} title={showMasks ? 'Showing the edges of the masks on what is selected, or of every mask with nothing selected' : "Showing a mask's edge only while it is selected"} aria-pressed={showMasks}>
-          Show Masks
-        </button>
-        <button className={showCameras ? 'on' : ''} onClick={toggleShowCameras} title={showCameras ? "Showing every camera's frame" : "Showing a camera's frame only while it is selected"} aria-pressed={showCameras}>
-          Show Cameras
-        </button>
         <button className={previewSnap.edges ? 'on' : ''} onClick={() => setPreviewSnap({ edges: !previewSnap.edges })} title={previewSnap.edges ? 'Aligning to edges and centers' : 'Not aligning to other objects'} aria-pressed={previewSnap.edges}>
           Edges
         </button>
@@ -95,13 +106,6 @@ export function PreviewHeader() {
           </button>
         )}
       </div>
-      <div className="preview-views" role="group" aria-label="What the preview shows" onContextMenu={(e) => e.preventDefault()}>
-        {PREVIEW_VIEWS.map((v) => (
-          <button key={v} className={previewView === v ? 'active' : ''} onClick={() => setPreviewView(v)} title={key ? `${VIEW_TIP[v]} (${key} for the next)` : VIEW_TIP[v]} aria-pressed={previewView === v}>
-            {VIEW_LABEL[v]}
-          </button>
-        ))}
-      </div>
-    </>
+    </div>
   )
 }
