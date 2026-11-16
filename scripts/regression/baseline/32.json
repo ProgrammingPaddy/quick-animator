@@ -118,6 +118,7 @@
     "Mask"
    ],
    "pathModes": [
+    "Create",
     "Edit",
     "Move path"
    ],
@@ -162,27 +163,27 @@
    },
    "movedAll": [
     [
-     -280,
-     20
+     -300,
+     0
     ],
     [
-     20,
-     220
+     0,
+     200
     ],
     [
-     330,
-     30
+     310,
+     10
     ]
    ],
    "tool": "select",
    "err": null
   },
   "SHOW1": {
-   "objectOn": 2,
+   "objectOn": 1,
    "objectOff": 0,
-   "selectedOff": 1,
-   "selectedOn": 2,
-   "pathTool": 2,
+   "selectedOff": 0,
+   "selectedOn": 1,
+   "pathTool": 1,
    "hidden": {
     "lines": 1,
     "keys": [

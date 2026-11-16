@@ -4,7 +4,7 @@ import { javascript } from '@codemirror/lang-javascript'
 import { bracketMatching, ensureSyntaxTree, foldable, foldEffect, foldedRanges, foldGutter, foldKeymap, foldService, indentOnInput, indentUnit, syntaxHighlighting } from '@codemirror/language'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import { Annotation, EditorState, RangeSet, RangeSetBuilder, StateEffect, StateField, Transaction, type Extension } from '@codemirror/state'
-import { Decoration, EditorView, GutterMarker, WidgetType, drawSelection, gutterLineClass, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from '@codemirror/view'
+import { Decoration, EditorView, GutterMarker, ViewPlugin, WidgetType, drawSelection, gutterLineClass, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import type { TextEdit } from '../model/edits'
 import type { Range } from '../model/types'
 import type { ProjectSettings, SelectionState } from '../state/store'
@@ -245,24 +245,89 @@ function redoText(v: EditorView): boolean {
   return true
 }
 
-/** Curves fold between their backticks, and a list of points written on one line between its brackets, as a list over several lines folds on its own (D244). */
-const shapeFolding = foldService.of((state, lineStart) => {
+/** Where the values of a recorded ease begin on its line, `ease: Ease.curve([` (D397), wherever in the ease it stands: a cut one is `ease: Ease.along(Ease.curve([...]), 0, 0.4)` (D264). */
+const CURVE_LINE = /^\s*ease:.*?Ease\.curve\(\[/
+/** A line that begins something that folds: a shape, a list of points, curves, a morph's target, a recorded ease. */
+const FOLDS = /^\s*(shape|points|curves|to):\s*(\[|`)/
+
+/**
+ * What folds on a line (D244, D397, D402), found from the text alone, so it is there whether or
+ * not the code has been read through yet: curves between their backticks; a list of points
+ * between its brackets, on one line or over several; the values of a recorded ease between
+ * theirs, on one line or over several.
+ */
+function foldAt(state: EditorState, lineStart: number): { from: number; to: number } | null {
   const line = state.doc.lineAt(lineStart)
-  const m = /^\s*(curves|shape|points|to):\s*(.*)$/.exec(line.text)
-  if (!m) return null
-  const rest = m[2]!
-  if (/^`\s*$/.test(rest)) {
+  const indent = line.text.length - line.text.trimStart().length
+  /** The first line after this one that closes what it opened: the same indent, then `close`. */
+  const closing = (close: string): { from: number; to: number } | null => {
     for (let n = line.number + 1; n <= state.doc.lines; n++) {
       const next = state.doc.line(n)
-      if (/^\s*`\s*,?\s*$/.test(next.text)) return { from: line.to, to: next.from + (next.text.length - next.text.trimStart().length) }
+      const at = next.text.length - next.text.trimStart().length
+      if (at === indent && next.text.startsWith(close, at)) return { from: line.to, to: next.from + at }
+      // A line no further in than this one that does not close it: what was opened is not written the way the app writes it.
+      if (at <= indent && next.text.trim() !== '') return null
     }
     return null
   }
+  const curve = CURVE_LINE.exec(line.text)
+  if (curve) {
+    const from = curve[0].length
+    const to = line.text.indexOf(']', from)
+    if (to >= 0) return to > from ? { from: line.from + from, to: line.from + to } : null
+    return closing(']')
+  }
+  const m = /^\s*(curves|shape|points|to):\s*(.*)$/.exec(line.text)
+  if (!m) return null
+  const rest = m[2]!
+  if (/^`\s*$/.test(rest)) return closing('`')
+  if (/^\[\s*$/.test(rest)) return closing(']')
   const open = line.text.indexOf('[')
   const close = line.text.lastIndexOf(']')
   if (rest.startsWith('[') && /\[\s*\[/.test(rest) && close > open + 1) return { from: line.from + open + 1, to: line.from + close }
   return null
-})
+}
+
+const shapeFolding = foldService.of((state, lineStart) => foldAt(state, lineStart))
+
+/** The mark that makes a line go on, where the pane is too narrow for it, this many columns in: its first row stays where it is written. */
+const hangs = new Map<number, Decoration>()
+function hanging(columns: number): Decoration {
+  let mark = hangs.get(columns)
+  if (!mark) {
+    mark = Decoration.line({ attributes: { style: `padding-left: calc(6px + ${columns}ch); text-indent: -${columns}ch` } })
+    hangs.set(columns, mark)
+  }
+  return mark
+}
+
+/**
+ * A line too long for the pane goes on under itself, a step further in than it begins (D402),
+ * where it went on at the pane's edge: a long list of values reads as part of its block.
+ */
+const wrapIndent = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet
+    constructor(view: EditorView) {
+      this.decorations = this.marks(view)
+    }
+    update(update: ViewUpdate): void {
+      if (update.docChanged || update.viewportChanged) this.decorations = this.marks(update.view)
+    }
+    marks(view: EditorView): DecorationSet {
+      const builder = new RangeSetBuilder<Decoration>()
+      for (const { from, to } of view.visibleRanges) {
+        for (let pos = from; pos <= to; ) {
+          const line = view.state.doc.lineAt(pos)
+          builder.add(line.from, line.from, hanging(line.text.length - line.text.trimStart().length + 2))
+          pos = line.to + 1
+        }
+      }
+      return builder.finish()
+    }
+  },
+  { decorations: (plugin) => plugin.decorations },
+)
 
 function extensions(): Extension[] {
   return [
@@ -290,6 +355,7 @@ function extensions(): Extension[] {
     timeHints,
     numberScrub({ begin: beginGesture, end: endGesture }),
     EditorView.lineWrapping,
+    wrapIndent,
     javascript(),
     syntaxHighlighting(editorHighlight),
     editorTheme,
@@ -314,6 +380,8 @@ function extensions(): Extension[] {
     ]),
     EditorView.updateListener.of((update) => {
       if (update.docChanged && !suppress) onChange?.(update.state.doc.toString())
+      // What arrives whole comes folded (D402), unless it is being written by hand.
+      if (update.docChanged && !update.transactions.some((tr) => tr.isUserEvent('input') || tr.isUserEvent('delete') || tr.isUserEvent('move'))) foldArrived(update)
       for (const tr of update.transactions) {
         for (const effect of tr.effects) {
           if (effect.is(selectionEffect)) onSelection?.(effect.value.after)
@@ -354,17 +422,17 @@ export function resetEditorDoc(text: string): void {
   foldShapes()
 }
 
-/** Fold every `shape: [` list that spans lines, so a path's points stay out of the way until wanted (D204); one already open is left open. */
+/** Fold every shape, list of points, and recorded ease in the code, so they stay out of the way until wanted (D204, D402): what a file freshly loaded begins as. */
 export function foldShapes(): void {
   if (!view) return
   const { state } = view
-  // A freshly loaded file may not be parsed yet, and a fold needs the tree.
-  ensureSyntaxTree(state, state.doc.length, 500)
+  // A list written some other way than the app writes it folds by the code's own structure, which a freshly loaded file may not have been read for yet.
+  ensureSyntaxTree(state, state.doc.length, 100)
   const effects: StateEffect<unknown>[] = []
   const folded = foldedRanges(state)
   for (let n = 1; n <= state.doc.lines; n++) {
     const line = state.doc.line(n)
-    if (!/^\s*(shape|points|curves|to):\s*(\[|`)/.test(line.text)) continue
+    if (!FOLDS.test(line.text) && !CURVE_LINE.test(line.text)) continue
     const range = foldable(state, line.from, line.to)
     if (!range) continue
     let open = true
@@ -374,6 +442,38 @@ export function foldShapes(): void {
     if (open) effects.push(foldEffect.of(range))
   }
   if (effects.length > 0) view.dispatch({ effects })
+}
+
+/**
+ * Fold what has just arrived whole (D402): a shape, a list of points, or a recorded ease whose
+ * opening came with the change, whether a pane wrote it, an undo or a redo brought it back, or
+ * the file changed outside. What is typed, pasted, or deleted by hand folds nothing, and a
+ * change inside something leaves it as it stands, open or folded.
+ */
+function foldArrived(update: ViewUpdate): void {
+  const { state } = update
+  const folded = foldedRanges(state)
+  const effects: StateEffect<unknown>[] = []
+  const seen = new Set<number>()
+  update.changes.iterChangedRanges((_fromA, _toA, fromB, toB) => {
+    if (toB <= fromB) return
+    const last = state.doc.lineAt(toB).number
+    for (let n = state.doc.lineAt(fromB).number; n <= last; n++) {
+      if (seen.has(n)) continue
+      seen.add(n)
+      const line = state.doc.line(n)
+      if (!FOLDS.test(line.text) && !CURVE_LINE.test(line.text)) continue
+      const range = foldAt(state, line.from)
+      // Its opening is among what arrived: the bracket or the backtick just before what folds.
+      if (!range || range.from - 1 < fromB || range.from - 1 >= toB) continue
+      let open = true
+      folded.between(range.from, range.to, (from, to) => {
+        if (from === range.from && to === range.to) open = false
+      })
+      if (open) effects.push(foldEffect.of(range))
+    }
+  })
+  if (effects.length > 0) update.view.dispatch({ effects })
 }
 
 /**
@@ -395,7 +495,6 @@ export function setEditorDoc(text: string): void {
   } finally {
     suppress = false
   }
-  foldShapes()
 }
 
 /** Which gesture a transaction belongs to, so the history joins a gesture's edits (D22). */
@@ -411,7 +510,17 @@ export function beginGesture(): void {
   gestureTime = Date.now()
 }
 
+/** What runs as a gesture ends, while what it writes still joins the gesture's undo step: a recording writes out what the gesture did (D412). */
+const gestureEnders = new Set<() => void>()
+
+/** Run something at the end of every gesture, before it closes. Returns how to stop. */
+export function onGestureEnd(run: () => void): () => void {
+  gestureEnders.add(run)
+  return () => gestureEnders.delete(run)
+}
+
 export function endGesture(): void {
+  if (openGesture !== null) for (const run of [...gestureEnders]) run()
   openGesture = null
 }
 

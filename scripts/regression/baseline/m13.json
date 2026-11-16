@@ -82,7 +82,7 @@
    },
    "pathStarted": {
     "path": [
-     "box.path({ shape: [ [-100, 100], [150, -220], ], at: 0, duration: 1, })"
+     "box.path({ shape: [ [0, 0], [250, -320], ], at: 0, duration: 1, })"
     ],
     "selected": [
      {
@@ -92,7 +92,7 @@
     ]
    },
    "pathEdited": [
-    "box.path({ shape: [ [-100, 100], [25, -30], [150, -160], [-300, -150], ], at: 0, duration: 1, })"
+    "box.path({ shape: [ [0, 0], [125, -130], [250, -260], [-200, -250], ], at: 0, duration: 1, })"
    ],
    "text": {
     "offMiddle": [
@@ -216,7 +216,7 @@
     "frames": [],
     "lit": false,
     "kept": "off",
-    "title": "Showing a camera's frame only while it is selected"
+    "title": "Show camera frames"
    },
    "notPickedByLine": [
     "backdrop"
@@ -251,7 +251,7 @@
      "right"
     ],
     "lit": true,
-    "title": "Showing every camera's frame"
+    "title": "Show camera frames"
    },
    "error": null
   },
@@ -964,7 +964,7 @@
      "Grid, in pixels",
      "Angle step, in degrees"
     ],
-    "title": "Snapping to the grid",
+    "title": "Snap to the grid",
     "shape": {
      "height": 50,
      "rows": 2,
@@ -976,7 +976,7 @@
    "snapOff": {
     "on": false,
     "numbers": 0,
-    "title": "Free placement"
+    "title": "Snap to the grid"
    },
    "pick": {
     "pick": "group",

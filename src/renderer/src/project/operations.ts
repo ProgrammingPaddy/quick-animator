@@ -1,20 +1,22 @@
-import { applyEdits, beginGesture, endGesture, foldShapes, gestureOpen, scrollToPos } from '../code/editor'
+import { applyEdits, beginGesture, endGesture, gestureOpen, onGestureEnd, scrollToPos } from '../code/editor'
 import { findDependents, type Dependent } from '../model/dependents'
 import { appendStatement, blockText, formatNumber, formatValue, insertDeclaration, lineEdit, moveStatementEdits, removeProp, removeStatements, setProp, setPropFrom, setPropText, setTimeProp, type TextEdit } from '../model/edits'
 import { DEFAULT_EASE_FRACTION, namedEasings } from '../model/easing'
-import { isMember } from '../model/evaluate'
+import { evaluateScene, isMember } from '../model/evaluate'
 import { activeMembers, classSpan, groupFor, groupMembers, memberRef, movedInTime, normalizeSelection, withCarried } from '../model/groups'
 import { isMaskList, MASK_BELOW, maskDrawnBy, maskFor, maskNamed, maskWord, scopeRenamed, scopeWith } from '../model/masks'
 import { attrSchema, CAMERA, classes, EASE_NAMES, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ATTRS, type AttrValue, type Verb } from '../model/registry'
-import { absoluteAt, actionCourse, anchorTime, memberBox, pathCutAt, pathFrame, pathHolds, pathShift, pointsCenter, positionAt, progressAt, rawFromWorld, morphInForce, morphRunning, morphTargetSegs, shapeCurves, shapeOwnFromWorld, shapeOwnPoints, shapeSegsAt, travelFrame, type Point, type ShapePiece } from '../model/sample'
+import { actionCourse, anchorTime, memberBox, pathCutAt, pathHolds, pathShift, pointsCenter, progressAt, rawFromWorld, morphInForce, morphRunning, morphTargetSegs, shapeCurves, shapeOwnFromWorld, shapeOwnPoints, shapeSegsAt, shapeWorldCurve, travelFrame, type Point, type ShapePiece } from '../model/sample'
 import { anchorCurved, anchorKind, closePath, cornerAnchors, curveSegment, dragAnchorHandle, ellipsePathData, flattenPathData, formatCurves, hasPathData, moveAnchor, openPath, parsePathData, pathAnchors, pathDataBounds, polygonPathData, removeAnchor, scalePathData, segmentKind, serializePathData, smoothAnchors, smoothPathData, splitSegment, straightenAll, straightenAnchors, straightenSegment, translatePathData, type Anchor, type AnchorKind, type Seg } from '../model/pathData'
 import { insertPointsEdit, pointText, removePointEdit, setPointEdit, shapeLiteral, stringLiteral, type ShapeLiteral } from '../model/pathEdits'
 import { readSvg, scaleImported, type ImportedItem } from './svgImport'
 import { identifierEdits, nameProblem, renameMembers, replaceIdentifiers } from '../model/rename'
 import { currentWritten, definingAction, shownValue, valueAt, withWritten, writesFrom, writtenValues } from '../model/sample'
+import { curveCode, perFrame, sharesAlong, sharesToward, thinned, type Take } from '../model/record'
 import { begun, cameraAt, camerasOf, containers, existsAt, journeyOf, NO_VIEW, ownBounds, unitTurns, viewOf, worldPose, writtenSpan, type View } from '../model/sample'
 import type { Action, ActionInfo, BlockInfo, ClassAction, Mask, PropInfo, Range, SceneModel, SceneObject } from '../model/types'
-import { useStore, type ActionRef, type Clip, type ClipAction, type ClipObject, type MenuItem, type Pin, type SelectionState, type ObjectKind } from '../state/store'
+import { useStore, type ActionRef, type Clip, type ClipAction, type ClipObject, type MenuItem, type Pin, type RecordedClip, type SelectionState, type ObjectKind } from '../state/store'
+import { closeReview, findClip, noteClip, noteLives, noteMade, recorded } from './recording'
 import { timecode } from '../state/time'
 
 /**
@@ -74,10 +76,13 @@ export function uniqueName(base: string, from = 1): string {
   return `${base}${n}`
 }
 
-/** How a written number is rounded: whole pixels, tenths of a degree, hundredths for factors, a camera's zoom among them. */
+/** What is a factor or a share of one, written to hundredths: a whole number would lose it (D391). */
+const FINE_ATTRS = new Set(['scale', 'opacity', 'zoom', 'fillOpacity', 'strokeOpacity', 'drawn', 'lineHeight'])
+
+/** How a written number is rounded: whole pixels, tenths of a degree, hundredths for factors and shares, a camera's zoom and a fill's own opacity among them. */
 function roundAttr(attr: string, value: number): number {
-  if (attr === 'scale' || attr === 'opacity' || attr === 'zoom') return Math.round(value * 100) / 100
-  if (attr === 'rotation') return Math.round(value * 10) / 10
+  if (FINE_ATTRS.has(attr)) return Math.round(value * 100) / 100
+  if (attr === 'rotation' || attr === 'angle') return Math.round(value * 10) / 10
   return Math.round(value)
 }
 
@@ -156,8 +161,6 @@ export function addObject(className: ObjectKind, x: number, y: number, at = stat
   const length = useStore.getState().prefs.objectLength
   if (length !== null) attrs['until'] = roundSeconds(at + length)
   applyEdits([insertDeclaration(model.lastDeclEnd, blockText(`${name} = ${className === 'Mask' ? 'Rect' : className}`, attrs))], objectsSelected([name]))
-  // A Shape's points stay folded until wanted (D204, D244).
-  if (className === SHAPE) foldShapes()
   return name
 }
 
@@ -499,7 +502,8 @@ function writeTo(source: string, obj: SceneObject, definer: Action | null, attr:
 /**
  * Where an edit at a time falls in the middle of an animation (D263): the start of the earliest
  * of the object's own animations that has the say over one of the attributes while strictly
- * inside its span, more than half a frame from either end; null when none has.
+ * inside its span, more than half a frame from either end; null when none has. A path is one
+ * of them (D388).
  */
 function midAnimationStart(name: string, attrs: string[], time: number): number | null {
   const obj = findObject(name)
@@ -507,12 +511,31 @@ function midAnimationStart(name: string, attrs: string[], time: number): number 
   const slack = frameSeconds(state().fps) / 2
   let from: number | null = null
   for (const attr of attrs) {
-    const action = definingAction(obj, attr, time)
-    if (!action?.stmt || action.classAction || action.verb === 'path') continue
+    // A path that carries the place counts as the animation it is in the middle of (D388).
+    const action = pathOwns(obj, attr, time) ?? definingAction(obj, attr, time)
+    if (!action?.stmt || action.classAction) continue
     if (time <= action.start + slack || time >= action.end - slack) continue
     if (from === null || action.start < from) from = action.start
   }
   return from
+}
+
+/**
+ * The path that has an object's place at a time, for a write (D205, D388): the one that owns the
+ * attribute then, once past its first frame. At its first frame a path is where the object
+ * already was (D387), so what is written there goes to whatever put the object there, and the
+ * whole path goes with it: what lies below, which may be the end of another path.
+ */
+function pathOwns(obj: SceneObject, attr: string, time: number): Action | null {
+  if (attr !== 'x' && attr !== 'y') return null
+  const slack = frameSeconds(state().fps) / 2
+  const beginning: Action[] = []
+  for (;;) {
+    const holder = pathHolds(obj, attr, time, beginning)
+    if (!holder) return null
+    if (time > holder.start + slack) return holder
+    beginning.push(holder)
+  }
 }
 
 /**
@@ -558,9 +581,11 @@ function axesToJoin(name: string, attrs: string[], time: number, together: strin
  * at its own first frame (D263). What gets written is whatever makes the shown values true, with
  * everything stacked on top left in place (D122). An entry's `together` names attributes that
  * decide with its own where the change is written, changed or not: a drag's place is `x` and
- * `y` (D356). They are not written.
+ * `y` (D356). They are not written. While a recording runs the change is recorded instead, as it
+ * was made (D412), unless it is `plain`, a change that is no part of what is performed.
  */
-export function setAttrsAtMany(entries: { name: string; attrs: Record<string, number>; together?: string[] }[], time: number, options: { before?: boolean } = {}): boolean {
+export function setAttrsAtMany(entries: { name: string; attrs: Record<string, number>; together?: string[] }[], time: number, options: { before?: boolean; plain?: boolean } = {}): boolean {
+  if (!options.before && !options.plain && useStore.getState().recording) return recordChanges(entries)
   const slack = frameSeconds(state().fps) / 2
   const done = new Set<ClassAction>()
   for (const { name, attrs } of entries) {
@@ -608,9 +633,9 @@ export function setAttrsAtMany(entries: { name: string; attrs: Record<string, nu
   for (const piece of pieces) beginTimed(piece.name, piece.attrs, 'start', piece.from!, time - piece.from!)
   if (gaps.length > 0) {
     // The new animation is the change's own, not a thing to select: the selection stays, as after a key (D323).
-    const { selection, selectedActions, select, selectActions } = useStore.getState()
+    const { selection, selectedActions, select, selectWith } = useStore.getState()
     for (const gap of gaps) beginTimed(gap.name, gap.attrs, 'start', gap.from!, time - gap.from!)
-    if (selectedActions.length > 0) selectActions(selectedActions)
+    if (selectedActions.length > 0) selectWith(selection, selectedActions)
     else select(selection)
   }
   const changed = writeAttrsAtMany(entries, time)
@@ -625,8 +650,8 @@ function writeAttrsAtMany(entries: { name: string; attrs: Record<string, number>
   for (const { name, attrs: wanted } of entries) {
     const found = model.objects.find((o) => o.name === name)
     if (!found) continue
-    // A value a path owns right now cannot be written to show: the path is edited instead (D205), and the solver is kept off it.
-    const attrs = Object.fromEntries(Object.entries(wanted).filter(([attr]) => !pathHolds(found, attr, time)))
+    // A value a path owns right now cannot be written to show: the path is edited instead (D205), and the solver is kept off it. Not at the path's first frame, where it is what lies below that is written (D387).
+    const attrs = Object.fromEntries(Object.entries(wanted).filter(([attr]) => !pathOwns(found, attr, time)))
     edits.push(...heldByPathEdits(model, found, wanted, time))
     if (Object.keys(attrs).length === 0) continue
     let obj: SceneObject = found
@@ -657,34 +682,55 @@ function writeAttrsAtMany(entries: { name: string; attrs: Record<string, number>
 }
 
 /**
- * The edits for the values a path owns at a time (D205, D224): each goes into the path, along
- * its own axis, at the anchor the object is at, the first at the path's start and the last
- * after that, so a drag held by a move on one axis and a path on the other still lands where
- * the pointer is. A path whose shape is code takes nothing.
+ * The edits for the values a path owns at a time (D205, D224, D388): each goes into the path,
+ * along its own axis, at its last point, where the object is once the path is done, so a drag
+ * held by a move on one axis and a path on the other still lands where the pointer is. A path
+ * whose shape is code takes nothing.
  */
 function heldByPathEdits(model: SceneModel, obj: SceneObject, wanted: Record<string, number>, time: number): TextEdit[] {
   const byPath = new Map<Action, Record<string, number>>()
   for (const [attr, value] of Object.entries(wanted)) {
-    if (attr !== 'x' && attr !== 'y') continue
-    const holder = pathHolds(obj, attr, time)
+    const holder = pathOwns(obj, attr, time)
     if (!holder) continue
     byPath.set(holder, { ...(byPath.get(holder) ?? {}), [attr]: value })
   }
   const edits: TextEdit[] = []
-  for (const [holder, values] of byPath) {
-    const e = editableShape({ object: obj.name, index: obj.actions.indexOf(holder) })
-    const frame = travelFrame(model, obj, holder)
-    if (!e || !frame || frame.anchors.length === 0) continue
-    const anchor = time <= holder.start ? 0 : frame.anchors.length - 1
-    const world = { ...frame.anchors[anchor]!, ...values }
-    const raw = rawFromWorld(model, obj, holder, anchorTime(model, holder, anchor), world)
-    const edit = setPointEdit(e.shape, anchor, Math.round(raw.x), Math.round(raw.y))
-    if (edit && e.source.slice(edit.from, edit.to) !== edit.insert) edits.push(edit)
-  }
+  for (const [holder, values] of byPath) edits.push(...pathEndEdits(model, obj, holder, values))
   return edits
 }
 
-export function setAttrsAt(name: string, attrs: Record<string, number>, time: number, options?: { before?: boolean }): boolean {
+/**
+ * The edits that put a path's end where a place in the scene says (D197, D388): its last point,
+ * a point of a list or an anchor of curves, moved so that the object is there when the path is
+ * done; an axis not given stays as it is. Nothing for a shape that is code.
+ */
+function pathEndEdits(model: SceneModel, obj: SceneObject, action: Action, values: Record<string, number>): TextEdit[] {
+  const ref = { object: obj.name, index: obj.actions.indexOf(action) }
+  const frame = travelFrame(model, obj, action)
+  if (!frame || frame.anchors.length === 0) return []
+  const last = frame.anchors.length - 1
+  const when = anchorTime(model, action, last)
+  // The values are what the object shows, in the scene for one a group carries, as its last point is: the point goes as far as each value is from what shows as the path ends, and an axis not given stays.
+  const world = { ...frame.anchors[last]! }
+  for (const axis of ['x', 'y'] as const) {
+    const wanted = values[axis]
+    const shown = shownValue(model, obj, axis, when)
+    if (wanted !== undefined && typeof shown === 'number') world[axis] += wanted - shown
+  }
+  const cur = editableCurves(ref)
+  if (cur) {
+    const p = rawCurvePoint(cur, world, when)
+    const edit = lineEdit(cur.source, cur.literal.range.from, cur.literal.range.to, formatCurves(serializePathData(moveAnchor(cur.segs, last, p.x, p.y)), cur.stmt.indent))
+    return edit ? [edit] : []
+  }
+  const e = editableShape(ref)
+  if (!e) return []
+  const raw = rawFromWorld(model, obj, action, when, world)
+  const edit = setPointEdit(e.shape, last, Math.round(raw.x), Math.round(raw.y))
+  return edit && e.source.slice(edit.from, edit.to) !== edit.insert ? [edit] : []
+}
+
+export function setAttrsAt(name: string, attrs: Record<string, number>, time: number, options?: { before?: boolean; plain?: boolean }): boolean {
   return setAttrsAtMany([{ name, attrs }], time, options)
 }
 
@@ -701,7 +747,7 @@ function gapStart(name: string, attrs: string[], time: number): number | null {
   const slack = frameSeconds(state().fps) / 2
   let from: number | null = null
   for (const attr of attrs) {
-    const action = definingAction(obj, attr, time) ?? (attr === 'x' || attr === 'y' ? pathHolds(obj, attr, time) : null)
+    const action = (attr === 'x' || attr === 'y' ? pathHolds(obj, attr, time) : null) ?? definingAction(obj, attr, time)
     if (!action) continue
     if (time <= action.end + slack) return null
     if (from === null || action.end > from) from = action.end
@@ -713,10 +759,21 @@ export function setPositionAt(name: string, x: number, y: number, time: number):
   return setAttrsAt(name, { x, y }, time)
 }
 
-/** Arrow keys: move objects by whole pixels at the playhead (D95). A group's members move; the group itself is untouched (D124). */
+/** A run of the arrow keys while a recording runs (D412): one gesture, over when no key has come for a while. */
+let nudgeRun: ReturnType<typeof setTimeout> | null = null
+
+/** Arrow keys: move objects by whole pixels at the playhead (D95). A group's members move; the group itself is untouched (D124). While a recording runs, a run of them is one gesture, recorded as a drag is (D412). */
 export function nudgeObjects(names: string[], dx: number, dy: number): void {
   const { model, time } = state()
   if (!model) return
+  if (useStore.getState().recording && (nudgeRun !== null || !gestureOpen())) {
+    if (nudgeRun === null) beginGesture()
+    else clearTimeout(nudgeRun)
+    nudgeRun = setTimeout(() => {
+      nudgeRun = null
+      endGesture()
+    }, 400)
+  }
   const entries = [...new Set(names)].flatMap((name) => {
     const obj = model.objects.find((o) => o.name === name)
     if (!obj?.decl) return []
@@ -734,27 +791,37 @@ export function nudgeObjects(names: string[], dx: number, dy: number): void {
  * the size and the position (D104).
  */
 export function setActionDestination(name: string, index: number, destination: Record<string, number>): boolean {
+  const edits = destinationEdits(name, index, destination)
+  if (edits.length > 0) applyEdits(edits)
+  return edits.length > 0
+}
+
+/** The edits that put an action's destination where what shows says (D70, D104, D188), by the code as it stands; none when it is there already. */
+function destinationEdits(name: string, index: number, destination: Record<string, number>): TextEdit[] {
   const { source, model } = state()
   const obj = model?.objects.find((o) => o.name === name)
   const action = obj?.actions[index]
-  if (!model || !obj || !action?.stmt || action.classAction) return false
+  if (!model || !obj || !action?.stmt || action.classAction) return []
   const stmt = action.stmt
   const schema = classes[obj.className]
-  // A path's position comes from its shape: a drag edits the shape instead (D197), never this.
-  if (action.verb === 'path') return false
+  // A path's end is its last point (D197, D388): the place given goes there.
+  if (action.verb === 'path') {
+    const place = Object.fromEntries(Object.entries(destination).filter(([attr]) => attr === 'x' || attr === 'y'))
+    return Object.keys(place).length > 0 ? pathEndEdits(model, obj, action, place) : []
+  }
   // An animation given a change its verb cannot hold becomes a `to`, which holds any (D188): a resize whose center moves, a turn that is also dragged.
   const allowed = VERB_ATTRS[action.verb]
   const animatable = (attr: string): boolean => !!schema?.attrs.some((a) => a.name === attr && a.animatable)
   const upgrade = action.verb !== 'to' && Object.keys(destination).some((attr) => !(attr in action.changes) && animatable(attr) && allowed !== null && !allowed.includes(attr))
   const takes = (attr: string): boolean => (attr in action.changes && typeof action.changes[attr] !== 'function') || (upgrade && animatable(attr))
   const wanted = Object.fromEntries(Object.entries(destination).filter(([attr]) => takes(attr)))
-  if (Object.keys(wanted).length === 0) return false
+  if (Object.keys(wanted).length === 0) return []
   const definers = Object.fromEntries(['x', 'y', ...Object.keys(wanted)].map((attr) => [attr, takes(attr) ? action : definingAction(obj, attr, action.end)]))
   const edits: TextEdit[] = []
   if (upgrade) {
     const head = source.slice(stmt.range.from, stmt.propsOpen)
     const at = head.lastIndexOf(`.${action.verb}(`)
-    if (at < 0) return false
+    if (at < 0) return []
     edits.push({ from: stmt.range.from + at + 1, to: stmt.range.from + at + 1 + action.verb.length, insert: 'to' })
   }
   for (const [attr, value] of Object.entries(writtenValues(model, obj, action.end, wanted, definers))) {
@@ -762,9 +829,7 @@ export function setActionDestination(name: string, index: number, destination: R
     const edit = setProp(source, stmt, attr, roundAttr(attr, value))
     if (source.slice(edit.from, edit.to) !== edit.insert) edits.push(edit)
   }
-  if (edits.length === (upgrade ? 1 : 0)) return false
-  applyEdits(edits)
-  return edits.length > 0
+  return edits.length === (upgrade ? 1 : 0) ? [] : edits
 }
 
 /**
@@ -840,6 +905,582 @@ export function appendTimed(name: string, verb: Verb, block: Record<string, Attr
   block['duration'] = duration
   applyEdits([appendStatement(source, blockText(`${name}.${verb}`, block)), ...coverEdits(source, obj, at, at + duration)], actionSelected(name, obj.actions.length))
   return at + duration
+}
+
+/** A length of whole frames in seconds as written: one frame a touch under its length (D110), more to four decimals, as any length is. */
+function framesSeconds(frames: number, fps: number): number {
+  return frames <= 1 ? frameSeconds(fps) : roundSeconds(frames / fps)
+}
+
+/** The time of the frame a count of frames after the one a time is on: where a life widened for an animation of whole frames ends. */
+function frameAfter(time: number, frames: number, fps: number): number {
+  return (Math.round(time * fps) + frames) / fps
+}
+
+/** The edits that widen the lives an animation holds, the thing's own or those of what its group carries, to its span (D146, D403). */
+function holdEdits(source: string, model: SceneModel, holds: readonly string[], start: number, end: number): TextEdit[] {
+  return holds.flatMap((name) => {
+    const held = model.objects.find((o) => o.name === name)
+    return held ? coverEdits(source, held, start, end) : []
+  })
+}
+
+/**
+ * Begin a gesture's recording (D397): an animation of what is dragged, from the playhead, a frame
+ * long for now. The recording lengthens it as the playhead runs and the drag sets its end, so
+ * the thing shows where it is dragged at every frame. The thing stays what is selected: the
+ * animation is one of those the recording writes, looked over when it ends (D404). `carried` are
+ * the things in view that a group in hand carries: their lives are widened with the animation,
+ * as the thing's own is (D403). With `instant` it is of no length: a change made at once, at its
+ * moment (D412). Returns its index, or null.
+ */
+function beginRecorded(name: string, attrs: string[], at: number, carried: readonly string[] = [], instant = false): number | null {
+  const { source, model, fps } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj || !obj.decl) return null
+  const present = attrs.filter((a) => classes[obj.className]?.attrs.some((s) => s.name === a))
+  if (present.length === 0) return null
+  // On the frame the playhead is at.
+  const start = roundSeconds(Math.round(at * fps) / fps)
+  const block: Record<string, AttrValue> = {}
+  for (const attr of present) {
+    const value = valueAt(model, obj, attr, start)
+    block[attr] = roundAttr(attr, typeof value === 'number' ? value : 0)
+  }
+  Object.assign(block, pivotFor(model, obj, block, start))
+  block['at'] = start
+  block['duration'] = instant ? 0 : frameSeconds(fps)
+  const holds = [name, ...carried]
+  noteLives(model, holds)
+  applyEdits([appendStatement(source, blockText(`${name}.${verbFor(present)}`, block)), ...holdEdits(source, model, holds, start, frameAfter(start, 1, fps))])
+  return obj.actions.length
+}
+
+/** How near a recorded value is kept, by what it is: a pixel, half a degree, a hundredth of a factor. */
+const NEAR: Record<string, number> = { rotation: 0.5, scale: 0.01, zoom: 0.01, opacity: 0.01 }
+
+/**
+ * A recorded gesture, let go (D397): written as one clip whose ease is the pace it was done at,
+ * in one edit (D401). `takes` are what the thing showed at each frame the playhead came to, the
+ * first where it was as the gesture began. A move becomes a path along the way dragged,
+ * simplified as a drawn line is and smooth, the object going along it as it went; anything else
+ * stays its own animation, to where it ended, or to the farthest it went when it came back to
+ * where it began. A gesture that changed nothing leaves nothing. `fine` is how near the way is
+ * kept, in the scene; `carried` what a group in hand carried, as the gesture began with.
+ */
+function endRecorded(name: string, index: number, takes: Take[], fine: number, carried: readonly string[] = []): void {
+  const { source, model, fps } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  const action = obj?.actions[index]
+  if (!model || !obj || !action?.stmt) return
+  const stmt = action.stmt
+  const holds = [name, ...carried]
+  const frames = perFrame(takes, fps)
+  const first = frames[0]
+  const keys = first ? Object.keys(frames[frames.length - 1]!).filter((key) => frames.some((f) => Math.abs((f[key] ?? first[key] ?? 0) - (first[key] ?? 0)) > 1e-6)) : []
+  const at = roundSeconds(action.start)
+  const count = Math.max(1, frames.length - 1)
+  const duration = framesSeconds(count, fps)
+  // The frame the animation ends on, which the lives it holds reach.
+  const ends = frameAfter(at, count, fps)
+  const moved = !!first && frames.length >= 2 && keys.length > 0
+  const path = moved && action.verb === 'move' && keys.every((key) => key === 'x' || key === 'y')
+  // A move's way as a path: its text, null when the thing went nowhere, and nothing when the way could not be worked out, which leaves the move the animation it is.
+  const text = path ? recordedPathText(name, index, stmt, source, fps, frames, fine, at, duration) : undefined
+  if (!moved || text === null) {
+    // Nothing of it to keep: its animation goes, and the lives it widened go back to what the recording's other animations need.
+    applyEdits([...removeStatements(source, [stmt.range]), ...livesBack(source, model, holds, recorded()?.clips ?? [])])
+    return
+  }
+  if (typeof text === 'string') {
+    applyEdits([{ from: stmt.range.from, to: stmt.range.to, insert: text }, ...holdEdits(source, model, holds, at, ends)])
+    noteClip({ object: name, verb: 'path', start: at, end: at + duration, holds })
+    return
+  }
+  const { shares, to } = sharesToward(frames, keys)
+  // Back where it began: the animation goes to the farthest it went, and its ease brings it back.
+  if (to !== frames.length - 1) setActionDestination(name, index, frames[to]!)
+  const now = state()
+  const written = now.model?.objects.find((o) => o.name === name)?.actions[index]
+  if (!now.model || !written?.stmt) return
+  const target = frames[to]!
+  const near = Math.min(...keys.map((key) => (NEAR[key] ?? 1) / Math.max(1e-6, Math.abs((target[key] ?? 0) - (first![key] ?? 0)))))
+  const edits: TextEdit[] = [setPropText(now.source, written.stmt, 'ease', curveCode(thinned(shares, Math.max(0.001, Math.min(0.05, near))), written.stmt.indent))]
+  // What the gesture began with and never changed is no part of its animation (D412): a wheel that zoomed and moved nothing writes the zoom alone.
+  for (const key of Object.keys(written.changes)) {
+    const out = keys.includes(key) ? null : removeProp(now.source, written.stmt, key)
+    if (out) edits.push(out)
+  }
+  if (Math.abs(written.end - written.start - duration) > 1e-6) edits.push(timeProp(now.source, written.stmt, 'duration', duration), ...holdEdits(now.source, now.model, holds, at, ends))
+  applyEdits(edits)
+  noteClip({ object: name, verb: written.verb, start: at, end: at + duration, holds })
+}
+
+/** A gesture being recorded on one thing (D397, D412). */
+interface Recording {
+  name: string
+  index: number
+  /** What the thing showed at each frame the playhead came to, the first where it was as the gesture began. */
+  takes: Take[]
+  /** What the gesture last asked for. */
+  latest: Record<string, number>
+  fine: number
+  carried: readonly string[]
+  /** Moved by the gesture and not by the hand, as what a drag pushes is: taken when it changes, and ended where it last changed. */
+  pushed: boolean
+  /** Whether what it asks has changed since it was last taken. */
+  dirty: boolean
+  /** Whether what it asks is still to be written. */
+  unwritten: boolean
+  /** For a Shape's outline being reshaped: the outline it began as, and the outline a measure of the gesture stands for. The values taken are then the gesture's own measure, not the thing's. */
+  outline: { base: Seg[]; shape: (base: Seg[], measure: Record<string, number>) => Seg[] } | null
+}
+
+/**
+ * The gestures being recorded, by the thing each is on (D412): one gesture may change several
+ * things, as a drag changes the thing dragged and what it pushes. They end with the gesture, or
+ * with the recording when it stops first.
+ */
+const recordings = new Map<string, Recording>()
+/** The instant changes of values that are not numbers made by the gesture that is open, by thing and value: a color picked through many is one change. */
+const instants = new Map<string, number>()
+
+/** The gesture is over: what it did to each thing is written out, in its undo step. */
+function finishRecordings(): void {
+  for (const rec of [...recordings.values()]) finishRecording(rec)
+  instants.clear()
+}
+
+const stopFinishing = onGestureEnd(finishRecordings)
+if (import.meta.hot) import.meta.hot.dispose(stopFinishing)
+
+/** Take what a gesture asks at a time: for what a drag pushes, what was still for a while holds until the frame before it moved again. */
+function takeRecording(rec: Recording, time: number): void {
+  const last = rec.takes[rec.takes.length - 1]!
+  if (rec.pushed && time - last.time > 1.5 / state().fps) rec.takes.push({ time: time - 1 / state().fps, values: last.values })
+  rec.takes.push({ time, values: rec.latest })
+  rec.dirty = false
+}
+
+/**
+ * Gestures being recorded, a step on (D397, D412): each one's animation ends at the playhead, where
+ * its thing shows what the gesture asks, and the lives it holds reach as far (D403). One edit for
+ * all of them, so a step costs one reading of the code however many things a gesture moves.
+ */
+function growRecordings(due: Recording[], time: number): void {
+  const { source, model, fps } = state()
+  if (!model || due.length === 0) return
+  const edits: TextEdit[] = []
+  const moved: Recording[] = []
+  for (const rec of due) {
+    rec.unwritten = false
+    const action = model.objects.find((o) => o.name === rec.name)?.actions[rec.index]
+    if (!action?.stmt || action.classAction) continue
+    const frames = Math.max(1, Math.round((time - action.start) * fps))
+    const duration = framesSeconds(frames, fps)
+    if (Math.abs(action.end - action.start - duration) > 1e-6) {
+      edits.push(timeProp(source, action.stmt, 'duration', duration), ...holdEdits(source, model, [rec.name, ...rec.carried], action.start, frameAfter(action.start, frames, fps)))
+      moved.push(rec)
+    }
+    if (!rec.outline) edits.push(...destinationEdits(rec.name, rec.index, rec.latest))
+  }
+  if (edits.length > 0) applyEdits(edits)
+  // An end that moved is where its destination is worked out from: worked out again there, it is written only where it differs, as it does for a thing something else carries meanwhile.
+  for (const rec of moved) if (!rec.outline) setActionDestination(rec.name, rec.index, rec.latest)
+}
+
+/** What the gestures being recorded ask and have not yet written, written in one edit. */
+export function flushRecorded(): void {
+  growRecordings(
+    [...recordings.values()].filter((rec) => rec.unwritten),
+    state().time,
+  )
+}
+
+let flushSoon: number | null = null
+
+/** The same, once in a frame of the display at most: a drag asks at every move of the pointer, which may be several in a frame, and each written is a reading of the code. A step of the playhead meanwhile writes it too, and leaves this nothing to do. */
+export function flushRecordedSoon(): void {
+  if (flushSoon !== null) return
+  flushSoon = requestAnimationFrame(() => {
+    flushSoon = null
+    flushRecorded()
+  })
+}
+
+function finishRecording(rec: Recording): void {
+  if (recordings.get(rec.name) !== rec) return
+  recordings.delete(rec.name)
+  if (recordings.size === 0) {
+    stopFollowing?.()
+    stopFollowing = null
+  }
+  const s = useStore.getState()
+  const last = rec.takes[rec.takes.length - 1]!
+  if (!rec.pushed || rec.dirty) {
+    // What the gesture asked for last is where it ends: at the playhead, or a frame on when it never ran that far.
+    const end = Math.max(s.recording ? s.time : last.time, rec.takes[0]!.time + 1 / s.settings.fps)
+    if (end > last.time + 1e-9) takeRecording(rec, end)
+    else rec.takes[rec.takes.length - 1] = { time: last.time, values: rec.latest }
+  }
+  if (rec.outline) endRecordedOutline(rec)
+  else endRecorded(rec.name, rec.index, rec.takes, rec.fine, rec.carried)
+}
+
+let stopFollowing: (() => void) | null = null
+
+/** Follow the playhead for the gestures being recorded: each frame it comes to is taken, for all of them at once, and a recording that stops ends them where they are. */
+function followRecording(rec: Recording): void {
+  recordings.set(rec.name, rec)
+  if (stopFollowing) return
+  stopFollowing = useStore.subscribe((s, p) => {
+    if (recordings.size === 0) return
+    if (!s.recording) {
+      finishRecordings()
+      return
+    }
+    if (s.time === p.time) return
+    // What a drag pushes is taken when it has changed.
+    const due = [...recordings.values()].filter((r) => !r.pushed || r.dirty)
+    for (const r of due) takeRecording(r, s.time)
+    growRecordings(due, s.time)
+  })
+}
+
+/** The length alone of a gesture being recorded, a frame on (D412): for one whose end is written by other means, as a morph's target is. */
+function growSpan(name: string, index: number, time: number, carried: readonly string[]): void {
+  const { source, model, fps } = state()
+  const action = model?.objects.find((o) => o.name === name)?.actions[index]
+  if (!model || !action?.stmt || action.classAction) return
+  const frames = Math.max(1, Math.round((time - action.start) * fps))
+  const duration = framesSeconds(frames, fps)
+  if (Math.abs(action.end - action.start - duration) > 1e-6) applyEdits([timeProp(source, action.stmt, 'duration', duration), ...holdEdits(source, model, [name, ...carried], action.start, frameAfter(action.start, frames, fps))])
+}
+
+/**
+ * Give an animation being recorded the values a gesture has come to change, as they stand, where
+ * its kind may hold them; what its kind may not hold makes it a `to` as its end is set (D188).
+ */
+function holdAttrs(name: string, index: number, keys: readonly string[]): void {
+  for (const key of keys) {
+    const { source, model } = state()
+    const obj = model?.objects.find((o) => o.name === name)
+    const action = obj?.actions[index]
+    if (!model || !obj || !action?.stmt || key in action.changes) continue
+    const allowed = VERB_ATTRS[action.verb]
+    if (!attrSchema(obj.className, key)?.animatable || (allowed !== null && !allowed.includes(key))) continue
+    const value = valueAt(model, obj, key, action.end)
+    if (typeof value === 'number') applyEdits([setProp(source, action.stmt, key, roundAttr(key, value))])
+  }
+}
+
+/**
+ * What a thing shows by a gesture, while a recording runs (D397, D412): the gesture's animation on
+ * that thing, begun at the playhead with the first of it and ending at the playhead from then on,
+ * written out as one clip when the gesture ends. `values` are what the thing shows now, as a
+ * plain change gives them; `base` what it showed as the gesture began, where the caller knows it;
+ * `keys` further values the gesture may come to change, which it begins with as they are and
+ * drops again when it never does; `pushed` for a thing the gesture moves by what the hand moves,
+ * recorded from where it is first moved to where it is last; with `batch` what is asked is
+ * written by `flushRecorded`, with whatever else the same step asks. False when nothing is
+ * recording, or the thing cannot be written.
+ */
+export function recordShown(name: string, values: Record<string, number>, options: { base?: Record<string, number>; keys?: readonly string[]; fine?: number; carried?: readonly string[]; pushed?: boolean; batch?: boolean } = {}): boolean {
+  const store = useStore.getState()
+  if (!store.recording) return false
+  // A recording that waited for its first action runs from here.
+  store.runRecording()
+  const { model, time } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj) return false
+  /** What the thing showed of a value before the gesture changed it. */
+  const before = (key: string): number => {
+    const given = options.base?.[key]
+    if (given !== undefined) return given
+    const shown = shownValue(model, obj, key, time)
+    return typeof shown === 'number' ? shown : (values[key] ?? 0)
+  }
+  let rec = recordings.get(name)
+  if (rec?.outline) return false
+  if (!rec) {
+    const keys = [...new Set([...Object.keys(values), ...(options.keys ?? [])])].filter((key) => attrSchema(obj.className, key)?.animatable)
+    const first = Object.fromEntries(keys.map((key) => [key, before(key)]))
+    const index = beginRecorded(name, keys, time, options.carried ?? [])
+    if (index === null) return false
+    rec = { name, index, takes: [{ time, values: first }], latest: {}, fine: options.fine ?? 2, carried: options.carried ?? [], pushed: options.pushed === true, dirty: false, unwritten: false, outline: null }
+    followRecording(rec)
+  } else {
+    // A value the gesture comes to change later joins it, from what it was until now.
+    const fresh = Object.keys(values).filter((key) => !(key in rec!.takes[0]!.values))
+    if (fresh.length > 0) {
+      for (const key of fresh) rec.takes[0]!.values[key] = before(key)
+      holdAttrs(name, rec.index, fresh)
+    }
+    if (rec.pushed && Object.keys(values).every((key) => Math.abs((rec!.latest[key] ?? NaN) - values[key]!) < 1e-9)) return true
+  }
+  rec.latest = { ...rec.latest, ...values }
+  rec.dirty = true
+  rec.unwritten = true
+  if (!options.batch) flushRecorded()
+  return true
+}
+
+/**
+ * A Shape's outline reshaped while a recording runs (D412), as its resize reshapes it: a morph
+ * from the playhead to the outline the gesture leaves, at the pace it was done. `measure` is the
+ * gesture's own measure of how far it has come, its factors across and up, `base` that measure
+ * as it began, and `shape` gives the outline a measure stands for, from the outline the gesture
+ * began with, both as the shape's morphs have them. False when nothing is recording or the
+ * shape cannot be written.
+ */
+export function recordOutline(name: string, measure: Record<string, number>, base: Record<string, number>, shape: (from: Seg[], measure: Record<string, number>) => Seg[]): boolean {
+  const store = useStore.getState()
+  if (!store.recording) return false
+  store.runRecording()
+  let rec = recordings.get(name)
+  if (rec && !rec.outline) return false
+  if (!rec) {
+    const { source, model, time, fps } = state()
+    const obj = model?.objects.find((o) => o.name === name)
+    if (!model || !obj?.decl || obj.className !== SHAPE) return false
+    const from = shapeSegsAt(model, obj, time)
+    if (!from) return false
+    const start = roundSeconds(Math.round(time * fps) / fps)
+    noteLives(model, [name])
+    applyEdits([appendStatement(source, blockText(`${name}.morph`, { to: serializePathData(from), at: start, duration: frameSeconds(fps) })), ...holdEdits(source, model, [name], start, frameAfter(start, 1, fps))])
+    rec = { name, index: obj.actions.length, takes: [{ time, values: { ...base } }], latest: {}, fine: 2, carried: [], pushed: false, dirty: false, unwritten: false, outline: { base: from, shape } }
+    followRecording(rec)
+  }
+  rec.latest = { ...measure }
+  rec.dirty = true
+  growSpan(name, rec.index, state().time, rec.carried)
+  writeOutline(rec, rec.latest)
+  return true
+}
+
+/** Write the outline a measure of the gesture stands for as the target of the morph being recorded. */
+function writeOutline(rec: Recording, measure: Record<string, number>): void {
+  const { source, model } = state()
+  const action = model?.objects.find((o) => o.name === rec.name)?.actions[rec.index]
+  if (!action?.stmt || !rec.outline) return
+  const edit = setPropText(source, action.stmt, 'to', formatCurves(serializePathData(rec.outline.shape(rec.outline.base, measure)), action.stmt.indent))
+  if (source.slice(edit.from, edit.to) !== edit.insert) applyEdits([edit])
+}
+
+/** A recorded reshaping, let go (D412): the morph to where the outline ended, or to the farthest it went when it came back, on the pace it was done at; nothing when the outline never changed. */
+function endRecordedOutline(rec: Recording): void {
+  const { source, model, fps } = state()
+  const action = model?.objects.find((o) => o.name === rec.name)?.actions[rec.index]
+  if (!model || !action?.stmt || !rec.outline) return
+  const frames = perFrame(rec.takes, fps)
+  const first = frames[0]
+  const keys = first ? Object.keys(first).filter((key) => frames.some((f) => Math.abs((f[key] ?? first[key] ?? 0) - (first[key] ?? 0)) > 1e-4)) : []
+  if (!first || frames.length < 2 || keys.length === 0) {
+    applyEdits([...removeStatements(source, [action.stmt.range]), ...livesBack(source, model, [rec.name], recorded()?.clips ?? [])])
+    return
+  }
+  const at = roundSeconds(action.start)
+  const count = Math.max(1, frames.length - 1)
+  const duration = framesSeconds(count, fps)
+  const { shares, to } = sharesToward(frames, keys)
+  writeOutline(rec, frames[to]!)
+  const now = state()
+  const written = now.model?.objects.find((o) => o.name === rec.name)?.actions[rec.index]
+  if (!now.model || !written?.stmt) return
+  const edits: TextEdit[] = [setPropText(now.source, written.stmt, 'ease', curveCode(thinned(shares, 0.01), written.stmt.indent))]
+  if (Math.abs(written.end - written.start - duration) > 1e-6) edits.push(timeProp(now.source, written.stmt, 'duration', duration), ...holdEdits(now.source, now.model, [rec.name], at, frameAfter(at, count, fps)))
+  applyEdits(edits)
+  noteClip({ object: rec.name, verb: 'morph', start: at, end: at + duration, holds: [rec.name] })
+}
+
+/**
+ * Changes made at the playhead while a recording runs (D412), in place of writing them for all
+ * time. Inside a gesture, a slider's drag, a run of the wheel or of the arrow keys, each thing
+ * changed gets one animation over the gesture's span, at the pace it was done. On its own, a
+ * typed value or a single step, a change is an instant one at its moment.
+ */
+function recordChanges(entries: { name: string; attrs: Record<string, number>; together?: string[] }[]): boolean {
+  let any = false
+  if (gestureOpen()) {
+    for (const { name, attrs, together } of entries) if (Object.keys(attrs).length > 0 && recordShown(name, attrs, { keys: together, batch: true })) any = true
+    flushRecorded()
+    return any
+  }
+  beginGesture()
+  try {
+    for (const { name, attrs } of entries) if (Object.keys(attrs).length > 0 && recordInstant(name, attrs)) any = true
+  } finally {
+    endGesture()
+  }
+  return any
+}
+
+/** A change made at once while a recording runs (D412): an animation of no length at the playhead's frame, to what the thing then shows. One made on the frame of the one before it joins that one. */
+function recordInstant(name: string, values: Record<string, number>): boolean {
+  useStore.getState().runRecording()
+  const { model, time, fps } = state()
+  if (!model) return false
+  const at = roundSeconds(Math.round(time * fps) / fps)
+  const earlier = [...(recorded()?.clips ?? [])].reverse().find((c) => c.object === name && c.start === c.end && Math.abs(c.start - at) < 1e-6 && c.verb !== 'path' && c.verb !== 'morph')
+  let index = earlier ? findClip(model, earlier) : null
+  const joined = index !== null
+  if (index === null) index = beginRecorded(name, Object.keys(values), time, [], true)
+  else holdAttrs(name, index, Object.keys(values))
+  if (index === null) return false
+  setActionDestination(name, index, values)
+  const written = findObject(name)?.actions[index]
+  if (!written) return false
+  if (joined && earlier) earlier.verb = written.verb
+  else noteClip({ object: name, verb: written.verb, start: at, end: at, holds: [name] })
+  return true
+}
+
+/**
+ * A value that is not a number, a color or words, set while a recording runs (D412): an instant
+ * change at the playhead's frame, `thing.to({ fill: '#ff0000', at: 2.4, duration: 0 })`. Within
+ * one gesture, a color picked through many, it is one change, the last picked. False when
+ * nothing is recording or the value cannot be animated, and the caller writes it as it would.
+ */
+export function recordValue(name: string, attr: string, value: AttrValue): boolean {
+  const store = useStore.getState()
+  if (!store.recording) return false
+  const { source, model, time, fps } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl || !attrSchema(obj.className, attr)?.animatable) return false
+  store.runRecording()
+  const key = `${name}:${attr}`
+  const open = gestureOpen() ? instants.get(key) : undefined
+  if (open !== undefined && obj.actions[open]?.stmt) {
+    setActionProp({ object: name, index: open }, attr, value)
+    return true
+  }
+  const at = roundSeconds(Math.round(time * fps) / fps)
+  noteLives(model, [name])
+  applyEdits([appendStatement(source, blockText(`${name}.to`, { [attr]: value, at, duration: 0 })), ...holdEdits(source, model, [name], at, frameAfter(at, 1, fps))])
+  noteClip({ object: name, verb: 'to', start: at, end: at, holds: [name] })
+  if (gestureOpen()) instants.set(key, obj.actions.length)
+  return true
+}
+
+/**
+ * A line drawn with the pencil while a recording runs (D412): written on over the time its stroke
+ * took, at the pace it was drawn. `worlds` are the places of the stroke in the scene and `times`
+ * the playhead's time at each; the line itself begins where the stroke began.
+ */
+export function recordWriteOn(name: string, worlds: Point[], times: number[]): void {
+  const { source, model, fps } = state()
+  const obj = model?.objects.find((o) => o.name === name)
+  if (!model || !obj?.decl || worlds.length < 2) return
+  const frames = perFrame(
+    worlds.map((w, i) => ({ time: times[i] ?? times[times.length - 1] ?? 0, values: { x: w.x, y: w.y } })),
+    fps,
+  )
+  const at = roundSeconds(Math.round((times[0] ?? 0) * fps) / fps)
+  const count = Math.max(1, frames.length - 1)
+  const duration = framesSeconds(count, fps)
+  const line = shapeWorldCurve(model, obj, at)
+  let length = 0
+  for (let i = 1; i < line.length; i++) length += Math.hypot(line[i]!.x - line[i - 1]!.x, line[i]!.y - line[i - 1]!.y)
+  const shares = frames.length >= 2 ? sharesAlong(frames.map((f) => ({ x: f['x'] ?? 0, y: f['y'] ?? 0 })), line) : [0, 1]
+  const ease = curveCode(thinned(shares, Math.max(0.001, Math.min(0.05, 2 / Math.max(1, length)))), '  ')
+  noteLives(model, [name])
+  applyEdits([appendStatement(source, `${name}.to({\n  drawn: [0, 1],\n  at: ${formatNumber(at)},\n  duration: ${formatNumber(duration)},\n  ease: ${ease},\n})`), ...coverEdits(source, obj, at, frameAfter(at, count, fps))])
+  noteClip({ object: name, verb: 'to', start: at, end: at + duration, holds: [name] })
+  noteMade(name)
+}
+
+/**
+ * A recorded move as the text of a path (D397): the way the thing went, and how far along it it
+ * was at each frame. Nothing is written to find it out (D401): the code with the gesture as a
+ * path of one point is read on its own, and asked where each frame's place lies in the path's
+ * own terms, through whatever carries the thing at that frame. Null when the thing went nowhere;
+ * nothing when the code so read gives no path to ask.
+ */
+function recordedPathText(name: string, index: number, stmt: ActionInfo, source: string, fps: number, frames: Record<string, number>[], fine: number, at: number, duration: number): string | null | undefined {
+  const head = `${name}.path`
+  const probe = evaluateScene(source.slice(0, stmt.range.from) + pathText(head, [{ x: 0, y: 0 }], at, duration) + source.slice(stmt.range.to), fps).model
+  const obj = probe?.objects.find((o) => o.name === name)
+  const path = obj?.actions[index]
+  if (!probe || !obj || !path || path.verb !== 'path') return undefined
+  const begins = travelFrame(probe, obj, path)
+  const origin = begins?.anchors[0] ?? begins?.curve[0]
+  if (!origin) return undefined
+  // The way, in the scene: from where the path begins, as far as the thing showed itself gone at each frame.
+  const first = frames[0]!
+  const way = frames.map((f) => ({ x: origin.x + (f['x'] ?? first['x'] ?? 0) - (first['x'] ?? 0), y: origin.y + (f['y'] ?? first['y'] ?? 0) - (first['y'] ?? 0) }))
+  // The same way as the path's shape has it: each place taken back through what carries the thing at its own frame.
+  const raws = way.map((w, i) => rawFromWorld(probe, obj, path, Math.min(at + i / fps, at + duration), w))
+  // Fewer points for the same line, as a drawn line is kept (D297), in whole pixels (D223).
+  const corners: Point[] = []
+  for (const i of simplifiedIndexes(way, fine)) {
+    const p = { x: Math.round(raws[i]!.x - raws[0]!.x), y: Math.round(raws[i]!.y - raws[0]!.y) }
+    const before = corners[corners.length - 1]
+    if (!before || before.x !== p.x || before.y !== p.y) corners.push(p)
+  }
+  if (corners.length < 2) return null
+  // A way with a bend in it is a curve, as a drawn line is (D249).
+  const segs = corners.length > 2 ? smoothPathData(corners, false) : null
+  const shape = segs ? formatCurves(serializePathData(segs), '  ') : `[\n${corners.map((p) => `    ${pointText(p.x, p.y)},`).join('\n')}\n  ]`
+  const line = segs ? flattenPathData(segs).flatMap((piece) => piece.points) : corners
+  let length = 0
+  for (let i = 1; i < line.length; i++) length += Math.hypot(line[i]!.x - line[i - 1]!.x, line[i]!.y - line[i - 1]!.y)
+  const places = raws.map((p) => ({ x: p.x - raws[0]!.x, y: p.y - raws[0]!.y }))
+  const ease = curveCode(thinned(sharesAlong(places, line), Math.max(0.001, Math.min(0.05, 2 / Math.max(1, length)))), '  ')
+  return `${head}({\n  shape: ${shape},\n  at: ${formatNumber(at)},\n  duration: ${formatNumber(duration)},\n  ease: ${ease},\n})`
+}
+
+/** The edits that take lives a recording widened back to what the animations kept of it need (D404): never to less than they were before it. */
+function livesBack(source: string, model: SceneModel, names: Iterable<string>, kept: readonly RecordedClip[]): TextEdit[] {
+  const lives = recorded()?.lives
+  if (!lives) return []
+  const edits: TextEdit[] = []
+  for (const name of names) {
+    const was = lives.get(name)
+    const obj = model.objects.find((o) => o.name === name)
+    const prop = obj?.decl?.props.find((p) => p.key === 'until')
+    if (!was || was.until === null || !obj?.decl || obj.until === null || !prop || prop.kind !== 'literal') continue
+    const until = roundSeconds(Math.max(was.until, ...kept.filter((c) => c.holds.includes(name)).map((c) => frameAfter(c.end, 0, state().fps))))
+    if (until < roundSeconds(obj.until) - 1e-9) edits.push(timeProp(source, obj.decl, 'until', until))
+  }
+  return edits
+}
+
+/**
+ * The review of a recording settled (D404): the animations given go, in one undo step; the lives
+ * the recording widened go back to what the kept ones need; a group made for a gesture that is
+ * gone, with nothing else made of it, is taken apart again; and a thing the recording made goes
+ * when everything recorded on it does. With none given, all are kept.
+ */
+export function settleRecording(discard: readonly RecordedClip[]): void {
+  const { source, model } = state()
+  const review = recorded()
+  if (review && model && discard.length > 0) {
+    const ranges: Range[] = []
+    for (const clip of discard) {
+      const at = findClip(model, clip)
+      const stmt = at === null ? undefined : model.objects.find((o) => o.name === clip.object)?.actions[at]?.stmt
+      if (stmt) ranges.push(stmt.range)
+    }
+    const edits = [...removeStatements(source, ranges), ...livesBack(source, model, review.lives.keys(), review.clips.filter((c) => !discard.includes(c)))]
+    if (edits.length > 0) {
+      const open = gestureOpen()
+      if (!open) beginGesture()
+      try {
+        applyEdits(edits, objectsSelected(useStore.getState().selection))
+        for (const name of review.groups) {
+          const group = findObject(name)
+          if (group?.className === GROUP && !group.actions.some((a) => a.stmt && !a.classAction)) ungroup(name, true)
+        }
+        // A thing the recording made, a line drawn with the pencil, goes when everything recorded on it does.
+        const gone = review.made.filter((name) => findObject(name) && review.clips.some((c) => c.object === name) && review.clips.every((c) => c.object !== name || discard.includes(c)))
+        if (gone.length > 0) deleteObjects(gone, true)
+      } finally {
+        if (!open) endGesture()
+      }
+    }
+  }
+  closeReview()
+  useStore.getState().setRecordReview(null)
 }
 
 /**
@@ -1263,7 +1904,6 @@ function writeMorph(name: string, at: number, duration: number, targetAt: number
   const index = obj.actions.length
   applyEdits([appendStatement(source, blockText(`${name}.morph`, { to: serializePathData(segs), at, duration })), ...coverEdits(source, obj, at, at + duration)], actionSelected(name, index))
   useStore.getState().setTime(at + duration)
-  foldShapes()
   return index
 }
 
@@ -1293,9 +1933,8 @@ export function addClassAction(className: string, verb: Verb, time: number): voi
   const first = model?.objects.find((o) => isMember(o, className))
   if (!model || !first) return
   if (verb === 'path') {
-    // Every member takes the same path, which begins where the first member is (D194).
-    const here = positionAt(model, first, roundSeconds(time))
-    applyEdits([appendStatement(source, pathText(`all('${className}').path`, [{ x: Math.round(here.x), y: Math.round(here.y) }], roundSeconds(time), 1))], actionSelected(first.name, first.actions.length))
+    // Every member takes the same path, each from its own place (D387): the shape begins at nothing away.
+    applyEdits([appendStatement(source, pathText(`all('${className}').path`, [{ x: 0, y: 0 }], roundSeconds(time), 1))], actionSelected(first.name, first.actions.length))
     return
   }
   if (verb === 'morph') {
@@ -1303,7 +1942,6 @@ export function addClassAction(className: string, verb: Verb, time: number): voi
     const segs = first.className === SHAPE ? shapeSegsAt(model, first, roundSeconds(time)) : null
     if (!segs) return
     applyEdits([appendStatement(source, blockText(`all('${className}').morph`, { to: serializePathData(segs), at: roundSeconds(time), duration: 1 }))], actionSelected(first.name, first.actions.length))
-    foldShapes()
     return
   }
   const attrs = startingValues(model, first, verb, time)
@@ -1319,21 +1957,17 @@ function pathText(head: string, points: Point[], at: number, duration: number): 
 }
 
 /**
- * Add a path to an object at a time (D194): its shape begins with one point, where the object is
- * then, and the Draw tool adds the rest. The object's life widens to hold it. Returns the index
- * of the new action.
+ * Add a path to an object at a time (D194): its shape begins with one point, the object itself,
+ * written as nothing away from it (D387), and the Draw tool adds the rest. The object's life
+ * widens to hold it. Returns the index of the new action.
  */
 export function addPath(name: string, time: number): number | null {
   const { source, model } = state()
   const obj = model?.objects.find((o) => o.name === name)
   if (!model || !obj || !obj.decl) return null
   const at = roundSeconds(time)
-  // The path's first point is where the absolute actions put the object, so what relative changes add on top, an orbit say, goes on adding and the object stays put as the path begins (D225).
-  const here = { x: absoluteAt(model, obj, 'x', at), y: absoluteAt(model, obj, 'y', at) }
   const index = obj.actions.length
-  applyEdits([appendStatement(source, pathText(`${name}.path`, [{ x: Math.round(here.x), y: Math.round(here.y) }], at, 1)), ...coverEdits(source, obj, at, at + 1)], actionSelected(name, index))
-  // The points stay folded in the code until wanted (D204).
-  foldShapes()
+  applyEdits([appendStatement(source, pathText(`${name}.path`, [{ x: 0, y: 0 }], at, 1)), ...coverEdits(source, obj, at, at + 1)], actionSelected(name, index))
   return index
 }
 
@@ -1424,8 +2058,124 @@ function insertTime(e: EditableShape, index: number): number {
   return index > 0 ? anchorTime(e.model, e.action, Math.min(index, e.shape.points.length) - 1) : e.action.start
 }
 
-/** Move several points of a path at once, each to a place in the scene (D198); on a curves path, the anchors, their controls along (D246). */
-export function setPathPoints(ref: ActionRef, entries: { index: number; world: Point }[]): void {
+/**
+ * Whether a path's first point is the object itself (D387): the path is the object's own, written
+ * out, and takes its object from where it is. A relative path's first point is an amount like the
+ * rest, and a class's path has a first point for every member.
+ */
+export function pathBeginsAtObject(ref: ActionRef): boolean {
+  const action = findObject(ref.object)?.actions[ref.index]
+  return !!action && action.verb === 'path' && !!action.stmt && !action.classAction && !action.timing.relative && action.timing.by === undefined
+}
+
+/**
+ * Carry a whole path by its object (D387): the object goes, as the path begins, to where the
+ * path's first point is asked to be in the scene, and the path, which begins where its object
+ * is, goes with it. What is written is whatever puts the object there then (D388); nothing of
+ * the shape.
+ */
+export function carryPath(ref: ActionRef, world: Point): void {
+  const { model } = state()
+  const obj = model?.objects.find((o) => o.name === ref.object)
+  const action = obj?.actions[ref.index]
+  const frame = model && obj && action ? travelFrame(model, obj, action) : null
+  // Where the path begins now, which is where its object shows then: the object goes as far as the point does.
+  const from = frame?.anchors[0] ?? frame?.curve[0]
+  if (!model || !obj || !action || !from) return
+  const x = shownValue(model, obj, 'x', action.start)
+  const y = shownValue(model, obj, 'y', action.start)
+  if (typeof x === 'number' && typeof y === 'number') setAttrsAtMany([{ name: ref.object, attrs: { x: x + world.x - from.x, y: y + world.y - from.y }, together: ['x', 'y'] }], action.start, { plain: true })
+}
+
+/** Whether a move of a path's points is the whole path going one way: every point of it, each as far as the first. */
+function movesWhole(ref: ActionRef, entries: { index: number; world: Point }[]): boolean {
+  const { model } = state()
+  const obj = model?.objects.find((o) => o.name === ref.object)
+  const action = obj?.actions[ref.index]
+  const anchors = model && obj && action ? travelFrame(model, obj, action)?.anchors : undefined
+  const first = entries.find((p) => p.index === 0)
+  if (!anchors || !first || entries.length !== anchors.length) return false
+  const dx = first.world.x - anchors[0]!.x
+  const dy = first.world.y - anchors[0]!.y
+  return entries.every((p) => {
+    const a = anchors[p.index]
+    return !!a && Math.abs(p.world.x - a.x - dx) < 1e-6 && Math.abs(p.world.y - a.y - dy) < 1e-6
+  })
+}
+
+/**
+ * Move several points of a path at once, each to a place in the scene (D198); on a curves path,
+ * the anchors, their controls along (D246). The first point of a path that begins where its
+ * object is is the object (D387): moved, the object is put there as the path begins, and the
+ * points not moved stay where they are in the scene, so the object never jumps to its path.
+ * `stay` names one such point and where it was as a drag began, so a long drag holds the rest
+ * of the path still; without it, the first point not moved, where it is now. Every point moved
+ * as one is the path carried by its object, with nothing of the shape rewritten (D388).
+ */
+export function setPathPoints(ref: ActionRef, entries: { index: number; world: Point }[], stay?: { index: number; world: Point }): void {
+  const first = pathBeginsAtObject(ref) ? entries.find((p) => p.index === 0) : undefined
+  if (!first) {
+    writePathPoints(ref, entries)
+    return
+  }
+  if (movesWhole(ref, entries)) {
+    carryPath(ref, first.world)
+    return
+  }
+  const own = !gestureOpen()
+  if (own) beginGesture()
+  try {
+    const kept = stay ?? firstUnmoved(ref, entries)
+    carryPath(ref, first.world)
+    if (kept) holdPathPoint(ref, kept)
+    const rest = entries.filter((p) => p.index !== 0)
+    if (rest.length > 0) writePathPoints(ref, rest)
+  } finally {
+    if (own) endGesture()
+  }
+}
+
+/** The first of a path's points that a move leaves alone, where it is in the scene now. */
+function firstUnmoved(ref: ActionRef, entries: { index: number; world: Point }[]): { index: number; world: Point } | undefined {
+  const { model } = state()
+  const obj = model?.objects.find((o) => o.name === ref.object)
+  const action = obj?.actions[ref.index]
+  const anchors = model && obj && action ? (travelFrame(model, obj, action)?.anchors ?? []) : []
+  const index = anchors.findIndex((_, i) => !entries.some((p) => p.index === i))
+  return index >= 0 ? { index, world: anchors[index]! } : undefined
+}
+
+/**
+ * Write a path's first point so that another point of it is at a place in the scene (D388). The
+ * object is at the first point wherever that is written, so the first point is what moves the
+ * rest of the shape against the object: it goes as far as the other point is from where that
+ * one would have to be written.
+ */
+function holdPathPoint(ref: ActionRef, kept: { index: number; world: Point }): void {
+  const cur = editableCurves(ref)
+  if (cur) {
+    const anchors = pathAnchors(cur.segs)
+    const first = anchors[0]
+    const other = anchors[kept.index]
+    if (!first || !other) return
+    const want = rawCurvePoint(cur, kept.world, anchorTime(cur.model, cur.action, kept.index))
+    const hundredth = (v: number): number => Math.round(v * 100) / 100
+    const x = hundredth(first.x + other.x - want.x)
+    const y = hundredth(first.y + other.y - want.y)
+    if (x !== first.x || y !== first.y) writePathCurves(cur, moveAnchor(cur.segs, 0, x, y))
+    return
+  }
+  const e = editableShape(ref)
+  const first = e?.shape.points[0]
+  const other = e?.shape.points[kept.index]
+  if (!e || !first || !other) return
+  const want = rawPoint(e, kept.world, anchorTime(e.model, e.action, kept.index))
+  const edit = setPointEdit(e.shape, 0, Math.round(first.x + other.x - want.x), Math.round(first.y + other.y - want.y))
+  if (edit && e.source.slice(edit.from, edit.to) !== edit.insert) applyEdits([edit])
+}
+
+/** The points of a path written where they are asked to be in the scene, as the path lies now. */
+function writePathPoints(ref: ActionRef, entries: { index: number; world: Point }[]): void {
   const cur = editableCurves(ref)
   if (cur) {
     let segs = cur.segs
@@ -1444,9 +2194,26 @@ export function setPathPoints(ref: ActionRef, entries: { index: number; world: P
   for (const { index, world } of entries) {
     const p = rawPoint(e, world, anchorTime(e.model, e.action, index))
     const edit = setPointEdit(e.shape, index, p.x, p.y)
-    if (edit) edits.push(edit)
+    // A point that is where it is asked to be is left as written.
+    if (edit && e.source.slice(edit.from, edit.to) !== edit.insert) edits.push(edit)
   }
   if (edits.length > 0) applyEdits(edits)
+}
+
+/**
+ * Turn a path (D394): its `angle`, in degrees counterclockwise, to a tenth, between -180 and 180,
+ * written in the path's own statement, a class's for a class's path, whatever its shape is
+ * written as; a path not turned says nothing.
+ */
+export function setPathAngle(ref: ActionRef, degrees: number): void {
+  const { source, model } = state()
+  const action = model?.objects.find((o) => o.name === ref.object)?.actions[ref.index]
+  const stmt = pathStmt(action)
+  if (!action || action.verb !== 'path' || !stmt) return
+  const wrapped = ((((degrees + 180) % 360) + 360) % 360) - 180
+  const angle = Math.round((wrapped === -180 ? 180 : wrapped) * 10) / 10 || 0
+  const edit = angle === 0 ? removeProp(source, stmt, 'angle') : setProp(source, stmt, 'angle', angle)
+  if (edit && source.slice(edit.from, edit.to) !== edit.insert) applyEdits([edit])
 }
 
 /** A path's `offset` as written, for a drag that carries the whole path by changing it. */
@@ -1613,7 +2380,6 @@ export function convertPathToCurves(ref: ActionRef, smoothen?: boolean): void {
   const dropSmooth = removeProp(e.source, e.stmt, 'smooth')
   if (dropSmooth) edits.push(dropSmooth)
   applyEdits(edits, actionSelected(ref.object, ref.index))
-  foldShapes()
 }
 
 /**
@@ -1625,31 +2391,6 @@ export function addClassPath(className: string, time: number): void {
   if (!model) return
   const at = roundSeconds(time)
   applyEdits([appendStatement(source, `all('${className}').path({\n  shape: [\n    [0, 0],\n  ],\n  relative: true,\n  at: ${formatNumber(at)},\n  duration: 1,\n})`)])
-  foldShapes()
-}
-
-/**
- * Where a drag of an object that a path places goes (D197, D205), as a drag during a move goes to
- * the move's end: the path, selected or else the one that owns the position at the playhead, and
- * the anchor to move: the first at the path's start, the last anywhere after that, with the
- * playhead shown at the path's end while it is running. Null when no path has a say, or when the
- * path has ended and is not selected: a plain drag then is a new move from its end (D328).
- */
-export function pathDragTarget(name: string, selectedIndex: number | null, time: number): { ref: ActionRef; index: number; showTime: number | null } | null {
-  const { model } = state()
-  const obj = model?.objects.find((o) => o.name === name)
-  if (!model || !obj) return null
-  const action = selectedIndex !== null ? obj.actions[selectedIndex] : pathHolds(obj, 'x', time)
-  if (!action || action.verb !== 'path' || action.classAction || !action.stmt || action.overridden || action.timing.relative) return null
-  // After the path has ended, with the path not selected, nothing: a drag there is a new move from the path's end (D328).
-  if (selectedIndex === null && time > action.end + frameSeconds(state().fps) / 2) return null
-  const index = obj.actions.indexOf(action)
-  const ref = { object: name, index }
-  if (!pathEditable(ref)) return null
-  const frame = pathFrame(model, action, time)
-  if (!frame || frame.anchors.length === 0) return null
-  const atStart = time <= action.start
-  return { ref, index: atStart ? 0 : frame.anchors.length - 1, showTime: !atStart && time < action.end ? action.end : null }
 }
 
 /** Move one point of a path to a place in the scene (D194). */
@@ -1873,8 +2614,6 @@ function writeCurvesAsIs(e: EditableShapeCurves, segs: Seg[], base?: ShapeEditBa
     edits.push(...centerShift(e.source, e.obj, { x: c.x - ref.x, y: c.y - ref.y }, base?.origin))
   }
   if (edits.length > 0) applyEdits(edits)
-  // A word or points written as curves for the first time fold like any curves (D244).
-  if (e.bake && edits.length > 0) foldShapes()
 }
 
 /** A place in the scene as a Shape's points are written: against the center of their box as it is written now (D243). */
@@ -2138,7 +2877,6 @@ export function convertToCurves(name: string, smoothen?: boolean): void {
   } finally {
     if (started) endGesture()
   }
-  foldShapes()
 }
 
 /**
@@ -2195,26 +2933,36 @@ export function importSvg(text: string, fileName: string, at: Point): void {
     return
   }
   applyEdits([insertDeclaration(model.lastDeclEnd, blocks.join('\n\n'))], objectsSelected(items.map((i) => i.name)))
-  foldShapes()
   // Select shows what came in, with its box.
   useStore.getState().setTool('select')
   notice(`Imported ${count} ${count === 1 ? 'object' : 'objects'}${scale !== 1 ? ` at ${scale}×` : ''}${read.dropped.length > 0 ? `; dropped ${read.dropped.join(', ')}` : ''}.`)
 }
 
 /**
- * Close a Shape or open it (D233, D253): the close goes in or comes out, and that is all; its
- * fill and its stroke are its own, so a closed line stays hollow and an opened polygon keeps
- * its fill. Opening takes the segment drawn back to the start with the close, so the ends part.
- * Closed is the default of a points shape, so closing removes the key.
+ * Close a Shape or open it (D233, D253). Opening takes the close out, and that is all: the
+ * segment drawn back to the start goes with it, so the ends part, and an opened polygon keeps
+ * its fill. Closing a line, a shape with no fill, makes it a polygon, as closing on its first
+ * point does while it is drawn (D390): it takes the Shape tool's fill, with its opacity, and
+ * keeps the outline it has. Closed is the default of a points shape, so closing removes the key.
  */
 export function setShapeClosed(name: string, closed: boolean): void {
-  const cur = shapeCurvesOf(name)
-  if (cur) {
-    const segs = closed ? closePath(cur.written) : openPath(cur.written)
-    if (segs !== cur.written) writeCurvesAsIs(cur, segs)
-    return
+  beginGesture()
+  try {
+    const cur = shapeCurvesOf(name)
+    if (cur) {
+      const segs = closed ? closePath(cur.written) : openPath(cur.written)
+      if (segs !== cur.written) writeCurvesAsIs(cur, segs)
+    } else setObjectProp(name, 'closed', closed ? null : false)
+    const obj = findObject(name)
+    if (!closed || !obj?.decl || obj.attrs['fill'] !== 'none' || shapeAnchorCount(name) < 3) return
+    const { source } = state()
+    const style = useStore.getState().shapeStyle
+    const edits: TextEdit[] = [setProp(source, obj.decl, 'fill', style.fill)]
+    if (style.fillOpacity < 1) edits.push(setProp(source, obj.decl, 'fillOpacity', style.fillOpacity))
+    applyEdits(edits, objectsSelected([name]))
+  } finally {
+    endGesture()
   }
-  setObjectProp(name, 'closed', closed ? null : false)
 }
 
 export function setShapeSmooth(name: string, smooth: boolean): void {
@@ -2336,7 +3084,6 @@ export function finishShape(name: string, close: boolean): void {
     } finally {
       endGesture()
     }
-    foldShapes()
     return
   }
   const e = shapeLiteralOf(name)
@@ -2362,7 +3109,6 @@ export function finishShape(name: string, close: boolean): void {
   } finally {
     endGesture()
   }
-  foldShapes()
 }
 
 /**
@@ -2414,7 +3160,6 @@ export function convertToShape(name: string): void {
   } finally {
     endGesture()
   }
-  foldShapes()
 }
 
 function edits(list: TextEdit[], edit: TextEdit): void {
@@ -2665,6 +3410,8 @@ export function sliceClassAction(id: number, time: number): boolean {
   if (at < start + frame - 1e-9 || at > end - frame + 1e-9) return uncut('Cut inside the animation')
   const first = pieceEdits()
   const second = pieceEdits()
+  // A class's path keeps its line on both pieces: the second's offset is what makes it go on from the first (D393).
+  if (sample.verb === 'path') secondPieceOffset(model, sample, at, true, second)
   const withUntil = stmt.props.some((p) => p.key === 'until')
   if (withUntil) first.set['until'] = at
   else first.set['duration'] = roundSeconds(at - start)
@@ -2743,6 +3490,7 @@ export function sliceAction(name: string, index: number, time: number): boolean 
   // The pieces' values. A path from a formula keeps its whole line on both pieces, as a function does.
   if (action.verb === 'path') {
     if (!functional && !slicePathInto(obj, action, index, at, first, second)) return uncut('This path could not be cut')
+    secondPieceOffset(model, action, at, functional, second)
   } else if (action.verb === 'morph' && !functional) {
     const segs = shapeSegsAt(model, obj, at)
     if (!segs) return uncut('This shape draws nothing here')
@@ -2775,9 +3523,31 @@ export function sliceAction(name: string, index: number, time: number): boolean 
     return [{ from: s.range.to, to: s.range.to, insert: `\n\n${src.slice(s.range.from + object, s.range.to)}` }]
   })
   applyPieceEdits(name, index + 1, second, () => [], actionSelected(name, index + 1))
-  if (action.verb === 'path' || action.verb === 'morph') foldShapes()
   if (!joined) endGesture()
   return true
+}
+
+/**
+ * The `offset` of the second piece of a cut path (D264, D393). A piece that begins at the cut
+ * begins where the first leaves the object, which the whole's offset has already moved, so it
+ * has none of its own. One that keeps the whole line and adds it on, a relative path from a
+ * formula or a class's, would add what the line had added by the cut a second time: its offset
+ * takes that off.
+ */
+function secondPieceOffset(model: SceneModel, action: Action, at: number, wholeLine: boolean, second: PieceEdits): void {
+  if (wholeLine && action.timing.relative) {
+    const shift = pathShift(action)
+    const x = actionCourse(model, action.object, action, 'x', at)
+    const y = actionCourse(model, action.object, action, 'y', at)
+    const back = (v: AttrValue, own: number): number => (typeof v === 'number' ? Math.round(-(v - own) * 100) / 100 || 0 : 0)
+    const dx = back(x, shift.x)
+    const dy = back(y, shift.y)
+    if (dx !== 0 || dy !== 0) {
+      second.setText['offset'] = pointText(dx, dy)
+      return
+    }
+  }
+  second.remove.push('offset')
 }
 
 /**
@@ -3126,6 +3896,7 @@ export function setAttached(names: string[], on: boolean): void {
   setAttrsAtMany(
     shown.map(({ name, pose, group }): { name: string; attrs: Record<string, number> } => ({ name, attrs: group ? { x: pose.x, y: pose.y } : { x: pose.x, y: pose.y, rotation: pose.rotation, scale: pose.scale } })),
     time,
+    { plain: true },
   )
   if (own) endGesture()
 }
@@ -4129,6 +4900,8 @@ export function paintFill(name: string, color: string, time: number): void {
     return
   }
   if (!obj.decl || !attrSchema(obj.className, 'fill')) return
+  // While a recording runs, the color changes at that moment (D412).
+  if (recordValue(name, 'fill', color)) return
   const t = roundSeconds(time)
   const action = definingAction(obj, 'fill', t)
   if (action?.stmt && !action.classAction) setActionProp({ object: name, index: obj.actions.indexOf(action) }, 'fill', color)
@@ -4207,7 +4980,10 @@ export function paintStroke(name: string, color: string, width: number, time: nu
   beginGesture()
   try {
     const action = definingAction(obj, 'stroke', t)
-    if (action?.stmt && !action.classAction) setActionProp({ object: name, index: obj.actions.indexOf(action) }, 'stroke', color)
+    // While a recording runs, the color changes at that moment (D412).
+    if (recordValue(name, 'stroke', color)) {
+      // Recorded.
+    } else if (action?.stmt && !action.classAction) setActionProp({ object: name, index: obj.actions.indexOf(action) }, 'stroke', color)
     else setObjectProp(name, 'stroke', color)
     const current = valueAt(model, obj, 'strokeWidth', t)
     if (typeof current !== 'number' || current <= 0) setObjectProp(name, 'strokeWidth', Math.max(1, Math.round(width)))
@@ -4260,7 +5036,6 @@ export function sketchLine(worlds: Point[], stroke: string, width: number, strok
   const life = useStore.getState().prefs.objectLength
   if (life !== null) attrs['until'] = roundSeconds(start + life)
   applyEdits([insertDeclaration(model.lastDeclEnd, blockText(`${name} = Shape`, attrs))], objectsSelected([name]))
-  foldShapes()
   return name
 }
 
@@ -4276,7 +5051,12 @@ export function writeOnLine(name: string, pin: Pin, when: number, length = 1): n
 
 /** Fewer points for the same line (D297): those a stroke's path would miss by more than the tolerance are kept, the rest dropped. */
 export function simplifyPoints(points: Point[], tolerance: number): Point[] {
-  if (points.length < 3) return points
+  return points.length < 3 ? points : simplifiedIndexes(points, tolerance).map((i) => points[i]!)
+}
+
+/** Which points of a line are kept when it is made of fewer (D297), by their places in it: the first, the last, and those the line between its neighbours would miss by more than the tolerance. */
+function simplifiedIndexes(points: Point[], tolerance: number): number[] {
+  if (points.length < 3) return points.map((_, i) => i)
   const keep = new Array<boolean>(points.length).fill(false)
   keep[0] = true
   keep[points.length - 1] = true
@@ -4303,5 +5083,5 @@ export function simplifyPoints(points: Point[], tolerance: number): Point[] {
       stack.push([a, far], [far, b])
     }
   }
-  return points.filter((_, i) => keep[i])
+  return keep.flatMap((kept, i) => (kept ? [i] : []))
 }

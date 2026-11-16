@@ -1,5 +1,5 @@
 import * as opentype from 'opentype.js'
-import { applyEdits, beginGesture, endGesture, foldShapes } from '../code/editor'
+import { applyEdits, beginGesture, endGesture } from '../code/editor'
 import { removeProp, setPropText, type TextEdit } from '../model/edits'
 import { formatCurves, serializePathData, type Seg } from '../model/pathData'
 import { SHAPE } from '../model/registry'
@@ -99,5 +99,4 @@ async function convertNow(name: string, style: TextStyle, textOnly: Action[]): P
   } finally {
     endGesture()
   }
-  foldShapes()
 }

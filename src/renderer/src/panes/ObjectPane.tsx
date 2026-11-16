@@ -5,9 +5,10 @@ import { LinkIcon } from '../components/LinkIcon'
 import { actionLinks, dependentsByTarget, objectLinks, targetKey } from '../model/links'
 import { actionIdents, carriedBy, classActionIdents, classGroups, classKey, classSpan, groupMembers, overrideOf, typeGroups, type ClassGroup } from '../model/groups'
 import { maskDrawnBy, maskFor, maskNamed, masksOn } from '../model/masks'
-import { CAMERA, GROUP, PIVOT_PARAMS, VERB_COLORS } from '../model/registry'
+import { actionLabel } from '../model/label'
+import { CAMERA, GROUP, VERB_COLORS } from '../model/registry'
 import { cameraAt, containers, isVisibleAt } from '../model/sample'
-import type { Action, Mask, SceneObject } from '../model/types'
+import type { Mask, SceneObject } from '../model/types'
 import { addCamera, addObject, lifetimeMenu, propertiesMenu, canEdit, classMaskItems, cutHereItems, createGroup, prospectiveGroup, deleteAction, deleteClass, deleteClassAction, deleteObjects, duplicateObjects, hideMenuItems, jumpToAction, jumpToClass, jumpToObject, maskedShare, maskListEditable, maskMenuItems, materializeClassAction, moveDeclaration, overrideClassAction, removeFromClass, requestRename, selectClass, selectClassAction, setMasked, ungroup } from '../project/operations'
 import { requestSavePreset } from '../project/userPresets'
 import { closeBackground, openBackground, setBackground } from '../project/controller'
@@ -19,11 +20,6 @@ import { timecode } from '../state/time'
 const CLASS_TYPE = 'type:Class'
 const MASK_TYPE = 'type:Mask'
 const CAMERA_TYPE = 'type:Camera'
-
-function actionLabel(action: Action): string {
-  const what = action.verb === 'to' ? Object.keys(action.changes).filter((k) => !(PIVOT_PARAMS as readonly string[]).includes(k)).join(', ') || 'to' : action.verb
-  return action.timing.relative ? `${what} (relative)` : what
-}
 
 const Idents = ({ words }: { words: string[] }) => (
   <>

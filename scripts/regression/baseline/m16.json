@@ -1,0 +1,271 @@
+{
+ "results": {
+  "LIFE1": {
+   "first": {
+    "grabbed": true,
+    "seen": true,
+    "selection": "a",
+    "actionsSelected": 0
+   },
+   "letGo": {
+    "shown": true,
+    "exists": false,
+    "pastItsLife": true
+   },
+   "second": {
+    "grabbed": true,
+    "seen": true,
+    "selection": "a",
+    "actionsSelected": 0
+   },
+   "written": {
+    "actions": [
+     "path",
+     "path"
+    ],
+    "livesToItsLast": true,
+    "lifeWidened": true
+   },
+   "others": {
+    "c": {
+     "shown": false,
+     "until": 3
+    },
+    "b": {
+     "shown": true,
+     "until": 6
+    }
+   },
+   "pickedGone": {
+    "c": false,
+    "a": false
+   },
+   "pickedAgain": false,
+   "stopped": {
+    "review": [
+     "a path",
+     "a path"
+    ],
+    "time": 1
+   },
+   "afterwards": false,
+   "pastEnd": {
+    "shownBefore": true,
+    "first": {
+     "grabbed": true,
+     "seen": true,
+     "selection": "d",
+     "actionsSelected": 0
+    },
+    "second": {
+     "grabbed": true,
+     "seen": true,
+     "selection": "d",
+     "actionsSelected": 0
+    },
+    "actions": [
+     "path",
+     "path"
+    ],
+    "livesToItsLast": true,
+    "review": [
+     "d path",
+     "d path"
+    ]
+   },
+   "error": null
+  },
+  "REVIEW1": {
+   "listed": {
+    "review": [
+     "a path",
+     "a path",
+     "b path"
+    ],
+    "shown": true,
+    "things": [
+     "a",
+     "b"
+    ],
+    "clips": [
+     "path",
+     "path",
+     "path"
+    ],
+    "keep": "Keep all",
+    "playheadBack": true
+   },
+   "unticked": {
+    "keep": "Keep 2 of 3",
+    "things": [
+     "some",
+     "all"
+    ]
+   },
+   "kept": {
+    "a": [
+     "path"
+    ],
+    "b": [
+     "path"
+    ],
+    "lifeBack": true,
+    "livesToItsLast": true,
+    "closed": true
+   },
+   "undone": true,
+   "deleteAll": {
+    "asBefore": true,
+    "closed": true
+   },
+   "deleteUndone": {
+    "a": [
+     "path"
+    ],
+    "b": [
+     "path"
+    ]
+   },
+   "group": {
+    "made": 1,
+    "review": [
+     "group1 path"
+    ]
+   },
+   "groupGone": {
+    "groups": 0,
+    "asBefore": true
+   },
+   "escape": {
+    "closed": true,
+    "b": [
+     "path"
+    ]
+   },
+   "nothing": {
+    "review": null,
+    "shown": false
+   },
+   "error": null
+  },
+  "CODE1": {
+   "drag": {
+    "grabbed": true,
+    "seen": true,
+    "selection": "b",
+    "actionsSelected": 0
+   },
+   "rows": {
+    "opens": true,
+    "closes": true,
+    "some": true,
+    "indented": true,
+    "fiveAtMost": true,
+    "firstIsNothing": true,
+    "lastIsAll": true
+   },
+   "folded": {
+    "open": 0,
+    "shut": 2
+   },
+   "afterUndo": {
+    "open": 0,
+    "shut": 0,
+    "actions": 0
+   },
+   "afterRedo": {
+    "open": 0,
+    "shut": 2
+   },
+   "cut": true,
+   "afterCut": {
+    "open": 0,
+    "shut": 4,
+    "pieces": [
+     "path",
+     "path"
+    ]
+   },
+   "wraps": true,
+   "cost": {
+    "lines": 1,
+    "meshes": 3,
+    "pieces": true,
+    "readOnce": true
+   },
+   "error": null
+  },
+  "PATHS1": {
+   "selectedOff": {
+    "lines": 0,
+    "inHand": 0,
+    "handles": false
+   },
+   "selectedOn": {
+    "lines": 2,
+    "inHand": 1,
+    "handles": false
+   },
+   "otherPicked": {
+    "lines": 2,
+    "inHand": 1,
+    "handles": false
+   },
+   "nonePicked": {
+    "lines": 2,
+    "inHand": 0,
+    "handles": false
+   },
+   "selectedNotRunning": {
+    "lines": 1,
+    "inHand": 0,
+    "handles": false
+   },
+   "pathTool": {
+    "lines": 2,
+    "inHand": 0,
+    "handles": true
+   },
+   "backToSelect": {
+    "lines": 1,
+    "inHand": 0,
+    "handles": false,
+    "points": 0
+   },
+   "deleted": {
+    "p": [],
+    "q": [
+     "path"
+    ]
+   },
+   "error": null
+  },
+  "TIPS1": {
+   "tips": {
+    "player": [
+     "Loop",
+     "Record (T)",
+     "Wait for action to start recording",
+     "Snap to seconds, animations, and fifth frames",
+     "Keep times on frames",
+     "Pointer: select, move, and trim",
+     "Razor (R)"
+    ],
+    "rate": "Recording and Playback Rate",
+    "header": [
+     "Show Paths: Show running paths",
+     "Show Masks: Show mask edges",
+     "Show Cameras: Show camera frames",
+     "Chain: Shift-drags follow one another",
+     "Snap: Snap to the grid",
+     "Edges: Align to edges and centers",
+     "Collision: Objects collide"
+    ],
+    "code": "Show unset attributes"
+   },
+   "sameWhenToggled": true,
+   "error": null
+  }
+ },
+ "volatile": {}
+}

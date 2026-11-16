@@ -105,7 +105,7 @@ S().setTool('shape'); S().setShapeMode('create'); S().select([]); await tick(200
 for (const p of [[-300, 300], [-200, 300], [-250, 400], [-300, 300]]) await press(c, c.at(p[0], p[1]));
 S().setTool('select'); await tick(250);
 out.shape = { name: last().name, kind: last().className, frame: frame(last().name) };
-S().select(['box']); S().setTool('path'); S().setPathMode('edit'); await tick(250);
+S().select(['box']); S().setTool('path'); S().setPathMode('create'); await tick(250);
 await press(c, c.at(150, -220));
 out.pathStarted = { path: stmts('box', 'path'), selected: S().selectedActions };
 await press(c, c.at(-300, -150));

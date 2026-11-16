@@ -182,21 +182,21 @@
    "err": null
   },
   "PERF1": {
-   "importMs": 373,
+   "importMs": 402,
    "count": 61,
    "chars": 84619,
    "lines": 2588,
    "dragOff": {
-    "avg": 11,
-    "max": 12
+    "avg": 13,
+    "max": 19
    },
    "dragOn": {
-    "avg": 11,
-    "max": 13
+    "avg": 13,
+    "max": 18
    },
    "pointDrag": {
-    "avg": 8,
-    "max": 10
+    "avg": 10,
+    "max": 11
    },
    "err": null
   },

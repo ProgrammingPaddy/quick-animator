@@ -2,6 +2,10 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointer
 import { parseColor } from '../model/sample'
 import type { SceneModel } from '../model/types'
 import { useStore } from '../state/store'
+import { NumberField } from './NumberField'
+
+/** What a color with an opacity is shown over (D391), so how much of it lets through can be seen. */
+const CHECKER = 'repeating-conic-gradient(#8f8f8f 0% 25%, #d0d0d0 0% 50%)'
 
 /** The colors a scene writes, the fills and strokes of its objects and their changes, each once, in the order written (D294). */
 export function colorsOf(model: SceneModel | null): string[] {
@@ -58,8 +62,10 @@ function hsvToHex(h: number, s: number, v: number): string {
  * with a hue bar, a square of saturation and brightness, the hex, the colors used lately, and
  * every color the project writes; with `onDrop`, a dropper that takes a color from the preview.
  * A color picked from the lists or let go of in the picker joins the colors used lately.
+ * With `onOpacity`, the color has an opacity too (D391): a bar under the hue, from see-through
+ * to solid, and the percent beside the hex; the color itself then shows as see-through as it is.
  */
-export function ColorPicker({ value, onChange, onDrop, disabled, title, onOpen, onClose }: { value: string; onChange: (hex: string) => void; onDrop?: () => void; disabled?: boolean; title?: string; onOpen?: () => void; onClose?: () => void }) {
+export function ColorPicker({ value, onChange, onDrop, disabled, title, onOpen, onClose, opacity, onOpacity }: { value: string; onChange: (hex: string) => void; onDrop?: () => void; disabled?: boolean; title?: string; onOpen?: () => void; onClose?: () => void; opacity?: number; onOpacity?: (opacity: number) => void }) {
   const [open, setOpen] = useState(false)
   const [at, setAt] = useState({ left: 0, top: 0 })
   const [hex, setHex] = useState(value)
@@ -72,6 +78,9 @@ export function ColorPicker({ value, onChange, onDrop, disabled, title, onOpen, 
   const project = useMemo(() => colorsOf(model), [model])
   const valid = parseColor(value) ? value : '#ffffff'
   const hsv = useMemo(() => hexToHsv(valid), [valid])
+  const rgb = parseColor(valid) ?? [255, 255, 255]
+  const alpha = onOpacity && typeof opacity === 'number' && Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : 1
+  const ink = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})`
   const hueRef = useRef(hsv.h)
   /** The color the picker was opened on: only a color changed in it is one used lately. */
   const openedOn = useRef(value)
@@ -156,7 +165,7 @@ export function ColorPicker({ value, onChange, onDrop, disabled, title, onOpen, 
 
   return (
     <span className="color-well">
-      <button ref={buttonRef} className="color-swatch" style={{ background: valid }} disabled={disabled} title={title ?? valid} aria-label={title ?? 'Color'} onClick={() => (open ? hide() : show())} />
+      <button ref={buttonRef} className="color-swatch" style={onOpacity ? { backgroundImage: `linear-gradient(${ink}, ${ink}), ${CHECKER}`, backgroundSize: 'auto, 8px 8px' } : { background: valid }} disabled={disabled} title={title ?? valid} aria-label={title ?? 'Color'} onClick={() => (open ? hide() : show())} />
       {beside > 0 && recent.length > 0 && (
         <span className="color-recent" role="group" aria-label="Recent colors">
           {swatches(recent.slice(0, beside), 'b')}
@@ -186,6 +195,19 @@ export function ColorPicker({ value, onChange, onDrop, disabled, title, onOpen, 
           >
             <span className="color-dot" style={{ left: `${(hueRef.current / 360) * 100}%`, top: '50%' }} />
           </div>
+          {onOpacity && (
+            <div
+              className="color-opacity"
+              style={{ backgroundImage: `linear-gradient(to right, rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0), rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})), ${CHECKER}` }}
+              title="Opacity"
+              onPointerDown={(e) => {
+                e.preventDefault()
+                track(e, (x) => onOpacity(Math.round(x * 100) / 100))
+              }}
+            >
+              <span className="color-dot" style={{ left: `${alpha * 100}%`, top: '50%' }} />
+            </div>
+          )}
           <div className="color-row">
             <input
               className="color-hex mono"
@@ -205,6 +227,7 @@ export function ColorPicker({ value, onChange, onDrop, disabled, title, onOpen, 
               }}
               aria-label="Hex"
             />
+            {onOpacity && <NumberField label="Opacity" value={Math.round(alpha * 100)} unit="%" min={0} onChange={(v) => onOpacity(Math.min(100, v) / 100)} />}
             {onDrop && (
               <button
                 className="dropper"

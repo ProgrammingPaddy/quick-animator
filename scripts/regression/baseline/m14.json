@@ -1,0 +1,1444 @@
+{
+ "results": {
+  "MODEL1": {
+   "asWritten": {
+    "at": [
+     [
+      -300,
+      0
+     ],
+     [
+      -300,
+      0
+     ],
+     [
+      -150,
+      100
+     ],
+     [
+      0,
+      200
+     ],
+     [
+      0,
+      200
+     ]
+    ],
+    "error": null
+   },
+   "moved": {
+    "at": [
+     [
+      100,
+      100
+     ],
+     [
+      100,
+      100
+     ],
+     [
+      250,
+      200
+     ],
+     [
+      400,
+      300
+     ]
+    ],
+    "error": null
+   },
+   "turned": {
+    "at": [
+     [
+      100,
+      100
+     ],
+     [
+      400,
+      300
+     ]
+    ],
+    "error": null
+   },
+   "afterMove": {
+    "at": [
+     [
+      400,
+      0
+     ],
+     [
+      700,
+      200
+     ]
+    ],
+    "error": null
+   },
+   "offset": {
+    "at": [
+     [
+      -300,
+      0
+     ],
+     [
+      -250,
+      0
+     ],
+     [
+      50,
+      200
+     ]
+    ],
+    "error": null
+   },
+   "relative": {
+    "at": [
+     [
+      -200,
+      100
+     ],
+     [
+      100,
+      300
+     ]
+    ],
+    "error": null
+   },
+   "formula": {
+    "at": [
+     [
+      500,
+      0
+     ],
+     [
+      500,
+      0
+     ],
+     [
+      300,
+      200
+     ],
+     [
+      100,
+      0
+     ]
+    ],
+    "error": null
+   },
+   "facing": [
+    90,
+    123.7,
+    123.7
+   ],
+   "afterFacing": {
+    "went": [
+     0,
+     -200
+    ],
+    "faces": [
+     36.9,
+     36.9
+    ]
+   },
+   "turnedBefore": {
+    "at": [
+     [
+      -300,
+      -50
+     ],
+     [
+      300,
+      50
+     ]
+    ],
+    "error": null
+   },
+   "turnedDuring": {
+    "at": [
+     [
+      -300,
+      0
+     ],
+     [
+      100,
+      0
+     ]
+    ],
+    "error": null,
+    "anchors": [
+     [
+      -300,
+      0
+     ],
+     [
+      -100,
+      100
+     ],
+     [
+      100,
+      0
+     ]
+    ]
+   },
+   "angle": {
+    "at": [
+     [
+      -300,
+      0
+     ],
+     [
+      -400,
+      200
+     ],
+     [
+      -300,
+      400
+     ]
+    ],
+    "error": null
+   },
+   "angleOffset": {
+    "at": [
+     [
+      -300,
+      0
+     ],
+     [
+      -250,
+      0
+     ],
+     [
+      -250,
+      400
+     ]
+    ],
+    "error": null
+   },
+   "relativeAngle": {
+    "at": [
+     [
+      -300,
+      0
+     ],
+     [
+      -400,
+      200
+     ],
+     [
+      -300,
+      400
+     ]
+    ],
+    "error": null
+   },
+   "facingAngle": [
+    0,
+    116.6,
+    63.4
+   ],
+   "spin": {
+    "at": [
+     [
+      -300,
+      0
+     ],
+     [
+      -100,
+      100
+     ],
+     [
+      100,
+      0
+     ]
+    ],
+    "error": null,
+    "turns": [
+     120,
+     360,
+     600
+    ]
+   },
+   "warnings": []
+  },
+  "DRAG1": {
+   "click": {
+    "selection": [
+     "b"
+    ],
+    "actions": 0,
+    "time": 2,
+    "same": true
+   },
+   "lastFrame": {
+    "selection": [
+     "b"
+    ],
+    "time": 2.98,
+    "exists": true
+   },
+   "menu": [
+    "Jump to code",
+    "Rename",
+    "Shape",
+    "Path",
+    "Save preset",
+    "Mask",
+    "Hide",
+    "Properties",
+    "Duplicate",
+    "Delete"
+   ],
+   "pathItems": [
+    "Edit path",
+    "Add path"
+   ],
+   "editPath": {
+    "time": 2.5,
+    "selected": [
+     "b:0"
+    ],
+    "tool": "path"
+   },
+   "atFirstFrame": {
+    "lands": [
+     -200,
+     100
+    ],
+    "wanted": [
+     -200,
+     100
+    ],
+    "time": 1,
+    "decl": "b = Rect({ x: -200, y: 100, width: 80, height: 50, until: 6, })",
+    "path": "b.path({ shape: [ [0, 0], [200, 100], [400, 0], ], at: 1, duration: 2, ease: 'linear', })",
+    "ends": [
+     200,
+     100
+    ]
+   },
+   "inTheMiddle": {
+    "lands": [
+     0,
+     150
+    ],
+    "wanted": [
+     0,
+     150
+    ],
+    "time": 2,
+    "actions": [
+     [
+      "path",
+      1,
+      3
+     ],
+     [
+      "move",
+      1,
+      2
+     ]
+    ],
+    "ends": [
+     100,
+     0
+    ],
+    "path": "b.path({ shape: [ [0, 0], [200, 100], [400, 0], ], at: 1, duration: 2, ease: 'linear', })"
+   },
+   "undone": true,
+   "atTheEnd": {
+    "lands": [
+     150,
+     80
+    ],
+    "wanted": [
+     150,
+     80
+    ],
+    "time": 3,
+    "actions": [
+     [
+      "path",
+      1,
+      3
+     ]
+    ],
+    "path": "b.path({ shape: [ [0, 0], [200, 100], [450, 80], ], at: 1, duration: 2, ease: 'linear', })"
+   },
+   "after": {
+    "lands": [
+     0,
+     -100
+    ],
+    "wanted": [
+     0,
+     -100
+    ],
+    "time": 4,
+    "actions": [
+     [
+      "path",
+      1,
+      3
+     ],
+     [
+      "move",
+      3,
+      4
+     ]
+    ],
+    "at3": [
+     100,
+     0
+    ]
+   },
+   "error": null
+  },
+  "DRAG2": {
+   "atFirstFrame": {
+    "lands": [
+     -250,
+     40
+    ],
+    "wanted": [
+     -250,
+     40
+    ],
+    "time": 1,
+    "move": "a.move({ x: -250, at: 0, duration: 1, ease: 'linear', y: 40, })",
+    "path": "a.path({ shape: [ [0, 0], [200, 100], [400, 0], ], at: 1, duration: 2, ease: 'linear', })",
+    "decl": "a = Rect({ x: -500, y: 0, width: 80, height: 50, })",
+    "ends": [
+     150,
+     40
+    ],
+    "actions": [
+     [
+      "move",
+      0,
+      1
+     ],
+     [
+      "path",
+      1,
+      3
+     ]
+    ]
+   },
+   "inTheMiddle": {
+    "lands": [
+     -50,
+     140
+    ],
+    "wanted": [
+     -50,
+     140
+    ],
+    "time": 2,
+    "actions": [
+     [
+      "move",
+      0,
+      1
+     ],
+     [
+      "path",
+      1,
+      3
+     ],
+     [
+      "move",
+      1,
+      2
+     ]
+    ],
+    "ends": [
+     100,
+     0
+    ],
+    "move": "a.move({ x: -300, at: 0, duration: 1, ease: 'linear', })"
+   },
+   "atTheEnd": {
+    "lands": [
+     150,
+     40
+    ],
+    "wanted": [
+     150,
+     40
+    ],
+    "time": 3,
+    "actions": [
+     [
+      "move",
+      0,
+      1
+     ],
+     [
+      "path",
+      1,
+      3
+     ]
+    ],
+    "path": "a.path({ shape: [ [0, 0], [200, 100], [450, 40], ], at: 1, duration: 2, ease: 'linear', })",
+    "move": "a.move({ x: -300, at: 0, duration: 1, ease: 'linear', })"
+   },
+   "after": {
+    "lands": [
+     150,
+     40
+    ],
+    "wanted": [
+     150,
+     40
+    ],
+    "time": 4,
+    "actions": [
+     [
+      "move",
+      0,
+      1
+     ],
+     [
+      "path",
+      1,
+      3
+     ],
+     [
+      "move",
+      3,
+      4
+     ]
+    ],
+    "at3": [
+     100,
+     0
+    ]
+   },
+   "chainBefore": [
+    [
+     0,
+     0
+    ],
+    [
+     0,
+     -200
+    ]
+   ],
+   "chain": {
+    "lands": [
+     60,
+     40
+    ],
+    "wanted": [
+     60,
+     40
+    ],
+    "time": 3,
+    "first": "c.path({ shape: [ [0, 0], [200, 100], [460, 40], ], at: 1, duration: 2, ease: 'linear', })",
+    "second": "c.path({ shape: [ [0, 0], [0, -200], ], at: 3, duration: 1, ease: 'linear', })",
+    "decl": "c = Rect({ x: -400, y: 0, width: 80, height: 50, })",
+    "at1": [
+     -400,
+     0
+    ],
+    "at4": [
+     60,
+     -160
+    ],
+    "actions": [
+     [
+      "path",
+      1,
+      3
+     ],
+     [
+      "path",
+      3,
+      4
+     ]
+    ]
+   },
+   "withRelative": {
+    "lands": [
+     -30,
+     120
+    ],
+    "wanted": [
+     -30,
+     120
+    ],
+    "time": 2,
+    "actions": [
+     [
+      "path",
+      1,
+      3
+     ],
+     [
+      "move",
+      1,
+      3
+     ],
+     [
+      "move",
+      1,
+      2
+     ]
+    ]
+   },
+   "error": null
+  },
+  "DRAG3": {
+   "first": {
+    "lands": [
+     -20,
+     -30
+    ],
+    "wanted": [
+     -20,
+     -30
+    ],
+    "time": 1,
+    "decl": "b = Rect({ x: -140, y: -90, width: 80, height: 50, })",
+    "path": "b.path({ shape: [ [0, 0], [200, 100], [400, 0], ], at: 1, duration: 2, ease: 'linear', })"
+   },
+   "middle": {
+    "lands": [
+     164,
+     250
+    ],
+    "wanted": [
+     165,
+     250
+    ],
+    "time": 2,
+    "actions": [
+     [
+      "path",
+      1,
+      3
+     ],
+     [
+      "move",
+      1,
+      2
+     ]
+    ]
+   },
+   "end": {
+    "lands": [
+     499,
+     270
+    ],
+    "wanted": [
+     500,
+     270
+    ],
+    "time": 3,
+    "path": "b.path({ shape: [ [0, 0], [200, 100], [421, -43], ], at: 1, duration: 2, ease: 'linear', })",
+    "actions": 1
+   },
+   "error": null
+  },
+  "TOOL1": {
+   "drawn": {
+    "path": "b.path({ shape: [ [0, 0], [300, 200], [500, -100], ], at: 0, duration: 1, })",
+    "anchors": [
+     [
+      200,
+      100
+     ],
+     [
+      500,
+      300
+     ],
+     [
+      700,
+      0
+     ]
+    ],
+    "ends": [
+     700,
+     0
+    ]
+   },
+   "drawnTurned": {
+    "path": "b.path({ shape: [ [0, 0], [300, 200], ], at: 0, duration: 1, })",
+    "anchors": [
+     [
+      200,
+      100
+     ],
+     [
+      500,
+      300
+     ]
+    ],
+    "ends": [
+     500,
+     300
+    ]
+   },
+   "before": [
+    [
+     200,
+     100
+    ],
+    [
+     500,
+     300
+    ],
+    [
+     700,
+     0
+    ]
+   ],
+   "firstDragged": {
+    "decl": "b = Rect({ x: 100, y: 0, width: 100, height: 60, })",
+    "path": "b.path({ shape: [ [-100, -100], [300, 200], [500, -100], ], at: 0, duration: 2, })",
+    "anchors": [
+     [
+      100,
+      0
+     ],
+     [
+      500,
+      300
+     ],
+     [
+      700,
+      0
+     ]
+    ]
+   },
+   "secondDragged": {
+    "path": "b.path({ shape: [ [-100, -100], [350, 250], [500, -100], ], at: 0, duration: 2, })",
+    "anchors": [
+     [
+      100,
+      0
+     ],
+     [
+      550,
+      350
+     ],
+     [
+      700,
+      0
+     ]
+    ],
+    "decl": "b = Rect({ x: 100, y: 0, width: 100, height: 60, })"
+   },
+   "carried": {
+    "decl": "b = Rect({ x: 200, y: 100, width: 100, height: 60, })",
+    "path": "b.path({ shape: [ [-100, -100], [350, 250], [500, -100], ], at: 0, duration: 2, })",
+    "anchors": [
+     [
+      200,
+      100
+     ],
+     [
+      650,
+      450
+     ],
+     [
+      800,
+      100
+     ]
+    ]
+   },
+   "error": null
+  },
+  "TOOL2": {
+   "inGroup": {
+    "first": [
+     -90,
+     -110
+    ],
+    "wanted": [
+     -90,
+     -110
+    ],
+    "legBefore": [
+     185,
+     280
+    ],
+    "legAfter": [
+     95,
+     349
+    ],
+    "path": "a.path({ shape: [ [29, -70], [200, 100], [400, 0], ], at: 1, duration: 2, ease: 'linear', })"
+   },
+   "inGroupSecond": {
+    "got": [
+     44,
+     279
+    ],
+    "wanted": [
+     45,
+     279
+    ],
+    "first": [
+     -90,
+     -110
+    ]
+   },
+   "offset": {
+    "before": [
+     -250,
+     30
+    ],
+    "first": [
+     -190,
+     90
+    ],
+    "decl": "b = Rect({ x: -240, y: 60, width: 80, height: 50, })",
+    "keeps": true
+   },
+   "groupPath": {
+    "before": [
+     -250,
+     0
+    ],
+    "first": [
+     -200,
+     80
+    ],
+    "decl": "k = Group({ members: 'h1 h2', x: 50, y: 80, })",
+    "path": "k.path({ shape: [ [50, 80], [200, 100], [400, 0], ], at: 1, duration: 2, ease: 'linear', })"
+   },
+   "formulaMoved": {
+    "decl": "m = Circle({ x: 180, y: 50, radius: 20, })",
+    "offset": false,
+    "starts": [
+     180,
+     50
+    ],
+    "was": [
+     100,
+     0
+    ]
+   },
+   "relativeMoved": {
+    "decl": "m = Circle({ x: 100, y: 0, radius: 20, })",
+    "path": "m.path({ shape: (p) => [p * 300, Math.sin(p * 2 * Math.PI) * 100], at: 1, duration: 2, ease: 'linear', relative: true, offset: [40, 30], })"
+   },
+   "error": null
+  },
+  "TURN1": {
+   "inEdit": null,
+   "grip": [
+    -100,
+    200
+   ],
+   "turned": {
+    "path": "b.path({ shape: [ [0, 0], [200, 100], [400, 0], ], at: 1, duration: 2, ease: 'linear', angle: 90, })",
+    "anchors": [
+     [
+      -300,
+      0
+     ],
+     [
+      -400,
+      200
+     ],
+     [
+      -300,
+      400
+     ]
+    ],
+    "ends": [
+     -300,
+     400
+    ],
+    "grip": [
+     -500,
+     200
+    ]
+   },
+   "undone": true,
+   "snapped": "b.path({ shape: [ [0, 0], [200, 100], [400, 0], ], at: 1, duration: 2, ease: 'linear', angle: 30, })",
+   "carried": {
+    "decl": "b = Rect({ x: -200, y: 50, width: 80, height: 50, })",
+    "path": "b.path({ shape: [ [0, 0], [200, 100], [400, 0], ], at: 1, duration: 2, ease: 'linear', angle: 30, })"
+   },
+   "formula": {
+    "path": "m.path({ shape: (p) => [p * 400, Math.sin(p * Math.PI) * 100], at: 1, duration: 2, angle: 180, })",
+    "ends": [
+     -300,
+     0
+    ]
+   },
+   "error": null
+  },
+  "SHOW1": {
+   "title": "Show running paths",
+   "shown": [
+    0,
+    1,
+    2,
+    1,
+    0,
+    1,
+    0
+   ],
+   "off": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "offObject": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "offPathSelected": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "shownInHand": [
+    [
+     0,
+     0
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     0
+    ],
+    [
+     1,
+     0
+    ]
+   ],
+   "shownNoneInHand": [
+    [
+     1,
+     0
+    ],
+    [
+     1,
+     0
+    ]
+   ],
+   "toolNothing": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "toolNothingShown": [
+    0,
+    1,
+    2,
+    1,
+    0,
+    1,
+    0
+   ],
+   "toolObject": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   "inForce": {
+    "before": [
+     "b:0",
+     ""
+    ],
+    "running": [
+     "b:0",
+     ""
+    ],
+    "between": [
+     "b:0",
+     ""
+    ],
+    "second": [
+     "",
+     "b:1"
+    ],
+    "after": [
+     "",
+     "b:1"
+    ]
+   },
+   "pressed": [
+    "b:0",
+    "b:0",
+    "b:0",
+    "b:1"
+   ],
+   "unchanged": true,
+   "hiddenObject": 0,
+   "gone": {
+    "until": 1.5,
+    "there": 1,
+    "gone": 0
+   },
+   "error": null
+  },
+  "CUT1": {
+   "points": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "a.path({ shape: [[379.08, -29.08], [400, -50], [600, 100]], at: 2.2, duration: 0.8, easeIn: 0, easeOut: 0.6, })"
+   },
+   "facing": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "a.path({ shape: [[379.08, -29.08], [400, -50], [600, 100]], at: 2.2, duration: 0.8, orient: true, easeIn: 0, easeOut: 0.6, })"
+   },
+   "turnedObject": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "a.path({ shape: [[379.08, -29.08], [400, -50], [600, 100]], at: 2.2, duration: 0.8, orient: true, easeIn: 0, easeOut: 0.6, })"
+   },
+   "smoothFacing": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0.17,
+    "turn": 4.45,
+    "second": "a.path({ shape: ` M 371.89 -38.4 C 381.16 -45.14 390.52 -49.33 400 -50 C 464.73 -54.6 533.33 50 600 100 `, at: 2.2, duration: 0.8, orient: true, easeIn: 0, easeOut: 0.6, })"
+   },
+   "curvesFacing": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0.04,
+    "turn": 2.83,
+    "second": "a.path({ shape: ` M 400 0 C 450 -100 550 -100 600 50 `, at: 2.2, duration: 0.8, orient: true, easeIn: 0, easeOut: 0.6, })"
+   },
+   "pointsWhileTurning": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "a.path({ shape: [[379.08, -29.08], [400, -50], [600, 100]], at: 2.2, duration: 0.8, easeIn: 0, easeOut: 0.6, })"
+   },
+   "curvesWhileTurning": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0.04,
+    "turn": 0,
+    "second": "a.path({ shape: ` M 400 0 C 450 -100 550 -100 600 50 `, at: 2.2, duration: 0.8, easeIn: 0, easeOut: 0.6, })"
+   },
+   "formula": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "a.path({ shape: (p) => [p * 500, Math.sin(p * 2 * Math.PI) * 150], at: 2.2, duration: 0.8, ease: Ease.along(Ease.ramps(0.6, 0.6, 2), 0.6, 1), })"
+   },
+   "formulaFacing": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "a.path({ shape: (p) => [p * 500, Math.sin(p * 2 * Math.PI) * 150], at: 2.2, duration: 0.8, orient: true, ease: Ease.along(Ease.ramps(0.6, 0.6, 2), 0.6, 1), })"
+   },
+   "formulaWhileTurning": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "a.path({ shape: (p) => [p * 500, Math.sin(p * 2 * Math.PI) * 150], at: 2.2, duration: 0.8, ease: Ease.along(Ease.ramps(0.6, 0.6, 2), 0.6, 1), })"
+   },
+   "relative": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "a.path({ shape: [[0, 0], [20.92, -20.92], [220.92, 129.08]], at: 2.2, duration: 0.8, relative: true, easeIn: 0, easeOut: 0.6, })"
+   },
+   "relativeFacing": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "a.path({ shape: [[0, 0], [20.92, -20.92], [220.92, 129.08]], at: 2.2, duration: 0.8, relative: true, orient: true, easeIn: 0, easeOut: 0.6, })"
+   },
+   "angled": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "a.path({ shape: [[379.08, -29.08], [400, -50], [600, 100]], at: 2.2, duration: 0.8, angle: 30, orient: true, easeIn: 0, easeOut: 0.6, })"
+   },
+   "angledFormula": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "a.path({ shape: (p) => [p * 500, Math.sin(p * 2 * Math.PI) * 150], at: 2.2, duration: 0.8, angle: -40, ease: Ease.along(Ease.ramps(0.6, 0.6, 2), 0.6, 1), })"
+   }
+  },
+  "CUT2": {
+   "offset": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "a.path({ shape: [[379.08, -29.08], [400, -50], [600, 100]], at: 2.2, duration: 0.8, easeIn: 0, easeOut: 0.6, })"
+   },
+   "relativeOffset": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "a.path({ shape: [[0, 0], [20.92, -20.92], [220.92, 129.08]], at: 2.2, duration: 0.8, relative: true, easeIn: 0, easeOut: 0.6, })"
+   },
+   "formulaOffset": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "a.path({ shape: (p) => [p * 500, Math.sin(p * 2 * Math.PI) * 150], at: 2.2, duration: 0.8, ease: Ease.along(Ease.ramps(0.6, 0.6, 2), 0.6, 1), })"
+   },
+   "relativeFormula": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "a.path({ shape: (p) => [p * 500, Math.sin(p * 2 * Math.PI) * 150], at: 2.2, duration: 0.8, relative: true, offset: [-321.43, 117.27], ease: Ease.along(Ease.ramps(0.6, 0.6, 2), 0.6, 1), })"
+   },
+   "relativeFormulaOffset": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "a.path({ shape: (p) => [p * 500, Math.sin(p * 2 * Math.PI) * 150], at: 2.2, duration: 0.8, relative: true, offset: [-321.43, 117.27], ease: Ease.along(Ease.ramps(0.6, 0.6, 2), 0.6, 1), })"
+   },
+   "class relativePath": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "all('bars').path({ shape: [ [0, 0], [200, 100], [400, 0], ], at: 2.2, duration: 0.8, relative: true, offset: [-257.14, -71.43], ease: Ease.along(Ease.ramps(0.6, 0.6, 2), 0.6, 1), })"
+   },
+   "class path": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "all('bars').path({ shape: [ [0, 0], [200, 100], [400, 0], ], at: 2.2, duration: 0.8, ease: Ease.along(Ease.ramps(0.6, 0.6, 2), 0.6, 1), })"
+   },
+   "class relativeMove": {
+    "cut": true,
+    "notice": null,
+    "pieces": [
+     [
+      1,
+      2.2
+     ],
+     [
+      2.2,
+      3
+     ]
+    ],
+    "place": 0,
+    "turn": 0,
+    "second": "all('bars').move({ x: 300, at: 2.2, duration: 0.8, relative: true, ease: Ease.share(Ease.ramps(0.6, 0.6, 2), 0.6, 1), })"
+   }
+  },
+  "CLOSE1": {
+   "shapeItems": [
+    "Smooth shape",
+    "Straighten shape",
+    "Close line"
+   ],
+   "closed": {
+    "decl": "l = Shape({ x: 0, y: 0, curves: ` M -200 -100 L 200 -100 L 0 150 Z `, fill: '#ff8800', stroke: '#ffffff', strokeWidth: 4, fillOpacity: 0.6, })",
+    "closed": true
+   },
+   "undone": true,
+   "closedSolid": "l = Shape({ x: 0, y: 0, curves: ` M -200 -100 L 200 -100 L 0 150 Z `, fill: '#ff8800', stroke: '#ffffff', strokeWidth: 4, })",
+   "filledItems": [
+    "Smooth shape",
+    "Straighten shape"
+   ],
+   "opened": "l = Shape({ x: 0, y: 0, curves: ` M -200 -100 L 200 -100 L 0 150 `, fill: '#ff8800', stroke: '#ffffff', strokeWidth: 4, })",
+   "pointsClosed": "p = Shape({ x: 0, y: 0, points: [ [-200, -100], [200, -100], [0, 150], ], fill: '#ff8800', stroke: '#ffffff', strokeWidth: 4, })",
+   "twoPoints": "t = Shape({ x: 0, y: 0, curves: ` M -200 0 L 200 0 Z `, fill: 'none', stroke: '#ffffff', strokeWidth: 4, })",
+   "error": null
+  },
+  "COLOR1": {
+   "bar": {
+    "fields": [
+     "Width"
+    ],
+    "wells": [
+     "Fill",
+     "Outline"
+    ]
+   },
+   "picker": {
+    "opacity": true,
+    "percent": "Opacity"
+   },
+   "fillSlid": {
+    "style": 0.4,
+    "percent": "40",
+    "box": "linear-gradient(rgba(255, 136, 0, 0.4), rgba(255, 136, 0, 0.4)), r"
+   },
+   "fillTyped": 0.25,
+   "pickerClosed": true,
+   "outlineSlid": 0.5,
+   "drawn": "shape1 = Shape({ x: 0, y: 25, curves: ` M -200 -125 L 200 -125 L 0 125 Z `, fill: '#ff8800', stroke: '#00ffcc', strokeWidth: 5, strokeOpacity: 0.5, until: 2, fillOpacity: 0.25, })",
+   "edited": {
+    "decl": "shape1 = Shape({ x: 0, y: 25, curves: ` M -200 -125 L 200 -125 L 0 125 Z `, fill: '#ff8800', stroke: '#00ffcc', strokeWidth: 5, strokeOpacity: 0.5, until: 2, fillOpacity: 0.8, })",
+    "style": 0.25
+   },
+   "editedSolid": "shape1 = Shape({ x: 0, y: 25, curves: ` M -200 -125 L 200 -125 L 0 125 Z `, fill: '#ff8800', stroke: '#00ffcc', strokeWidth: 5, strokeOpacity: 0.5, until: 2, })",
+   "pencilHasOpacity": true,
+   "paintHasOpacity": false,
+   "cursor": {
+    "hot": [
+     2,
+     22
+    ],
+    "pours": true
+   },
+   "shares": "s = Shape({ x: 0, y: 0, curves: 'M -200 -100 L 200 -100 L 0 150 Z', fill: '#ff8800', fillOpacity: 0.8, strokeOpacity: 0.35, })",
+   "error": null
+  }
+ },
+ "volatile": {}
+}

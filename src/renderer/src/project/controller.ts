@@ -7,6 +7,7 @@ import { SAMPLE_SCENE } from './sample'
 import { dropTargets } from '../state/dropTargets'
 import { loadProjectFonts } from './fonts'
 import { importSvg } from './operations'
+import { watchRecording } from './recording'
 
 /** Where a new version of the scene text came from. */
 export type SourceOrigin = 'editor' | 'external' | 'load'
@@ -16,6 +17,8 @@ let settingsTimer: ReturnType<typeof setTimeout> | null = null
 /** The text of our most recent write, so the watcher's echo of it is not mistaken for an outside edit. */
 let lastWritten: string | null = null
 let unsubscribeWatch: (() => void) | null = null
+/** Whether the recording is being followed yet: once is enough, however often the app's wiring runs. */
+let watching = false
 
 /** Where the content ends: the last action plus the hold, or the hold alone, or nothing. */
 export function contentEndFor(model: SceneModel | null): number | null {
@@ -119,6 +122,10 @@ export function applyProject(data: ProjectData): void {
     selectedAction: null,
     time: 0,
     playing: false,
+    // A recording does not outlast its project (D404): it stops, with nothing of it to look over.
+    recording: false,
+    armed: false,
+    recordReview: null,
     tool: 'select',
     contextMenu: null,
     soft: loadSoft(data.path),
@@ -159,6 +166,11 @@ export function initProject(): void {
   setSelectionSink(recordSelection)
   // So do changes of the project's settings made in a pane (D384): a step says what to set, and this sets it.
   setSettingsSink(updateSettings)
+  // What a recording writes is listed as it runs, and looked over when it ends (D404).
+  if (!watching) {
+    watching = true
+    watchRecording()
+  }
   if (!window.api) {
     // No file access, for example in a plain browser: work on the sample in memory.
     if (!useStore.getState().project) {

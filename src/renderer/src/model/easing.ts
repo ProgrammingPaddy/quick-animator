@@ -104,6 +104,23 @@ export function ramps(easeIn: number, easeOut: number, duration: number): Easing
   return trust(trapezoid(easeIn, easeOut, duration))
 }
 
+/**
+ * A curve given as its values at evenly spaced moments of the progress, straight between them
+ * (D397): what a recorded gesture runs on, the pace it was done at. Taken as it is, beyond 0 and
+ * 1 included, and ending where its last value says, so a gesture that came back ends back.
+ */
+export function easeCurve(values: readonly number[]): Easing {
+  const v = values.map((n) => (Number.isFinite(n) ? n : 0))
+  if (v.length === 0) return trust((p) => p)
+  if (v.length === 1) return trust(() => v[0]!)
+  const last = v.length - 1
+  return trust((p) => {
+    const at = Math.max(0, Math.min(1, p)) * last
+    const i = Math.min(last - 1, Math.floor(at))
+    return v[i]! + (v[i + 1]! - v[i]!) * (at - i)
+  })
+}
+
 /** The part of an ease between two points of its progress, stretched to an ease of its own, 0 to 1 (D264): what a sliced animation runs on, the bounces and overshoots of the whole kept. A part that covers no change is done at once. */
 export function easePart(ease: Easing, from: number, to: number): Easing {
   const a = ease(from)

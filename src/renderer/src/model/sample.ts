@@ -84,7 +84,7 @@ interface Cache {
   /** The cameras, in the order of the cast (D358). */
   cameras?: SceneObject[]
   /** What the picture is taken through at the time last asked for (D357). */
-  view?: { time: number; view: View }
+  view?: { time: number; view: View; kept: number }
   /** Whether each thing is held on the screen, by object id (D362). */
   attached: Map<number, boolean>
 }
@@ -214,6 +214,18 @@ export function over(end: number, time: number): boolean {
   return time > end + TIME_TOLERANCE
 }
 
+/**
+ * Of a thing's paths, the one in force at a time (D389): the last begun that is still running;
+ * with none running, the one that ended last; before any has begun, the first to come.
+ */
+export function pathInForce<T extends { action: { start: number; end: number } }>(paths: T[], time: number): T | undefined {
+  const started = paths.filter((p) => begun(p.action.start, time))
+  const running = started.filter((p) => !over(p.action.end, time)).at(-1)
+  if (running) return running
+  if (started.length > 0) return started.reduce((best, p) => (p.action.end >= best.action.end ? p : best))
+  return paths.length > 0 ? paths.reduce((first, p) => (p.action.start < first.action.start ? p : first)) : undefined
+}
+
 /** An animation that returns is gone once over (D285): nothing of it shows, and nothing of it is held. */
 function gone(action: Action, time: number): boolean {
   return action.timing.return !== undefined && over(action.end, time)
@@ -250,15 +262,8 @@ function returnEase(action: Action): Easing {
   return easingFor({ ease: action.timing.ease }, tailOf(action.timing)?.back ?? 0)
 }
 
-/**
- * The value of an attribute at a time from its absolute actions, those in `except` left out:
- * the one running, the top of the stack among those, has its say; else the last to end holds
- * what it reached; before any, the declaration. An action never dictates its start (D258): it
- * begins from the state the object is in when its first frame is active, what every other
- * animation leaves at that moment, in time order, whichever way they are written; the one
- * written exception is a start given as a range (D221).
- */
-function evalAbsolute(model: SceneModel, obj: SceneObject, attr: string, segments: Segment[], time: number, type: AttrType, except: readonly Action[] = NO_ACTIONS): AttrValue {
+/** Which absolute action has the say at a time, those in `except` left out: the one running, the top of the stack among those; else the last to end; -1 before any. */
+function sayAt(segments: Segment[], time: number, except: readonly Action[]): number {
   let running = -1
   let ended = -1
   for (let i = 0; i < segments.length; i++) {
@@ -268,7 +273,19 @@ function evalAbsolute(model: SceneModel, obj: SceneObject, attr: string, segment
     if (!over(a.end, time) && a.end > a.start) running = i
     else if (ended < 0 || a.end >= segments[ended]!.action.end) ended = i
   }
-  const index = running >= 0 ? running : ended
+  return running >= 0 ? running : ended
+}
+
+/**
+ * The value of an attribute at a time from its absolute actions, those in `except` left out:
+ * the one running, the top of the stack among those, has its say; else the last to end holds
+ * what it reached; before any, the declaration. An action never dictates its start (D258): it
+ * begins from the state the object is in when its first frame is active, what every other
+ * animation leaves at that moment, in time order, whichever way they are written; the one
+ * written exception is a start given as a range (D221). A path is no exception (D387).
+ */
+function evalAbsolute(model: SceneModel, obj: SceneObject, attr: string, segments: Segment[], time: number, type: AttrType, except: readonly Action[] = NO_ACTIONS): AttrValue {
+  const index = sayAt(segments, time, except)
   if (index < 0) {
     // Nothing has begun: the next action given a start of its own holds that start, as it holds its end after it (D221).
     let pending: Segment | null = null
@@ -283,8 +300,8 @@ function evalAbsolute(model: SceneModel, obj: SceneObject, attr: string, segment
   const course = courseAt(action, time)
   // Over its return, an animation goes from what it reached back to what the rest of the stack shows now (D285).
   const back = (reached: AttrValue): AttrValue => (course.q > 0 ? interpolate(reached, evalAbsolute(model, obj, attr, segments, time, type, [...except, action]), returnEase(action)(course.q), type) : reached)
-  // A path puts the object on its shape by the eased progress (D192).
-  if (action.verb === 'path') return back(pathValue(model, obj, action, attr, time))
+  // A path takes the object along its shape by the eased progress (D192), from where the object is as the path begins (D387).
+  if (action.verb === 'path') return back(pathValue(model, obj, action, attr, time, startOf(model, obj, attr, segments, segment, type, except)))
   // A change written as a function of the progress gives the value itself, the ease its envelope (D269, D277).
   if (isProgressFunction(segment.to)) return back(progressFunctionValue(model, segment.to, action, time, startOf(model, obj, attr, segments, segment, type, except), type))
   const to = resolveSource(model, segment.to, time, fallbackFor(obj, attr))
@@ -365,11 +382,12 @@ function pathDrives(action: Action, attr: string): boolean {
 /**
  * The absolute path that owns an attribute at a time, or null (D205): it has begun, it drives the
  * attribute, and no action that began later changes the attribute outright. While a path owns a
- * value, nothing written elsewhere shows, so the GUI edits the path instead.
+ * value, nothing written elsewhere shows, so the GUI edits the path instead. With `except`, as
+ * if those actions were not there: what lies below them.
  */
-export function pathHolds(obj: SceneObject, attr: string, time: number): Action | null {
+export function pathHolds(obj: SceneObject, attr: string, time: number, except: readonly Action[] = NO_ACTIONS): Action | null {
   const items = obj.actions
-    .filter((a) => !a.overridden && !a.timing.relative && !a.timing.by && (a.verb === 'path' ? pathDrives(a, attr) : attr in a.changes))
+    .filter((a) => !a.overridden && !a.timing.relative && !a.timing.by && !except.includes(a) && (a.verb === 'path' ? pathDrives(a, attr) : attr in a.changes))
     .sort(byStack)
     .map((action) => ({ action }))
   const top = topActionAt(items, time, false)
@@ -419,14 +437,22 @@ export function pathShape(model: SceneModel, action: Action, time: number): Shap
     }
     return { kind: 'function', at: (p) => pointOf(sampled<unknown>(model, time, () => fn(p), null)) }
   }
-  // Curves, SVG path data, travel as the line they draw (D246).
+  // Curves, SVG path data, travel as the line they draw (D246): the line is drawn once for each string, however often it is asked for (D401).
   if (hasPathData(raw)) {
-    const points = flattenPathData(parsedPathData(raw)).flatMap((sp) => sp.points)
+    const points = curvesFrame(raw).curve
     return points.length > 0 ? { kind: 'points', points } : null
   }
-  const points = pointsOf(raw)
+  // A list written out is read once: it is the same list for as long as the model is.
+  let points = Array.isArray(raw) ? listPoints.get(raw) : undefined
+  if (!points) {
+    points = pointsOf(raw)
+    if (Array.isArray(raw)) listPoints.set(raw, points)
+  }
   return points.length > 0 ? { kind: 'points', points } : null
 }
+
+/** The points of each list a shape was written as, read once. */
+const listPoints = new WeakMap<object, TiedPoint[]>()
 
 /** A path's shape when it is written as curves, SVG path data (D246): its segments, read once per string, or null. */
 export function pathCurves(action: Action): Seg[] | null {
@@ -569,9 +595,17 @@ export function pathFrame(model: SceneModel, action: Action, time: number): Path
   }
   const shift = pathShift(action)
   if (shift.x === 0 && shift.y === 0) return frame
+  // The shifted line is made once for each action, while its line and its shift stay what they are.
+  const known = shiftedFrames.get(action)
+  if (known && known.of === frame && known.x === shift.x && known.y === shift.y) return known.frame
   const moved = (p: Point): Point => ({ x: p.x + shift.x, y: p.y + shift.y })
-  return { anchors: frame.anchors.map(moved), curve: frame.curve.map(moved), spans: frame.spans, cumulative: frame.cumulative, at: frame.at, anchorAt: frame.anchorAt }
+  const shifted: PathFrame = { anchors: frame.anchors.map(moved), curve: frame.curve.map(moved), spans: frame.spans, cumulative: frame.cumulative, at: frame.at, anchorAt: frame.anchorAt }
+  shiftedFrames.set(action, { of: frame, x: shift.x, y: shift.y, frame: shifted })
+  return shifted
 }
+
+/** A path's line moved by its `offset`, for each action: the line it was made from, the shift, and the result. */
+const shiftedFrames = new WeakMap<Action, { of: PathFrame; x: number; y: number; frame: PathFrame }>()
 
 /** The point a fraction of the way along a frame's curve, by distance, the direction of travel there in degrees, and which piece of the curve it is on. */
 function alongFrame(frame: PathFrame, fraction: number): { point: Point; angle: number; segment: number; t: number } {
@@ -697,11 +731,11 @@ export function pathControlsWorld(model: SceneModel, obj: SceneObject, action: A
   const shift = pathShift(action)
   return pathAnchors(curves).map((a, i) => {
     const t = times[i] ?? action.start
-    const under = underPath(model, obj, action, t)
+    const lies = pathPlacing(model, obj, action, t)
     const off = pathAnchorOffset(model, obj, t)
     const place = (p: Point | null): Point | null => {
       if (!p) return null
-      const w = carried(model, obj, t, { x: under.x + p.x + shift.x, y: under.y + p.y + shift.y })
+      const w = carried(model, obj, t, placed(lies, { x: p.x + shift.x, y: p.y + shift.y }))
       return { x: w.x + off.x, y: w.y + off.y }
     }
     return { in: place(a.in), out: place(a.out) }
@@ -721,11 +755,40 @@ function pathAnchorOffset(model: SceneModel, obj: SceneObject, time: number): Po
   return { x: box.x - at.x, y: box.y - at.y }
 }
 
-/** What else puts an object where it is during a path, at a time (D196, D223, D225): its position with the path's own point taken off; under a relative path what the path adds to, under an absolute one the relative changes added on top. */
-function underPath(model: SceneModel, obj: SceneObject, action: Action, time: number): Point {
+/** How a path's shape lies in its object's own space at a time: turned, then shifted. */
+interface Placing {
+  cos: number
+  sin: number
+  dx: number
+  dy: number
+}
+
+/**
+ * How a path's shape lies at a time (D196, D223, D225, D387, D394): turned by the path's own
+ * `angle`, and put so that the shape's point at the path's progress is where the object is. That
+ * takes in everything else that places the object then: where it was as the path began, the
+ * relative changes added on top, and under a relative path what the path adds to.
+ */
+function pathPlacing(model: SceneModel, obj: SceneObject, action: Action, time: number): Placing {
   const own = positionAt(model, obj, time)
   const at = pathPointAt(model, action, progressAt(action, time), time)
-  return at ? { x: own.x - at.point.x, y: own.y - at.point.y } : own
+  const a = (pathAngle(action) * Math.PI) / 180
+  const cos = Math.cos(a)
+  const sin = Math.sin(a)
+  if (!at) return { cos, sin, dx: own.x, dy: own.y }
+  return { cos, sin, dx: own.x - (cos * at.point.x - sin * at.point.y), dy: own.y - (sin * at.point.x + cos * at.point.y) }
+}
+
+/** A point of a path's shape, offset and all, where the shape as it lies puts it in the object's own space. */
+function placed(p: Placing, point: Point): Point {
+  return { x: p.cos * point.x - p.sin * point.y + p.dx, y: p.sin * point.x + p.cos * point.y + p.dy }
+}
+
+/** A point of the object's own space as a point of the path's shape as it lies: the inverse of `placed`. */
+function unplaced(p: Placing, point: Point): Point {
+  const x = point.x - p.dx
+  const y = point.y - p.dy
+  return { x: p.cos * x + p.sin * y, y: -p.sin * x + p.cos * y }
 }
 
 /** A point of an object's own space carried through its groups to where it is drawn, at a time (D124); held on the screen, through the camera too (D362). */
@@ -778,8 +841,7 @@ function buildTravel(model: SceneModel, obj: SceneObject, action: Action): PathF
   // Each anchor where the object is as it reaches it: under a relative path, what else moves the object then, with the anchor's change on top (D196).
   const anchors = shape.anchors.map((a, i) => {
     const t = times[i]!
-    const under = underPath(model, obj, action, t)
-    const p = carried(model, obj, t, { x: under.x + a.x, y: under.y + a.y })
+    const p = carried(model, obj, t, placed(pathPlacing(model, obj, action, t), a))
     const off = pathAnchorOffset(model, obj, t)
     return { x: p.x + off.x, y: p.y + off.y }
   })
@@ -816,16 +878,17 @@ function buildTravel(model: SceneModel, obj: SceneObject, action: Action): PathF
 }
 
 /**
- * Where a point of a path's shape is written for a place in the scene (D223): the place taken
- * back through the object's groups at the time the object is there, what lay under a relative
- * path then taken off, and `offset` taken off. The inverse of how the travelled line is drawn.
+ * Where a point of a path's shape is written for a place in the scene (D223, D387, D394): the
+ * place taken back through the object's groups at the time the object is there, then through
+ * how the shape lies then, turned by its `angle` and put where the object is, and `offset` taken
+ * off. The inverse of how the travelled line is drawn.
  */
 export function rawFromWorld(model: SceneModel, obj: SceneObject, action: Action, time: number, world: Point): Point {
   const off = pathAnchorOffset(model, obj, time)
   const local = uncarried(model, obj, time, { x: world.x - off.x, y: world.y - off.y })
   const shift = pathShift(action)
-  const under = underPath(model, obj, action, time)
-  return { x: local.x - shift.x - under.x, y: local.y - shift.y - under.y }
+  const own = unplaced(pathPlacing(model, obj, action, time), local)
+  return { x: own.x - shift.x, y: own.y - shift.y }
 }
 
 /** A Shape's points as written, at a time (D232). Only their places against each other count: see `shapeOwnPoints`. */
@@ -1202,12 +1265,97 @@ export function pointAlong(points: Point[], fraction: number): { point: Point; a
   return { point: points[points.length - 1]!, angle: 0 }
 }
 
-function pathValue(model: SceneModel, obj: SceneObject, action: Action, attr: string, time: number): AttrValue {
+/**
+ * How an object is turned at a time by its absolute actions, in degrees, those in `except` left
+ * out, and apart from the facing a path gives it with `orient` (D387): a path that faces its
+ * object along its shape turns the look of it, not the object, so under such a path the object
+ * is turned as it was when that path began. It is what a facing is added to.
+ */
+function turnUnder(model: SceneModel, obj: SceneObject, time: number, except: readonly Action[]): number {
+  const schema = attrSchema(obj.className, 'rotation')
+  if (!schema) return 0
+  const { absolute } = segmentsFor(model, obj, 'rotation')
+  const say = absolute[sayAt(absolute, time, except)]?.action
+  if (say?.verb === 'path') return facingBase(model, obj, say)
+  return numValue(evalAbsolute(model, obj, 'rotation', absolute, time, schema.type, except))
+}
+
+/** How an object is turned as a path that faces it along its shape begins, the facing of any such path apart: what the facing is added to (D387). Worked out once per action. */
+function facingBase(model: SceneModel, obj: SceneObject, action: Action): number {
+  const c = cacheFor(model)
+  const key = `${action.id}:facing`
+  const known = c.froms.get(key)
+  if (typeof known === 'number') return known
+  // While it is being found, anything that asks gets none: no turn can depend on itself.
+  c.froms.set(key, 0)
+  const base = turnUnder(model, obj, action.start, [action])
+  c.froms.set(key, base)
+  return base
+}
+
+/**
+ * How a path's shape is turned from how it is written, in degrees, counterclockwise (D394):
+ * `angle`, about the point the path begins at, which is where its object is; for a relative path,
+ * about the place the amounts are counted from. A path never takes its turn from its object, so
+ * an object turns on its path as it likes.
+ */
+export function pathAngle(action: Action): number {
+  const angle = action.changes['angle']
+  return typeof angle === 'number' && Number.isFinite(angle) ? angle : 0
+}
+
+/** A step along a path's shape as the shape lies: turned by the path's `angle` (D394). */
+function turnedStep(action: Action, dx: number, dy: number): Point {
+  const angle = pathAngle(action)
+  if (angle === 0) return { x: dx, y: dy }
+  const a = (angle * Math.PI) / 180
+  return { x: Math.cos(a) * dx - Math.sin(a) * dy, y: Math.sin(a) * dx + Math.cos(a) * dy }
+}
+
+/**
+ * What a relative path adds at a point of its shape (D196, D394): the point as an amount from
+ * where the object is, the shape turned by `angle` about that place and `offset` on top; for the
+ * rotation, with `orient`, the way along the shape as it lies.
+ */
+function pathAmount(action: Action, at: { point: Point; angle: number }, attr: string): number {
+  if (attr !== 'x' && attr !== 'y') return at.angle + pathAngle(action)
+  const shift = pathShift(action)
+  const step = turnedStep(action, at.point.x - shift.x, at.point.y - shift.y)
+  return attr === 'x' ? shift.x + step.x : shift.y + step.y
+}
+
+/**
+ * Where a path has its object at a time (D192, D387, D394). A path never dictates its start
+ * (D258): it begins where the object is as its first frame is active, `from`, and its shape is
+ * taken from the point of it the path's own start is at, its first point for any ease that
+ * begins at nothing. So the object is on its path from the first frame, wherever it was put or
+ * left, and the path goes with it. The shape lies as the path's own `angle` turns it about that
+ * point, never as the object is turned; `offset` moves the whole shape away from the object.
+ * With `orient` the object faces along the shape as it lies: the way along it, added to how the
+ * object was turned as the path began.
+ */
+function pathValue(model: SceneModel, obj: SceneObject, action: Action, attr: string, time: number, from: AttrValue): AttrValue {
   const at = pathPointAt(model, action, progressAt(action, time), time)
-  if (!at) return baseValue(model, obj, attr, time)
-  if (attr === 'x') return at.point.x
-  if (attr === 'y') return at.point.y
-  return at.angle
+  if (!at) return from
+  if (attr !== 'x' && attr !== 'y') return facingBase(model, obj, action) + at.angle + pathAngle(action)
+  const first = pathBeginning(model, action, time) ?? at.point
+  const shift = pathShift(action)
+  const step = turnedStep(action, at.point.x - first.x, at.point.y - first.y)
+  return attr === 'x' ? numValue(from) + shift.x + step.x : numValue(from) + shift.y + step.y
+}
+
+/** The point of its shape each path's own start is at, for a shape that is written out. */
+const beginnings = new WeakMap<Action, Point | null>()
+
+/** The point of a path's shape its own start is at (D387): found once for a shape written out, which is the same at any time; a shape that is code is asked each time. */
+function pathBeginning(model: SceneModel, action: Action, time: number): Point | null {
+  if (typeof action.changes['shape'] === 'function') return pathPointAt(model, action, progressAt(action, action.start), time)?.point ?? null
+  let first = beginnings.get(action)
+  if (first === undefined) {
+    first = pathPointAt(model, action, progressAt(action, action.start), time)?.point ?? null
+    beginnings.set(action, first)
+  }
+  return first
 }
 
 /**
@@ -1218,8 +1366,14 @@ function pathValue(model: SceneModel, obj: SceneObject, action: Action, attr: st
 export function actionCourse(model: SceneModel, obj: SceneObject, action: Action, attr: string, time: number): AttrValue {
   const schema = attrSchema(obj.className, attr)
   if (!schema) return 0
-  if (action.verb === 'path') return pathValue(model, obj, action, attr, time)
   const { absolute, relative } = segmentsFor(model, obj, attr)
+  if (action.verb === 'path') {
+    const own = absolute.find((s) => s.action === action)
+    // A path that takes its object over goes from where the object is as it begins (D387); a relative one is its shape's own amounts.
+    if (own) return pathValue(model, obj, action, attr, time, startOf(model, obj, attr, absolute, own, schema.type, NO_ACTIONS))
+    const at = pathPointAt(model, action, progressAt(action, time), time)
+    return at ? pathAmount(action, at, attr) : 0
+  }
   const segment = [...absolute, ...relative].find((s) => s.action === action)
   if (!segment) return fallbackFor(obj, attr)
   const progress = progressAt(action, time)
@@ -1263,40 +1417,50 @@ export function valueAt(model: SceneModel, obj: SceneObject, attr: string, time:
   const schema = attrSchema(obj.className, attr)
   if (!schema) return 0
   const { absolute, relative } = segmentsFor(model, obj, attr)
-  let value = evalAbsolute(model, obj, attr, absolute, time, schema.type)
-  if (relative.length > 0 && typeof value === 'number') {
-    let sum = value
-    for (const segment of relative) {
-      if (segment.action.start > time) {
-        // A relative change given a start of its own adds that start until it begins (D221).
-        const from = segment.from !== undefined ? resolveSource(model, segment.from, time, 0) : 0
-        if (typeof from === 'number') sum += from
-        continue
-      }
-      // A returning change fades out over its return and adds nothing once over (D285).
-      const course = courseAt(segment.action, time)
-      if (course.gone) continue
-      const weight = course.q > 0 ? 1 - returnEase(segment.action)(course.q) : 1
-      if (segment.action.verb === 'path') {
-        // A relative path's shape is changes from where the object is, added on top of whatever else moves it (D196).
-        const at = pathPointAt(model, segment.action, progressAt(segment.action, time), time)
-        if (at) sum += (attr === 'x' ? at.point.x : attr === 'y' ? at.point.y : at.angle) * weight
-        continue
-      }
-      // A relative change written as a function of the progress adds what it gives, by its envelope (D269, D277).
-      if (isProgressFunction(segment.to)) {
-        const given = progressFunctionValue(model, segment.to, segment.action, time, 0, 'number')
-        if (typeof given === 'number') sum += given * weight
-        continue
-      }
-      const to = resolveSource(model, segment.to, time, 0)
+  const value = evalAbsolute(model, obj, attr, absolute, time, schema.type)
+  return relative.length > 0 && typeof value === 'number' ? value + relativeSum(model, relative, attr, time) : value
+}
+
+/**
+ * What the relative changes on an attribute add at a time, each by how far along it is (D53).
+ * A facing is a look and not an amount (D395): of the relative paths that face their object
+ * along their shapes, the last to have begun gives the facing, alone, so one such path after
+ * another, and the two pieces of a cut one, never add theirs together.
+ */
+function relativeSum(model: SceneModel, relative: Segment[], attr: string, time: number): number {
+  let sum = 0
+  let facing: Segment | null = null
+  if (attr === 'rotation') for (const s of relative) if (s.action.verb === 'path' && s.action.start <= time && !courseAt(s.action, time).gone && (!facing || s.action.start >= facing.action.start)) facing = s
+  for (const segment of relative) {
+    if (segment.action.start > time) {
+      // A relative change given a start of its own adds that start until it begins (D221).
       const from = segment.from !== undefined ? resolveSource(model, segment.from, time, 0) : 0
-      // A relative change runs from its own start, when written as a range, else from nothing, to its value (D221).
-      if (typeof to === 'number' && typeof from === 'number') sum += (from + (to - from) * progressAt(segment.action, time)) * weight
+      if (typeof from === 'number') sum += from
+      continue
     }
-    value = sum
+    // A returning change fades out over its return and adds nothing once over (D285).
+    const course = courseAt(segment.action, time)
+    if (course.gone) continue
+    const weight = course.q > 0 ? 1 - returnEase(segment.action)(course.q) : 1
+    if (segment.action.verb === 'path') {
+      if (attr === 'rotation' && segment !== facing) continue
+      // A relative path's shape is changes from where the object is, added on top of whatever else moves it (D196).
+      const at = pathPointAt(model, segment.action, progressAt(segment.action, time), time)
+      if (at) sum += pathAmount(segment.action, at, attr) * weight
+      continue
+    }
+    // A relative change written as a function of the progress adds what it gives, by its envelope (D269, D277).
+    if (isProgressFunction(segment.to)) {
+      const given = progressFunctionValue(model, segment.to, segment.action, time, 0, 'number')
+      if (typeof given === 'number') sum += given * weight
+      continue
+    }
+    const to = resolveSource(model, segment.to, time, 0)
+    const from = segment.from !== undefined ? resolveSource(model, segment.from, time, 0) : 0
+    // A relative change runs from its own start, when written as a range, else from nothing, to its value (D221).
+    if (typeof to === 'number' && typeof from === 'number') sum += (from + (to - from) * progressAt(segment.action, time)) * weight
   }
-  return value
+  return sum
 }
 
 /** Drop what the sampler has worked out for a model, for when its actions' times change under it. */
@@ -1549,7 +1713,9 @@ function unitValue(model: SceneModel, layout: TextLayout, attr: UnitAttr, list: 
     const at = pathPointAt(model, r.action, progress, time)
     const origin = pathPointAt(model, r.action, 0, time)
     if (!at || !origin) return null
-    return back(attr === 'x' ? at.point.x - origin.point.x : attr === 'y' ? at.point.y - origin.point.y : at.angle)
+    if (attr !== 'x' && attr !== 'y') return back(at.angle + pathAngle(r.action))
+    const step = turnedStep(r.action, at.point.x - origin.point.x, at.point.y - origin.point.y)
+    return back(attr === 'x' ? step.x : step.y)
   }
   const raw = r.action.changes[attr]
   const from = r.action.from[attr] !== undefined ? resolveSource(model, r.action.from[attr]!, time, natural) : (unitValue(model, layout, attr, list, r.begins, natural, [...except, r.action]) ?? natural)
@@ -1887,7 +2053,8 @@ export function cameraAt(model: SceneModel, time: number, keepAliveFrom?: number
   const all = camerasOf(model)
   for (let i = all.length - 1; i >= 0; i--) {
     const camera = all[i]!
-    if (existsAt(model, camera, time) || (keepAliveFrom !== undefined && existsAt(model, camera, keepAliveFrom))) return camera
+    // One a recording keeps in hand counts while it is kept (D403).
+    if (inView(model, camera, time) || (keepAliveFrom !== undefined && existsAt(model, camera, keepAliveFrom))) return camera
   }
   return null
 }
@@ -1906,12 +2073,12 @@ export function viewOf(model: SceneModel, camera: SceneObject, time: number): Vi
 /** What the picture is taken through at a time (D357, D358): the view of the camera that has it, or the scene's middle. Kept for the time last asked, since every thing held on the screen asks. */
 export function viewAt(model: SceneModel, time: number): View {
   const c = cacheFor(model)
-  if (c.view && c.view.time === time) return c.view.view
+  if (c.view && c.view.time === time && c.view.kept === keptCount) return c.view.view
   // While it is being found, anything that asks gets the scene's middle: a camera that follows what is held on the screen would otherwise ask for itself.
-  c.view = { time, view: NO_VIEW }
+  c.view = { time, view: NO_VIEW, kept: keptCount }
   const camera = cameraAt(model, time)
   const view = camera ? viewOf(model, camera, time) : NO_VIEW
-  c.view = { time, view }
+  c.view = { time, view, kept: keptCount }
   return view
 }
 
@@ -2065,6 +2232,26 @@ export function existsAt(model: SceneModel, obj: SceneObject, time: number): boo
   // The frame an object begins on is its, however its time was rounded when written; the frame it is removed on is not (D275).
   if (!begun(obj.at, time)) return false
   return obj.until === null || time < obj.until - TIME_TOLERANCE || (model.contentEnd !== null && obj.until >= model.contentEnd)
+}
+
+/** The names a recording keeps in view though their lives have gone by (D403): what is in hand while it runs. None outside a recording, and none in an export. */
+let kept: ReadonlySet<string> = new Set()
+/** Counts each change of what is kept, for what the sampler remembers by it. */
+let keptCount = 0
+
+/** Say what a recording keeps in view (D403). The same names as before change nothing. */
+export function keepInView(names: ReadonlySet<string>): void {
+  if (names.size === kept.size && [...names].every((n) => kept.has(n))) return
+  kept = names
+  keptCount++
+}
+
+/**
+ * Whether a thing is there to be seen and dragged at a time: within its life, or kept in view by
+ * a recording (D403). What is written, and what an export draws, goes by its life alone.
+ */
+export function inView(model: SceneModel, obj: SceneObject, time: number): boolean {
+  return existsAt(model, obj, time) || kept.has(obj.name)
 }
 
 /** The opacity an object shows with: its own, times that of every group carrying it (D150). */

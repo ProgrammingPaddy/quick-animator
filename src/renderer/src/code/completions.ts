@@ -53,22 +53,38 @@ const VERB_DOCS: Record<Verb, string> = {
   resize: 'Change width, height, radius, or font size over time; or scale, a multiplier of the drawn size, which is how a group grows or shrinks, around its pivot.',
   fade: 'Change opacity over time. Opacity 0 means the object does not exist.',
   to: 'Change any attributes over time.',
-  path: 'Take the object along a path over time: shape is points [[x, y], ...] or a function of the progress, (p) => [x, y]; orient turns the object with the path; offset shifts the whole path (D192).',
+  path: 'Take the object along a path over time, from where the object is: shape is points [[x, y], ...], curves, or a function of the progress, (p) => [x, y]; orient faces the object along the path; angle turns the whole path; offset shifts it (D192, D387, D394).',
   morph: "Take a Shape's outline to another over time: to is curves 'M 0 0 C ...', points [[x, y], ...], a word such as Shape.star(5, 100, 50), or a link such as () => other.curves (D257).",
+}
+
+/**
+ * What `Ease.` holds (D264, D397, D402): the eases as code, for an `ease` that is more than a
+ * name. Each writes its call with its values to fill in.
+ */
+function easeMembers(prefix = ''): Completion[] {
+  const call = (name: string, body: string, info: string): Completion => snippetCompletion(`${prefix}${name}(${body})`, { label: `${prefix}${name}`, detail: '()', info, type: 'function' })
+  return [
+    call('curve', '[${1:0}, ${2:0.5}, ${3:1}]', 'A curve by its values at evenly spaced moments of the progress, straight between them: what a recorded animation runs on.'),
+    call('ramps', '${1:0.3}, ${2:0.3}, ${3:1}', 'Seconds of easing in and out over a length in seconds, as easeIn and easeOut give.'),
+    call('part', "${1:'linear'}, ${2:0}, ${3:1}", 'The part of an ease between two points of its progress, stretched to an ease of its own: what a cut animation runs on.'),
+    call('share', "${1:'linear'}, ${2:0}, ${3:1}", 'The share of the change an ease covers between two points of its progress, from nothing.'),
+    call('along', "${1:'linear'}, ${2:0}, ${3:1}", 'The stretch of an ease between two points of its progress, as the curve is there: what a piece of a cut path runs on.'),
+  ]
 }
 
 /** The keys of a path block besides its timing (D192). */
 const PATH_DOCS: Record<string, string> = {
-  shape: "The path: points [[x, y], ...] in the scene's space, traveled by distance, or a function of the progress, (p) => [x, y].",
+  shape: "The path: points [[x, y], ...], traveled by distance, curves 'M 0 0 C ...', or a function of the progress, (p) => [x, y]. It begins where the object is: only where the points lie against the first counts.",
   orient: 'true: the object turns to face along the path.',
-  offset: 'A shift of the whole path, [dx, dy].',
+  offset: 'A shift of the whole path away from the object, [dx, dy].',
+  angle: 'Degrees the whole path is turned, counterclockwise, about the point it begins at.',
   smooth: 'true: a smooth curve through the points instead of straight lines between them.',
   timed: 'true: the points are evenly spaced in time, as the pencil records a motion, instead of traveled by distance.',
 }
 
 function pathCompletion(key: string): Completion {
   const f = new Fields()
-  const text = key === 'shape' ? `shape: [\n    [${f.field('0')}, ${f.field('0')}],\n    [${f.field('200')}, ${f.field('0')}],\n  ],` : key === 'offset' ? `offset: [${f.field('0')}, ${f.field('0')}],` : `${key}: ${f.field('true')},`
+  const text = key === 'shape' ? `shape: [\n    [${f.field('0')}, ${f.field('0')}],\n    [${f.field('200')}, ${f.field('0')}],\n  ],` : key === 'offset' ? `offset: [${f.field('0')}, ${f.field('0')}],` : key === 'angle' ? `angle: ${f.field('0')},` : `${key}: ${f.field('true')},`
   return snippetCompletion(text, { label: key, info: PATH_DOCS[key], type: 'property' })
 }
 
@@ -354,6 +370,8 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
   if (member) {
     const owner = member[1]!
     const from = pos - member[2]!.length
+    // Ease.| : the eases as code, and the named curves as they stand there (D402).
+    if (owner === 'Ease') return { from, options: [...easeMembers(), ...EASE_NAMES.map((n) => ({ label: n, type: 'constant' }))], validFor: /^[\w$]*$/ }
     const obj = model?.objects.find((o) => o.name === owner)
     if (obj) {
       const states: Completion[] = STATE_NAMES.map((s) => ({ label: s, type: 'property', info: `What ${obj.name} is doing, as a time: ${obj.name}.${s}.start and .end, [2] for the second stretch, .last for the last.` }))
@@ -387,7 +405,7 @@ export function sceneCompletions(context: CompletionContext): CompletionResult |
     if (key !== null) {
       if (key === 'ease') {
         const quoted = context.matchBefore(/'?[\w$]*/)
-        return { from: quoted?.from ?? pos, options: EASE_NAMES.map((n) => ({ label: `'${n}'`, type: 'constant' })), validFor: /^'?[\w$]*'?$/ }
+        return { from: quoted?.from ?? pos, options: [...EASE_NAMES.map((n) => ({ label: `'${n}'`, type: 'constant' })), ...easeMembers('Ease.')], validFor: /^'?[\w$]*'?$/ }
       }
       if (key === 'at' || key === 'until') {
         if (!word) return null

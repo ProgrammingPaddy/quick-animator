@@ -47,7 +47,7 @@
    ],
    "closedLine": {
     "closed": true,
-    "fill": "none",
+    "fill": "#4f8cff",
     "strokeWidth": 3,
     "segs": "MLLZ"
    },
@@ -378,13 +378,13 @@
     "s1": "line",
     "pointMenu": [
      "Smooth point",
-     "Path>[Smooth path,Straighten path]",
+     "Path>[Smooth path,Straighten path,Hide path]",
      "Delete point"
     ],
     "lineMenu": [
      "Add point",
      "Curve segment",
-     "Path>[Smooth path,Straighten path]"
+     "Path>[Smooth path,Straighten path,Hide path]"
     ]
    },
    "smoothed": {
@@ -399,7 +399,7 @@
     "pointMenu": [
      "Corner point",
      "Straighten point",
-     "Path>[Smooth path,Straighten path]",
+     "Path>[Smooth path,Straighten path,Hide path]",
      "Delete point"
     ],
     "anchors": [
@@ -428,7 +428,7 @@
     "lineMenu": [
      "Add point",
      "Curve segment",
-     "Path>[Smooth path,Straighten path]"
+     "Path>[Smooth path,Straighten path,Hide path]"
     ]
    },
    "err": null

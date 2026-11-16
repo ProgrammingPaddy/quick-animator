@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { applyEdits, createEditor, getEditor, highlightRanges, markProblemLines, placeCursor, scrollToPos, setGhostClickHandler, setGhostLines, type GhostBlock, type HighlightSpec } from '../code/editor'
 import { DEFAULT_EASE_FRACTION } from '../model/easing'
 import { formatNumber, formatValue, setProp, setPropText } from '../model/edits'
@@ -47,9 +47,10 @@ function timingDefaults(action: Action, model: SceneModel | null): { key: string
     if (box) for (const key of PIVOT_PARAMS) if (!present.has(key)) out.push({ key, value: formatNumber(Math.round(key === 'pivotX' ? box.x : box.y)) })
   }
   if (action.verb === 'path') {
-    // A path's settings: whether it turns the object with it, and the shift of the whole shape (D193).
+    // A path's settings: whether it faces the object along it, the shift of the whole shape (D193), and its turn (D394).
     if (!present.has('orient')) out.push({ key: 'orient', value: 'false' })
     if (!present.has('offset')) out.push({ key: 'offset', value: '[0, 0]' })
+    if (!present.has('angle')) out.push({ key: 'angle', value: '0' })
     if (!present.has('smooth')) out.push({ key: 'smooth', value: 'false' })
   }
   if (!present.has('at')) out.push({ key: 'at', value: formatNumber(action.start - (action.timing.delay ?? 0)) })
@@ -80,8 +81,6 @@ export function CodePane() {
   const source = useStore((s) => s.source)
   const showDefaults = useStore((s) => s.showDefaults)
   const toggleDefaults = useStore((s) => s.toggleDefaults)
-  const [marks, setMarks] = useState<Mark[]>([])
-  const [docLines, setDocLines] = useState(1)
 
   useEffect(() => {
     const host = hostRef.current
@@ -93,8 +92,8 @@ export function CodePane() {
     }
   }, [])
 
-  // Marks: tint the selected thing, bar what relates to it; keep the ruler in step.
-  useEffect(() => {
+  // Marks: tint the selected thing, bar what relates to it; the ruler shows the same. Worked out as the pane is drawn, and not set after it, so an edit draws the pane once (D401).
+  const { spec, marks, docLines } = useMemo(() => {
     const spec: HighlightSpec = { full: [], bars: [] }
     if (model) {
       if (selectedActions.length > 0) {
@@ -113,19 +112,22 @@ export function CodePane() {
         }
       }
     }
-    highlightRanges(spec)
-    const view = getEditor()
-    if (!view) return
-    const doc = view.state.doc
+    const marks: Mark[] = []
+    const doc = getEditor()?.state.doc
+    if (!doc) return { spec, marks, docLines: 1 }
     const lineOf = (pos: number) => doc.lineAt(Math.max(0, Math.min(pos, doc.length))).number
-    const next: Mark[] = []
-    for (const f of spec.full) next.push({ from: lineOf(f.range.from), to: lineOf(f.range.to), color: f.color, kind: 'full' })
-    for (const b of spec.bars) next.push({ from: lineOf(b.range.from), to: lineOf(b.range.to), color: b.color, kind: 'bar' })
-    if (error?.line) next.push({ from: error.line, to: error.line, color: 'var(--error)', kind: 'error' })
-    if (!error && model) for (const w of model.warnings) if (w.line) next.push({ from: w.line, to: w.line, color: 'var(--warning)', kind: 'warning' })
-    setMarks(next)
-    setDocLines(doc.lines)
+    for (const f of spec.full) marks.push({ from: lineOf(f.range.from), to: lineOf(f.range.to), color: f.color, kind: 'full' })
+    for (const b of spec.bars) marks.push({ from: lineOf(b.range.from), to: lineOf(b.range.to), color: b.color, kind: 'bar' })
+    if (error?.line) marks.push({ from: error.line, to: error.line, color: 'var(--error)', kind: 'error' })
+    if (!error && model) for (const w of model.warnings) if (w.line) marks.push({ from: w.line, to: w.line, color: 'var(--warning)', kind: 'warning' })
+    return { spec, marks, docLines: doc.lines }
+    // The text is among what this follows: the lines are those of the code as it stands.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, selectedActions, model, error, source])
+
+  useEffect(() => {
+    highlightRanges(spec)
+  }, [spec])
 
   // Selecting something scrolls the code to it.
   useEffect(() => {
@@ -214,7 +216,7 @@ export function CodePane() {
     <div className="code-pane">
       <div className="code" ref={hostRef} />
       <div className="code-tools">
-        <button className={showDefaults ? 'on' : ''} onClick={toggleDefaults} title={showDefaults ? 'Showing unset attributes as ghost lines. Click to show only what is written.' : 'Showing only what is written. Click to show unset attributes as ghost lines.'} aria-pressed={showDefaults}>
+        <button className={showDefaults ? 'on' : ''} onClick={toggleDefaults} title="Show unset attributes" aria-pressed={showDefaults}>
           Defaults
         </button>
       </div>

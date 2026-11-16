@@ -170,6 +170,40 @@ a value changes.
 Typed code is re-evaluated on a short debounce. External file changes are re-evaluated on the
 watcher event. In both cases the playhead and the selection, by object name, are kept.
 
+What a step costs is kept down where it is paid at every step (D401): a path's shape is drawn
+into a line once for each string, a path's line in the preview is one mesh rebuilt only when its
+points change, and a pane works out what it marks as it is drawn, not after.
+
+## Recording (D397, D401 to D404, D412)
+
+There is one recorder, in `project/operations.ts`, and every pane's changes reach it. The
+preview's drags call it themselves, `recordShown` for the thing dragged and for each thing it
+pushes, `recordOutline` for a Shape's resize, `recordWriteOn` for the pencil. Everything else
+reaches it through the two places plain changes are written through: `setAttrsAtMany`, which
+while a recording runs records the change instead of writing it for all time, and `recordValue`
+for a color or words. Whether a change is a gesture or a change at once is whether a gesture,
+an undo step, is open in the editor: inside one, a slider's drag, a run of the wheel or of the
+arrow keys, each thing changed has one recording, kept by the thing's name, which ends when the
+gesture does, through `onGestureEnd` in `code/editor.ts`, so what it writes joins the gesture's
+undo step; outside one, the change is an animation of no length. A change that is no part of
+what is performed passes `plain`. All the recordings of a gesture share one follower of the
+playhead, and what they ask at a step goes in one edit, at most once a frame of the display,
+so a frame costs one reading of the code however many things move.
+
+A recorded gesture is an ordinary animation while it is dragged: written at the first move,
+lengthened to the playhead at each frame, its end set by the drag, so the code is the truth at
+every frame as in any drag. Let go, it is rewritten in one edit. For a move, the code with the
+gesture as a path of one point is evaluated on its own, off to the side, and that model is asked
+where each frame's place lies in the path's own terms; the path's text, its points and its ease,
+replaces the animation's statement where it stands, so its index among the object's actions
+stays the same. `project/recording.ts` keeps the list of what the recording has written, each
+animation by its object, verb, and times, and the lives it widened as they stood; when the
+recording stops, a microtask later, so that a gesture still held is in it, the list goes to the
+store and the review shows it. The review's deleting is one more edit. While a recording runs,
+the names in hand are kept in view by the sampler's `inView`, which the renderer and the camera
+that has the picture ask; `existsAt`, which everything written and exported goes by, never
+knows of them.
+
 ## Rendering
 
 - One Three.js scene. 2D objects are flat meshes in draw order. The default scene camera is flat (orthographic). The 3D checkpoint animates the camera's projection blend toward perspective.
@@ -429,7 +463,7 @@ Vocabulary. Items marked "coming" are not built yet.
 
 - **Classes** (D36, D43): `Rect`, `Circle`, `Text`; coming: `Line`, `Polygon`, `Image`, `Group`, `Video`, `Camera`, and the 3D shapes. Every visible object is a shape with a kind, which is what lets one object morph into another kind.
 - **Attributes.** Common: `x`, `y`, `z`, `rotation`, `scale`, `opacity`, `fill`; coming: `anchor`, `stroke`, `strokeWidth`. Per class: `width`, `height`, `radius`, `text`, `fontSize`, `font`. The registry lists them all with defaults.
-- **Verbs** (D37): `move` for x, y, z; `rotate`; `resize` for width, height, radius, fontSize, and scale, a multiplier (D211); `fade` for opacity; `to` for any attributes; `path` along a shape, points or a function of the progress, with orient and offset (D192). Coming: `morph(Class, { ... })`, `link({ ... })`. The timeline labels and colors clips by verb.
+- **Verbs** (D37): `move` for x, y, z; `rotate`; `resize` for width, height, radius, fontSize, and scale, a multiplier (D211); `fade` for opacity; `to` for any attributes; `path` along a shape, points or a function of the progress, with orient and offset (D192), from where its object is and turned as it is (D387). Coming: `morph(Class, { ... })`, `link({ ... })`. The timeline labels and colors clips by verb.
 - **Timing keys**, reserved in every action block: `at`, `delay`, `duration`, `until`, `easeIn`, `easeOut`, `ease`, `relative`. `at` takes seconds or a time reference; omitted, it means right after the object's previous action, or 0. `until` is an end time or reference, as an alternative to `duration`.
 - **Relative** (D51): `relative: true` makes the block's values changes from wherever the object is when the action starts. A relative action adds on top of whatever else is happening; of the absolute ones running, the one later in the file has the say, and the ones below show through again when it ends (D53, D210).
 - **Visibility** (D52): opacity is the one system. An object with opacity 0 does not exist, is not drawn, not hit, and not sampled. To appear later, the cast sets `opacity: 0` and the script fades it in; the timeline shows every object's opacity as its own lane.

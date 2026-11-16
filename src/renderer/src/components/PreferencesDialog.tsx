@@ -149,6 +149,18 @@ function GeneralTab() {
           opacity on object clips
         </label>
       </div>
+      <div className="row">
+        <label className="check" title="When a recording stops, the playhead goes back to where it began">
+          <input type="checkbox" checked={prefs.recordReturn !== false} onChange={(e) => setPrefs({ recordReturn: e.target.checked })} />
+          playhead goes back after recording
+        </label>
+      </div>
+      <div className="row">
+        <label className="check" title="A list of what was recorded, to keep or delete">
+          <input type="checkbox" checked={prefs.recordReview !== false} onChange={(e) => setPrefs({ recordReview: e.target.checked })} />
+          review after recording
+        </label>
+      </div>
       <span className="dim top">Timeline sections</span>
       <SectionOrder />
     </div>

@@ -3,6 +3,7 @@ import { showMenu } from '../components/ContextMenu'
 import { Eye } from '../components/KindIcon'
 import { LinkIcon } from '../components/LinkIcon'
 import { NumberField } from '../components/NumberField'
+import { keysLabel, NO_OVERRIDES } from '../state/hotkeys'
 import { ScrollBar } from '../components/ScrollBar'
 import { beginGesture, endGesture } from '../code/editor'
 import { actionIdents, activeMembers, carriedBy, classActionIdents, classKey, classSpan, classStandIn, classTree, groupMembers, movedInTime, overrideOf, type ClassNode } from '../model/groups'
@@ -354,6 +355,10 @@ export function TimelinePane() {
   const timelineOrder = useStore((s) => s.prefs.timelineOrder)
   const hidden = useStore((s) => s.hidden)
   const loop = useStore((s) => s.loop)
+  const recording = useStore((s) => s.recording)
+  const recordWait = useStore((s) => s.recordWait)
+  const rate = useStore((s) => s.rate)
+  const recordKey = useStore((s) => keysLabel('record', s.prefs.hotkeys ?? NO_OVERRIDES, true))
   const snap = useStore((s) => s.snap)
   const openLinksDialog = useStore((s) => s.openLinksDialog)
   const setHoverTimeline = useStore((s) => s.setHoverTimeline)
@@ -381,6 +386,10 @@ export function TimelinePane() {
   const setAllCollapsed = useStore((s) => s.setAllCollapsed)
   const togglePlaying = useStore((s) => s.togglePlaying)
   const toggleLoop = useStore((s) => s.toggleLoop)
+  const stepFrames = useStore((s) => s.stepFrames)
+  const toggleRecording = useStore((s) => s.toggleRecording)
+  const toggleRecordWait = useStore((s) => s.toggleRecordWait)
+  const setRate = useStore((s) => s.setRate)
   const toggleSnap = useStore((s) => s.toggleSnap)
   const toggleFrameSnap = useStore((s) => s.toggleFrameSnap)
   const setWheelStep = useStore((s) => s.setWheelStep)
@@ -561,17 +570,20 @@ export function TimelinePane() {
 
   /**
    * A press on empty space in the rows (D92, D315): let go of where it began, it selects nothing,
-   * so the arrows go back to scrubbing; dragged, it draws a box, and the object clips the box
-   * touches are selected, added to what was selected when Ctrl is held. The razor draws no box.
+   * so the arrows go back to scrubbing; dragged, it draws a box. Over several object clips the box
+   * selects the clips it touches; inside one, the animations of that clip it touches, as it takes
+   * clips, and the clip itself when it touches none of them or the clip is collapsed (D409). With
+   * Ctrl held, what it takes is added to what was selected. The razor draws no box.
    */
   const beginMarquee = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
     if (e.target instanceof Element && e.target.closest('.clip, .oclip, .opacity-handle, .tl-row-header, button, input')) return
     const extend = e.ctrlKey || e.metaKey
-    const before = extend ? useStore.getState().selection : []
+    const began = useStore.getState()
+    const before = extend ? { names: began.selection, refs: began.selectedActions } : { names: [], refs: [] }
     const origin = { x: e.clientX, y: e.clientY }
     const rows = e.currentTarget
-    const boxing = useStore.getState().timelineTool !== 'razor'
+    const boxing = began.timelineTool !== 'razor'
     let moved = false
     capture(
       rows,
@@ -581,15 +593,27 @@ export function TimelinePane() {
         moved = true
         const box = { left: Math.min(origin.x, ev.clientX), right: Math.max(origin.x, ev.clientX), top: Math.min(origin.y, ev.clientY), bottom: Math.max(origin.y, ev.clientY) }
         setMarquee(box)
-        const touched = [...rows.querySelectorAll<HTMLElement>('.oclip[data-object]')]
-          .filter((el) => {
-            const r = el.getBoundingClientRect()
-            return r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top
-          })
-          .map((el) => el.dataset['object']!)
-        const next = [...before, ...touched.filter((name) => !before.includes(name))]
-        const now = useStore.getState().selection
-        if (next.length !== now.length || next.some((name, i) => name !== now[i])) select(next)
+        const touches = (el: HTMLElement): boolean => {
+          const r = el.getBoundingClientRect()
+          return r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top
+        }
+        const clips = [...rows.querySelectorAll<HTMLElement>('.oclip[data-object]')].filter(touches)
+        const only = clips.length === 1 && !clips[0]!.classList.contains('collapsed') ? clips[0]! : null
+        const inside: ActionRef[] = only
+          ? [...only.querySelectorAll<HTMLElement>('.clip[data-pick]')].filter(touches).map((el) => {
+              const pick = el.dataset['pick']!
+              const cut = pick.lastIndexOf(':')
+              return { object: pick.slice(0, cut), index: Number(pick.slice(cut + 1)) }
+            })
+          : []
+        const touched = clips.map((el) => el.dataset['object']!)
+        const names = [...before.names, ...touched.filter((name) => !before.names.includes(name))]
+        const refs = [...before.refs, ...inside.filter((r) => !isActionSelected(before.refs, r.object, r.index))]
+        const now = useStore.getState()
+        const same = names.length === now.selection.length && names.every((name, i) => name === now.selection[i]) && refs.length === now.selectedActions.length && refs.every((r, i) => r.object === now.selectedActions[i]!.object && r.index === now.selectedActions[i]!.index)
+        if (same) return
+        if (refs.length > 0) now.selectWith(names, refs)
+        else select(names)
       },
       () => {
         setMarquee(null)
@@ -1488,6 +1512,7 @@ export function TimelinePane() {
         className={`clip${locked ? ' locked' : ''}${derived ? ' derived' : ''}${action.overridden ? ' overridden' : ''}${action.overrides ? ' override' : ''}${isSelected ? ' selected' : ''}${kin ? ' kin' : ''}${carried ? ' carried' : ''}${thin ? ' thin' : ''}${dragging ? ' dragging' : ''}`}
         style={{ left, top, width: clipWidth, background: VERB_COLORS[action.verb], color: labelOn(VERB_COLORS[action.verb]) }}
         {...(own ? { 'data-ref': `${owner.name}:${index}` } : {})}
+        {...(!carried && !locked ? { 'data-pick': `${owner.name}:${index}` } : {})}
         onPointerDown={locked ? undefined : razor ? sliceHere(owner, index) : beginClipDrag(owner, index, 'move', own && !thin)}
         onDoubleClick={locked || razor ? undefined : actionDoubleClick(owner, index, action)}
         onContextMenu={action.stmt ? clipMenu(owner, index) : undefined}
@@ -1878,6 +1903,19 @@ export function TimelinePane() {
           {'⏮'}
         </button>
         <button
+          className="transport-button"
+          onClick={(e) => {
+            stepFrames(-1)
+            e.currentTarget.blur()
+          }}
+          title="Back a frame"
+          aria-label="Back a frame"
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M4 3 H5.6 V13 H4 Z M13 3 V13 L6.4 8 Z" fill="currentColor" />
+          </svg>
+        </button>
+        <button
           className="transport-button play"
           onClick={(e) => {
             togglePlaying()
@@ -1888,6 +1926,19 @@ export function TimelinePane() {
           aria-label={playing ? 'Pause' : 'Play'}
         >
           {playing ? '❚❚' : '▶'}
+        </button>
+        <button
+          className="transport-button"
+          onClick={(e) => {
+            stepFrames(1)
+            e.currentTarget.blur()
+          }}
+          title="Forward a frame"
+          aria-label="Forward a frame"
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M3 3 V13 L9.6 8 Z M10.4 3 H12 V13 H10.4 Z" fill="currentColor" />
+          </svg>
         </button>
         <button
           className="transport-button"
@@ -1910,19 +1961,53 @@ export function TimelinePane() {
             toggleLoop()
             e.currentTarget.blur()
           }}
-          title={loop ? 'Looping' : 'Stopping at the end'}
+          title="Loop"
           aria-label="Loop"
           aria-pressed={loop}
         >
           {'↻'}
         </button>
+        <TimeReadout fps={fps} />
+        <span className="transport-tools" role="group" aria-label="Recording">
+          <button
+            className={`transport-button record${recording ? ' on' : ''}`}
+            disabled={!editable}
+            onClick={(e) => {
+              toggleRecording()
+              e.currentTarget.blur()
+            }}
+            title={recordKey ? `Record (${recordKey})` : 'Record'}
+            aria-label="Record"
+            aria-pressed={recording}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <circle cx="8" cy="8" r="5" fill="currentColor" />
+            </svg>
+          </button>
+          <button
+            className={`transport-button${recordWait ? ' on' : ''}`}
+            onClick={(e) => {
+              toggleRecordWait()
+              e.currentTarget.blur()
+            }}
+            title="Wait for action to start recording"
+            aria-label="Wait for action to start recording"
+            aria-pressed={recordWait}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M2.5 3 H4.3 V13 H2.5 Z M5.9 3 H7.7 V13 H5.9 Z" fill="currentColor" />
+              <circle cx="12" cy="8" r="2.6" fill="currentColor" />
+            </svg>
+          </button>
+          <NumberField label="Recording and Playback Rate" value={rate} unit="%" onChange={setRate} />
+        </span>
         <button
           className={`transport-button text${snap ? ' on' : ''}`}
           onClick={(e) => {
             toggleSnap()
             e.currentTarget.blur()
           }}
-          title={snap ? 'Snapping to seconds, animations, and fifth frames' : 'Free placement'}
+          title="Snap to seconds, animations, and fifth frames"
           aria-label="Snap"
           aria-pressed={snap}
         >
@@ -1934,7 +2019,7 @@ export function TimelinePane() {
             toggleFrameSnap()
             e.currentTarget.blur()
           }}
-          title={frameSnap ? 'Times on frames' : 'Free times'}
+          title="Keep times on frames"
           aria-label="Frame snap"
           aria-pressed={frameSnap}
         >
@@ -1975,7 +2060,6 @@ export function TimelinePane() {
           </button>
         </span>
         <NumberField label="Frames per wheel tick with Shift" value={wheelStep} unit="f" onChange={setWheelStep} />
-        <TimeReadout fps={fps} />
         <span className="dim">
           {fps} fps{contentEnd !== null ? `, ends at ${timecode(contentEnd, fps)}` : ''}
           {!editable ? ', code has an error' : ''}

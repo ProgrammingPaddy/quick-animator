@@ -24,7 +24,7 @@
   "ENDS1": {
    "first": {
     "src": true,
-    "decl": -300,
+    "decl": -260,
     "acts": [
      "path"
     ]
@@ -98,46 +98,50 @@
    "err": null
   },
   "MARQ1": {
-   "boxed": {
+   "picked": {
     "picked": [
-     0,
-     1
+     1,
+     2
     ],
     "stillSelected": 1
    },
    "movedAll": {
     "points": [
      [
-      -290,
-      10
+      -300,
+      0
      ],
      [
       10,
       210
      ],
      [
-      300,
-      0
+      310,
+      10
      ]
     ],
     "picked": [
-     0,
-     1
+     1,
+     2
     ]
+   },
+   "withSelect": {
+    "picked": 0,
+    "handles": false
    },
    "deleted": {
     "points": [
      [
-      300,
+      -300,
       0
+     ],
+     [
+      10,
+      210
      ]
     ],
     "picked": [],
     "acts": 1
-   },
-   "clickedEmpty": {
-    "selectedActions": 0,
-    "picked": 0
    },
    "err": null
   },
@@ -153,8 +157,8 @@
     ],
     "count": 1,
     "first": {
-     "x": 200,
-     "y": 300
+     "x": 0,
+     "y": 0
     }
    },
    "drew": {
@@ -163,18 +167,22 @@
    },
    "onEmpty": {
     "tool": "path",
-    "count": 2,
+    "count": 3,
     "points": [
      [
       0,
-      -300
+      0
+     ],
+     [
+      100,
+      0
      ],
      [
       500,
-      -100
+      200
      ]
     ],
-    "paths": 2
+    "paths": 1
    },
    "hint": false,
    "err": null

@@ -1,5 +1,5 @@
 import { CLASS_NAMES, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ALIASES, VERB_ATTRS, VERB_NAMES, VERB_PARAMS, canonicalVerb, classes, type Verb } from './registry'
-import { easeFrom, easePart, easeShare, namedEasings, ramps, easeAlong } from './easing'
+import { easeCurve, easeFrom, easePart, easeShare, namedEasings, ramps, easeAlong } from './easing'
 import { resolveMasks } from './masks'
 import { parseScene } from './parse'
 import { UNIT_KINDS, unitBegins, unitCount, type UnitKind } from './text'
@@ -412,13 +412,15 @@ export function evaluateScene(source: string, fps: number): EvaluateResult {
     },
   })
 
-  // The eases as code (D264): the named curves, the ramps, and the part or the share of an ease between two points of its progress, which a sliced animation runs on.
+  // The eases as code (D264): the named curves, the ramps, the part or the share of an ease between two points of its progress, which a sliced animation runs on, and a curve by its values, which a recorded one runs on.
   api['Ease'] = Object.freeze({
     ...namedEasings,
     ramps: (easeIn: unknown = 0, easeOut: unknown = 0, duration: unknown = 1) => ramps(Number(easeIn), Number(easeOut), Number(duration)),
     part: (ease: unknown, from: unknown = 0, to: unknown = 1) => easePart(easeFrom(ease), Number(from), Number(to)),
     share: (ease: unknown, from: unknown = 0, to: unknown = 1) => easeShare(easeFrom(ease), Number(from), Number(to)),
     along: (ease: unknown, from: unknown = 0, to: unknown = 1) => easeAlong(easeFrom(ease), Number(from), Number(to)),
+    // The pace of a recorded gesture (D397): its values at evenly spaced moments.
+    curve: (values: unknown) => easeCurve(Array.isArray(values) ? values.map(Number) : []),
   })
 
   /**

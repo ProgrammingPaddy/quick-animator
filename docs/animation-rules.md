@@ -153,8 +153,9 @@ otherwise, and the handles of a clicked one, which drag: a smooth point keeps it
 line, except while Alt is held, when the dragged one moves alone; a corner's move alone; an end
 of a line has one; and a box dragged on empty space picks several. Right-click a point for
 Smooth point, Corner point, or Straighten point; the line for Curve segment or Straighten
-segment; Shape for Smooth shape, Straighten shape, and, on a line, Close line or Open line, which
-change the outline and nothing else, a closed line staying hollow until it is given a fill. A
+segment; Shape for Smooth shape, Straighten shape, and, on a line, Close line, which closes it
+and fills it in the tool's fill, as closing on the first corner does, its own outline staying,
+or Open line, which takes the close out and nothing else. A
 points shape becomes curves when a point or a segment of it is edited. The Shape tool opens in
 Edit when a shape is selected. The GUI turns a Rect or a Circle into a
 Shape with the same look. A point edit writes that point and moves `x, y` by where the center of the box went, to a
@@ -188,7 +189,10 @@ reads it. M writes one at the playhead; a marker is dragged, snapped to, and nam
 text typed where it shows.
 
 A Shape's `fillOpacity` and `strokeOpacity` are the fill's and the outline's own opacities, 0 to
-1 on top of `opacity`, as SVG's fill-opacity and stroke-opacity, which an import keeps.
+1 on top of `opacity`, as SVG's fill-opacity and stroke-opacity, which an import keeps. The
+Shape tool sets each in its color's picker, a bar under the hue and a percent beside the hex:
+for what is drawn next, or in Edit for the selected shape; the pencil's line takes the
+outline's.
 
 A Shape's `drawn` is how much of its line is drawn from its start, 0 to 1, 1 unless written;
 the stroke stops there and the fill is whole. `drawn: [0, 1]` writes a line on. A line whose two
@@ -256,7 +260,7 @@ Timing keys, allowed in every action block:
 - `hold`: seconds the change is held once reached, before the return; nothing without `return`.
 - `return`: seconds over which the animation goes back to what it found, after its journey and its hold; written, the change does not last, and `0` snaps back. See below.
 - `easeIn`, `easeOut`: seconds of easing at each end. Omitted: 30% of the duration each.
-- `ease`: `'linear'`, `'bounce'` (bounces at the end), `'back'` (overshoots at the end), `'elastic'` (springs at the end), or `'snap'` (fast start, settles); or a function of the progress, `(p) => p * p`, giving the eased progress, 0 to 1; or one of the `Ease` curves: `Ease.ramps(easeIn, easeOut, duration)`, the ramps as a curve; `Ease.part(ease, from, to)`, the part of a curve between two points of its progress, stretched to a whole curve; `Ease.share(ease, from, to)`, the share of the change the curve covers there, which stops part of the way; `Ease.along(ease, from, to)`, the stretch of the curve as it is there, which a piece of a cut path runs on; `ease` a name, a function, or another `Ease` curve. These are what a sliced animation runs on, and go beyond 0 and 1 where `'bounce'` or `'back'` does; a function of your own is kept within 0 and 1. Replaces `easeIn` and `easeOut`.
+- `ease`: `'linear'`, `'bounce'` (bounces at the end), `'back'` (overshoots at the end), `'elastic'` (springs at the end), or `'snap'` (fast start, settles); or a function of the progress, `(p) => p * p`, giving the eased progress, 0 to 1; or one of the `Ease` curves: `Ease.ramps(easeIn, easeOut, duration)`, the ramps as a curve; `Ease.part(ease, from, to)`, the part of a curve between two points of its progress, stretched to a whole curve; `Ease.share(ease, from, to)`, the share of the change the curve covers there, which stops part of the way; `Ease.along(ease, from, to)`, the stretch of the curve as it is there, which a piece of a cut path runs on; `ease` a name, a function, or another `Ease` curve; and `Ease.curve([0, 0.05, 0.3, 0.9, 1])`, a curve by its values at evenly spaced moments of the progress, straight between them, which is the pace a recorded gesture was done at. These are what a sliced or a recorded animation runs on, and go beyond 0 and 1 where `'bounce'` or `'back'` does, or where a recorded hand went past where it ended; a curve that ends short of 1 leaves the object there, so a gesture that came back ends back; a function of your own is kept within 0 and 1. Replaces `easeIn` and `easeOut`.
 - `relative`: `true` makes the values amounts added on top of everything else, where otherwise they are values to go to. Omitted: `false`. See Relative and overlapping actions.
 - `overrides`: the name of a class action this action replaces for its object. See Classes.
 
@@ -304,10 +308,11 @@ piece runs on `Ease.part`. A written number or color is cut into the value reach
 change into the change so far and the rest; a range stays on the first piece, and the second
 begins from where the first leaves it; a change that is a function stays a function on both
 pieces, the first stopping part of the way on `Ease.share`. A path's line is cut where the object
-is then, a smooth one as the curves it is; a morph's first piece gets the outline reached as its
+is then, a smooth one as the curves it is; the second piece begins where the first leaves the
+object, so it carries no `offset`, and keeps the `angle`, so the two go as the whole did; a
+morph's first piece gets the outline reached as its
 target. The name stays on the first piece, so `name.start` still names the start and what
-followed `name.end` now follows the cut; a linked end becomes the cut on the first piece. A
-class action is not cut, nor a path from a formula.
+followed `name.end` now follows the cut; a linked end becomes the cut on the first piece.
 
 An animation by character, word, or line is cut between its units: the units whose turns had
 begun by the cut stay in the first piece, which lasts until they are done, and the rest become
@@ -316,7 +321,11 @@ first unit's turn began, so the two run as the whole did. A hold or a return is 
 cut in the journey leaves the first piece without them and the second with them. A class
 animation is cut as one, from its own clip or a member's: both pieces keep the values and run
 their shares of the ease, so every member finds its own course. A path from a formula keeps its
-line on both pieces, each on `Ease.along`. What is not cut says why.
+line on both pieces, each on `Ease.along`, and so does a class's path; a relative one's second
+piece takes the line's place at the cut off with its `offset`, so it adds only what comes after.
+A facing is a look and not an amount: of the relative paths that face their object along their
+shapes, the last to have begun gives the facing, alone, so the two pieces of such a path face
+as the whole did. What is not cut says why.
 
 A number can be written as a range, `[from, to]`: the one exception, which sets the state at the
 first frame itself. The action begins from the first number
@@ -345,19 +354,33 @@ title.move({
 ## Paths
 
 `path` takes an object along a shape over time, with the usual timing and easing: the shape says
-where the object is at each point of the way, the timing and easing how fast it gets there.
+where the object goes at each point of the way, the timing and easing how fast it gets there.
+A path is a move with a shape. It begins where its object is as it starts, as a move does, and
+never where its shape happens to be written: the shape is taken from its own first point, so the
+object does not jump to its path, and whatever put the object there, its declaration or an
+earlier animation, moves the whole path by moving the object. A path does not turn with its
+object: the object turns on its path as it likes, by its declaration or by a `rotate` that
+begins before the path or during it, and the path lies as it is written, turned only by its own
+`angle`.
 `shape` is a list of points, `[[x, y], ...]`, traveled by distance, or a function of the
 progress, `(p) => [x, y]`, evaluated every frame with `p` from 0 to 1, for a shape from a formula.
-Points are in the scene's space. `smooth: true` makes the path a curve through its points
+Only where the points lie against the first counts; the GUI writes the first as `[0, 0]`.
+`smooth: true` makes the path a curve through its points
 instead of straight lines between them; the curve is the same however long the path takes.
-`orient: true` turns the object to face along the shape; `offset: [dx, dy]` shifts the whole
-shape; `relative: true` makes the points changes from where the object is, added on top of
-whatever else moves it, so a shape that begins at `[0, 0]` starts in place. A `move` written as
+`orient: true` turns the object to face along the shape as it lies, the way along it added to
+how the object was turned as the path began; `angle: 30` turns the whole shape that many
+degrees, counterclockwise, about the point it begins at, where the object is; `offset: [dx, dy]`
+moves the whole shape that far from the object, which then jumps to it as the path begins, the
+one way a path is put somewhere its object is not, and is not turned by `angle`;
+`relative: true` makes the points amounts added on top of whatever else moves the object, so a
+shape that begins at `[0, 0]` starts in place and one that begins elsewhere jumps there, and its
+`angle` turns it about the place the amounts are counted from. A `move` written as
 relative during a path offsets the object from the path; one written after the path, above it,
 takes the object over for its span, and the path has it back after. The GUI writes one point per
 line and edits the points one by one; a function is code. `shape` may also be curves, SVG path
-data in the scene's space, `'M -300 0 C -200 200 200 200 300 0'`: the Path tool then shows the
-anchors with the controls of a clicked one, and the words a shape has: Smooth path, or a drawn
+data, `'M 0 0 C 100 200 500 200 600 0'`, taken from its first point as points are: the Path tool
+then shows the anchors with the controls of a clicked one, and the words a shape has: Smooth
+path, or a drawn
 stroke, writes a points path as curves, Straighten path makes every segment a line, and a point
 or a segment is right-clicked for Smooth, Corner, Straighten, or Curve; `smooth` means nothing
 to curves. A group's path moves its members as one, its line
@@ -367,9 +390,9 @@ takes every member from its own place, and the Path tool edits it for all of the
 ```js
 dot.path({
   shape: [
-    [-300, 0],
-    [0, 200],
-    [300, 0],
+    [0, 0],
+    [300, 200],
+    [600, 0],
   ],
   at: 1,
   duration: 2,
@@ -384,8 +407,11 @@ moon.path({
 })
 ```
 
-A shape relative to the object follows the object wherever it is put. An orbit, with its
-center and radius in one place:
+The dot goes 600 to its right over a rise of 200, from wherever it is. The moon's circle begins
+where the moon is, the circle's point at `p` 0, so its center is 200 to the moon's left.
+
+A relative path adds its shape to whatever else moves the object, so it rides on a move or on
+another path. An orbit, with its center and radius in one place:
 
 ```js
 orbit = moon.path({
@@ -406,10 +432,32 @@ The preview draws every path as the line the object actually travels: a relative
 where the object is, a move under a path in the line, a relative change over a path in the line,
 and a path on a member of a group where the group puts it. Its points sit where the object is as
 it reaches each, and dragging one writes the change against whatever else moves the object at
-that moment. A path whose shape is code is drawn dashed and has no points to drag; Move path
-carries it by writing its `offset`. A path started from the GUI begins where the absolute actions
-put the object, so a relative change running then, an orbit say, goes on adding and the object
-stays put.
+that moment. The first point is where the object is as the path begins: dragging it puts the
+object there, and the points not dragged stay where they are. A path whose shape is code is
+drawn dashed and has no points to drag. Move path carries a path by moving its object as the path begins, whatever its shape
+is written as; a relative path that is code is carried by writing its `offset`. With Move path
+the path in hand wears a box, and the handle over it turns the whole path about the point it
+begins at, written as its `angle`, whatever the shape is written as. A path begins
+where the absolute actions put the object, so a relative change running then, an orbit say, goes
+on adding and the object stays put. Show Paths draws every path running at the playhead, the
+path of what is selected in white; the Path tool draws the path of what is selected, the one in
+force at the playhead, the one running, else the last to have ended, else the first to come,
+and the selected path with its handles. No other tool shows a path of its own or takes a press
+on one: with Select a press on a thing at the end of its path is a press on the thing. The Path
+tool has three modes. Create draws: a click on a thing with no path starts one, a click on empty
+space adds a corner after the last point, and a drag draws a line. Edit makes nothing new: a
+point drags, a drag from empty space boxes the points of the path in hand, Ctrl adding to them,
+a click on the line adds a point, and a click on empty space lets everything go. Move path
+carries and turns the path whole. The tool opens in Edit when there is a path to edit, the
+selected one or one on the one thing selected, and in Create with none. Taking it up selects
+nothing: the path in force of the one thing selected shows with its points, and a press on a
+point, a box around some, or a corner added in Create picks it.
+
+An object a path places is dragged as one a move places, and no press moves the playhead: at
+the path's first frame the drag writes whatever put the object there, the declaration, a move's
+end, or the last point of a path before it, and the path goes with the object; while the path
+runs, a move from the path's start to the playhead is written, as in the middle of any action;
+at its end its last point moves; after it, a new move from its end.
 
 An easing that rises and falls makes one action go and come back: `ease: (p) => Math.sin(p * Math.PI)`
 on `resize({ scale: 0.2, relative: true })` is a pulse. After an action ends, its attribute holds
@@ -986,7 +1034,8 @@ in the file; pushing moves only what a drag actually touches. An animation writt
 playhead and lasts as long as the app's preferences say. Deleting an object's last fade from the
 GUI also removes the `opacity` written in its declaration, so it is back at 1. The Object tool
 and the Add menus write a declaration with the kind's starting attributes, at the playhead; the
-Path tool writes a path, one point per line, and moves its points as the drags say; the pencil
+Path tool writes a path, one point per line, its first `[0, 0]`, the object itself, and moves its
+points as the drags say, and its Move path writes a path's `angle`; the pencil
 writes a line, an open Shape in the tool's outline, wherever it is drawn, over an object too,
 and never a path. A preset
 writes one named animation at the end of the file, an arrival as a relative move written as a
@@ -1012,7 +1061,26 @@ of the attributes and the default ramps; it has its say at the playhead, its las
 further edit there goes to it. A point of a Shape dragged, added, or removed in the middle of a
 morph writes a morph from the morph's start to the playhead the same way, its target the
 outline at the playhead, and edits that target. The timeline's razor cuts an action in two, as
-Actions says. A value that is code of its own, a shape from a formula or a custom ease, is marked
+Actions says. Playback shows whole frames, as an export has them: the playhead is on the frame
+the clock is in, so an action one frame long is seen as one frame, and one of no length,
+`duration: 0`, is instant at its time. Record, in the player, writes what is done while the
+playhead runs, each gesture as one action on top of what is there, from the frame it began at
+to the frame it was let go: a drag as a `path` along the way dragged, simplified as a drawn
+line is, with `ease: Ease.curve([...])` saying how far along it the hand was at each moment, so
+a pause is a pause; a turn, a resize, a slider's drag, or a run of the wheel on the camera as
+its own verb to where it ended, on such a curve too, or to the farthest it went when it came
+back to where it began; a Shape's resize as a `morph` to the outline it leaves. What a recorded
+drag pushes gets a `path` of its own, from the frame it was first moved to the frame it was
+last. A change made at once, a typed value, a click of Paint, a color picked, is an action of
+no length at its moment, `box.to({ fill: '#ff0000', at: 2.4, duration: 0 })`. A line drawn with
+the pencil begins where its stroke began and is written on as it was drawn,
+`line1.to({ drawn: [0, 1], at: 2.4, duration: 0.6, ease: Ease.curve([...]) })`. The values of
+such a curve are written five to a row and come folded, as a shape's points do. The
+player's rate slows the clock for the hand, and the times written are the scene's. While a
+recording runs, what is in hand stays in view though its life has gone by, so it can be dragged
+again; a life is widened only to hold an animation recorded on the thing. When the recording
+stops, what it wrote is listed, by the thing each action is on, to be kept or deleted, unless
+the preferences turn the review off. A value that is code of its own, a shape from a formula or a custom ease, is marked
 with a small ƒ in the timeline and the objects pane, and a path drawn from code is dashed; the
 code pane is where they change.
 
@@ -1090,5 +1158,5 @@ title.fade({
 
 ## Coming
 
-orbits (a turn around a point, as its own verb), objects attached to another's path, the motion of a drag kept as a path, `link` actions, `Image`, `Video`, `Line`, `Polygon`,
+orbits (a turn around a point, as its own verb), objects attached to another's path, `link` actions, `Image`, `Video`, `Line`, `Polygon`,
 object states such as `startsMoving`, per-character text animation, soft edges on any object, one camera on at several times without a copy, depth for the camera, 3D.

@@ -13,7 +13,7 @@ import { basePivot, cameraAt, definingAction, isVisibleAt, pathCurves, pathShape
 import { DEFAULT_STAGGER, UNIT_KINDS } from '../model/text'
 import type { Action, SceneModel, SceneObject } from '../model/types'
 import { askSystemFonts } from '../project/fonts'
-import { bakeActionProp, bakeObjectProp, canEdit, createGroup, easeMenuItems, frameSeconds, jumpToKey, keyActionsAt, keyBeside, keyState, prospectiveGroup, roundSeconds, setActionFrom, setActionProp, setAttached, setAttrsAt, setLifetime, setObjectProp, toggleKey, type KeyState } from '../project/operations'
+import { bakeActionProp, bakeObjectProp, canEdit, createGroup, easeMenuItems, frameSeconds, jumpToKey, keyActionsAt, keyBeside, keyState, prospectiveGroup, roundSeconds, setActionFrom, setActionProp, setAttached, setAttrsAt, setLifetime, setObjectProp, toggleKey, recordValue, type KeyState } from '../project/operations'
 import { useStore } from '../state/store'
 import { timecode } from '../state/time'
 
@@ -440,6 +440,8 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks, make }: { mo
               }
               // Held on the screen or let go, a thing stays where it shows (D362).
               else if (attr.name === 'attached' && typeof next === 'boolean') setAttached([name], next)
+              // A color or words changed while a recording runs change at that moment (D412).
+              else if (attr.animatable && (attr.type === 'color' || attr.type === 'string') && typeof next === 'string' && recordValue(name, attr.name, next)) return
               else if (defining?.stmt && !defining.classAction && next !== null) setActionProp({ object: name, index: obj.actions.indexOf(defining) }, attr.name, next)
               else setObjectProp(name, attr.name, (next === '' && NAME_LISTS.has(attr.name)) || (next === false && attr.name === 'inverted') ? null : next)
             }
@@ -695,7 +697,7 @@ function ActionView({ model, obj, action, index, fps, editable, openLinks }: { m
                     disabled={locked}
                     title={
                       key === 'shape'
-                        ? "The shape: points [[x, y], ...] in the scene's space, curves 'M 0 0 C ...', or a function of the progress, (p) => [x, y]"
+                        ? "The shape, from where the object is: points [[x, y], ...], curves 'M 0 0 C ...', or a function of the progress, (p) => [x, y]"
                         : morphTarget
                           ? "The target outline: curves 'M 0 0 C ...', points [[x, y], ...], a word such as Shape.star(5, 100, 50), or a link such as () => other.curves"
                           : 'A shift of the whole path, [dx, dy]'

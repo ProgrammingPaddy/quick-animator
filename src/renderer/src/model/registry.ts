@@ -184,7 +184,7 @@ export const VERB_ATTRS: Record<Verb, readonly string[] | null> = {
 export const VERB_PARAMS: Record<Verb, readonly string[]> = {
   to: ['pivotX', 'pivotY'],
   move: [],
-  path: ['shape', 'orient', 'offset', 'smooth', 'timed'],
+  path: ['shape', 'orient', 'offset', 'angle', 'smooth', 'timed'],
   rotate: ['pivotX', 'pivotY'],
   resize: ['pivotX', 'pivotY'],
   fade: [],

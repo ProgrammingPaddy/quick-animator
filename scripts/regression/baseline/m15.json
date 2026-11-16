@@ -1,0 +1,249 @@
+{
+ "results": {
+  "FRAMES1": {
+   "oneFrame": {
+    "played": true,
+    "onFrames": true,
+    "between": 0,
+    "firstAfter": 1.0167
+   },
+   "noLength": [
+    -300,
+    300,
+    300
+   ],
+   "steps": {
+    "forward": 122,
+    "back": 121,
+    "playing": false
+   },
+   "player": [
+    "Return to start",
+    "Back a frame",
+    "Play",
+    "Forward a frame",
+    "Jump to end",
+    "Loop",
+    "Record",
+    "Wait for action to start recording",
+    "Snap",
+    "Frame snap",
+    "Pointer",
+    "Razor"
+   ],
+   "rateField": "Recording and Playback Rate",
+   "halfRate": true,
+   "error": null
+  },
+  "CURVE1": {
+   "curve": {
+    "x": [
+     0,
+     150,
+     200,
+     150,
+     100,
+     400,
+     400
+    ],
+    "rotation": [
+     0,
+     90,
+     0,
+     0
+    ],
+    "error": null,
+    "warnings": []
+   },
+   "perFrame": [
+    {
+     "x": 0
+    },
+    {
+     "x": 10
+    },
+    {
+     "x": 20,
+     "y": 6
+    },
+    {
+     "x": 30,
+     "y": 6
+    },
+    {
+     "x": 40,
+     "y": 6
+    }
+   ],
+   "along": [
+    0,
+    0.25,
+    0.26,
+    0.26,
+    0.52,
+    0.8,
+    1
+   ],
+   "thinned": [
+    [
+     0,
+     1
+    ],
+    4,
+    [
+     0,
+     0.6,
+     1
+    ]
+   ],
+   "toward": {
+    "shares": [
+     0,
+     0.22,
+     0.5,
+     1
+    ],
+    "to": 3,
+    "back": [
+     0,
+     0.5,
+     1,
+     0.33,
+     0
+    ],
+    "backTo": 2
+   },
+   "code": [
+    "'linear'",
+    "Ease.curve([0, 0.25, 1])",
+    "Ease.curve([0, 1.04, 0])"
+   ]
+  },
+  "RECORD1": {
+   "started": {
+    "recording": true,
+    "playing": true,
+    "lit": true
+   },
+   "during": {
+    "verbs": [
+     "move"
+    ],
+    "reachesPlayhead": true,
+    "running": true
+   },
+   "stopped": {
+    "recording": false,
+    "playing": false,
+    "time": 1,
+    "lit": false,
+    "review": [
+     "b path"
+    ],
+    "dialog": true
+   },
+   "written": {
+    "verbs": [
+     "path"
+    ],
+    "beginsAtBox": true,
+    "pace": true,
+    "selected": [],
+    "selection": [
+     "b"
+    ],
+    "startsAfter": true
+   },
+   "follows": {
+    "within4": true,
+    "ends": [
+     200,
+     0
+    ],
+    "paused": true,
+    "stillInPause": true
+   },
+   "life": 8,
+   "undone": true,
+   "error": null
+  },
+  "RECORD2": {
+   "turn": {
+    "stmts": [
+     "b.rotate({ rotation: -90, at: ..., duration: ..., ease: Ease.curve([...]), })"
+    ],
+    "ends": -90
+   },
+   "resize": {
+    "stmts": [
+     "b.to({ width: 296, height: 180, x: 48, y: 30, at: ..., duration: ..., ease: Ease.curve([...]), })"
+    ],
+    "size": [
+     296,
+     180
+    ]
+   },
+   "thereAndBack": {
+    "stmts": [
+     "b.rotate({ rotation: -60, at: ..., duration: ..., ease: Ease.curve([...]), })"
+    ],
+    "farInTheMiddle": true,
+    "ends": 0
+   },
+   "waiting": {
+    "recording": true,
+    "armed": true,
+    "playing": false,
+    "time": 2
+   },
+   "running": {
+    "armed": false,
+    "playing": true,
+    "moved": true
+   },
+   "space": {
+    "recording": false,
+    "playing": false,
+    "time": 2,
+    "verbs": [
+     "path"
+    ]
+   },
+   "stoppedHeld": {
+    "verbs": [
+     "path"
+    ],
+    "ends": [
+     240,
+     60
+    ],
+    "after": [
+     240,
+     60
+    ],
+    "actions": 1
+   },
+   "halfRate": true,
+   "group": [
+    "b:Rect ",
+    "c:Circle ",
+    "group1:Group path"
+   ],
+   "cut": {
+    "cut": true,
+    "same": true,
+    "pieces": [
+     "path",
+     "path"
+    ],
+    "notice": null
+   },
+   "shape": {
+    "notice": null,
+    "actions": 1
+   },
+   "error": null
+  }
+ },
+ "volatile": {}
+}

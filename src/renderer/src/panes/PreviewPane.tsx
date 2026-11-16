@@ -9,9 +9,9 @@ import { NumberField } from '../components/NumberField'
 import { ScrollBar } from '../components/ScrollBar'
 import { groupMembers } from '../model/groups'
 import { maskDrawnBy } from '../model/masks'
-import { anchorIsSmooth, placeBetween, type AnchorKind, type Seg } from '../model/pathData'
+import { anchorIsSmooth, placeBetween, scalePathData, type AnchorKind, type Seg } from '../model/pathData'
 import { attrSchema, CAMERA, GROUP, SHAPE, type AttrValue } from '../model/registry'
-import { ownBounds, pathControlsWorld, pathHolds, positionAt, shapeOwnAnchors, shapeOwnPoints, shapeOwnSegs, shapeWorldCurve, shapeWorldFrame, shapeWorldOf, shapeWorldPoints, shownValue, travelFrame, type PathFrame, type Point } from '../model/sample'
+import { begun, existsAt, inView, keepInView, over as isOver, ownBounds, pathAngle, pathControlsWorld, pathInForce, positionAt, shapeOwnAnchors, shapeOwnPoints, shapeOwnSegs, shapeWorldCurve, shapeWorldFrame, shapeWorldOf, shapeWorldPoints, shownValue, travelFrame, type PathFrame, type Point } from '../model/sample'
 import type { SceneModel, SceneObject } from '../model/types'
 import { newProject, pickProject } from '../project/controller'
 import { askSystemFonts } from '../project/fonts'
@@ -19,8 +19,9 @@ import { convertTextToShape } from '../project/textToShape'
 import { cameraAt, camerasOf, journeyOf, NO_VIEW, parseColor, textPadding, textStyleAt, valueAt, viewOf, worldPose } from '../model/sample'
 import { layoutOf, type TextStyle } from '../model/text'
 import { DEFAULT_EASE_FRACTION, easingFor, unease } from '../model/easing'
-import { addCamera, cameraInHand, cutHereItems, hideMenuItems, propertiesMenu, maskMenuItems, addMorph, addObject, addPath, beginFill, beginOutline, canEdit, paintFill, paintStroke, sketchLine, writeOnLine, setObjectProp, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, pathDragTarget, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, settleMorph, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphRunning, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
+import { addCamera, cameraInHand, cutHereItems, hideMenuItems, propertiesMenu, maskMenuItems, addMorph, addObject, addPath, beginFill, beginOutline, canEdit, paintFill, paintStroke, sketchLine, writeOnLine, setObjectProp, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, recordShown, flushRecordedSoon, recordOutline, recordWriteOn, carryPath, pathBeginsAtObject, setPathAngle, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, settleMorph, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphRunning, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
 import { addUserObject, requestSavePreset } from '../project/userPresets'
+import { noteGroup } from '../project/recording'
 import { makeMover, outlineOf, resetMover, walk, type Mover, type Polygon, type Pushing } from '../preview/collide'
 import { SceneRenderer, type ControlHandle, type Frame, type GuideLine, type Handle } from '../preview/SceneRenderer'
 import { CameraView } from '../preview/CameraView'
@@ -84,6 +85,63 @@ function nearestSegment(points: Point[], at: Point, radius: number): number | nu
 }
 
 /** A drawn line kept as its corners: the points that bend it by more than the tolerance (D194). */
+/** Of an object's paths, the one in force at a time (D389): the one running then, else the last to have ended, else the first to come. */
+const NOTHING_KEPT: ReadonlySet<string> = new Set()
+
+/**
+ * What a recording keeps in view (D403): the things in hand, the selection and what its groups
+ * carry, that are there now or were kept before. So a thing dragged or held as its life goes by
+ * stays where it can be dragged again; let go of, it goes as its life says, and what was gone
+ * before it was picked is not brought back.
+ */
+function keptInHand(s: { recording: boolean; model: SceneModel | null; selection: readonly string[] }, time: number, before: ReadonlySet<string>): ReadonlySet<string> {
+  const model = s.model
+  if (!s.recording || !model || s.selection.length === 0) return NOTHING_KEPT
+  const next = new Set<string>()
+  const take = (name: string): void => {
+    const o = model.objects.find((x) => x.name === name)
+    if (!o) return
+    if (o.className === GROUP) {
+      for (const member of groupMembers(model, name)) take(member)
+      return
+    }
+    if (begun(o.at, time) && (before.has(name) || existsAt(model, o, time))) next.add(name)
+  }
+  for (const name of s.selection) take(name)
+  return next.size === 0 ? NOTHING_KEPT : next
+}
+
+/**
+ * The box around a path's line as the path lies (D394): its sides along the path's own axes,
+ * turned by its `angle`, with room around a line that has no width; and the point the path turns
+ * about, where it begins.
+ */
+function pathBoxOf(frame: PathFrame, angle: number, pixel: number): { frame: Frame; pivot: Point } | null {
+  const pivot = frame.anchors[0] ?? frame.curve[0]
+  if (!pivot) return null
+  const a = (angle * Math.PI) / 180
+  const cos = Math.cos(a)
+  const sin = Math.sin(a)
+  let left = 0
+  let right = 0
+  let bottom = 0
+  let top = 0
+  for (const p of [...frame.curve, ...frame.anchors]) {
+    const dx = p.x - pivot.x
+    const dy = p.y - pivot.y
+    const u = dx * cos + dy * sin
+    const v = -dx * sin + dy * cos
+    left = Math.min(left, u)
+    right = Math.max(right, u)
+    bottom = Math.min(bottom, v)
+    top = Math.max(top, v)
+  }
+  const room = 14 * pixel
+  const u = (left + right) / 2
+  const v = (bottom + top) / 2
+  return { frame: { x: pivot.x + u * cos - v * sin, y: pivot.y + u * sin + v * cos, rotation: angle, width: right - left + room * 2, height: top - bottom + room * 2 }, pivot: { x: pivot.x, y: pivot.y } }
+}
+
 function simplify(points: Point[], tolerance: number): Point[] {
   if (points.length < 3) return points
   const first = points[0]!
@@ -141,8 +199,8 @@ interface ShownShape {
 }
 
 interface Drag {
-  /** `plain`: edit the values at the playhead. `timed`: Shift, make an action. `destination`: the selected action's end follows. */
-  kind: 'plain' | 'timed' | 'destination'
+  /** `plain`: edit the values at the playhead. `timed`: Shift, make an action. `destination`: the selected action's end follows. `recorded`: a recording is running, and the drag is written as it is done (D397). */
+  kind: 'plain' | 'timed' | 'destination' | 'recorded'
   op: 'move' | 'rotate' | 'resize'
   /** What the gesture changes: each of several selected objects, or the one object or group (D96, D124). */
   names: string[]
@@ -199,6 +257,10 @@ interface Drag {
   /** The moves written for what this animation's drag has pushed, by object, and how far each was pushed last (D136). */
   pushedActions: Map<string, number>
   pushedShifts: Map<string, { x: number; y: number }>
+  /** While a recording runs: the playhead's time when what the drag meets was last looked at, since things come, go, and move under it (D412). */
+  metAt?: number
+  /** While a recording runs: what a group in hand carries, of what is in view, whose lives go with its animation (D403). */
+  carried?: string[]
   /** How far the dragged thing goes in the scene for a drag of so many pixels, where that is not the Preview view's own scale: on the Camera view the picture follows the pointer, so the camera goes the other way (D361). */
   delta?: (dx: number, dy: number) => Point
 }
@@ -352,8 +414,10 @@ export function PreviewPane() {
   const paintRef = useRef<() => void>(() => undefined)
   const [altDown, setAltDown] = useState(false)
   const [dragging, setDragging] = useState<'aspect' | null>(null)
-  /** The paths shown right now (D194, D209): the selected one, with its line and anchors and whether its points can be edited, and the others, lines only. */
+  /** The paths shown right now (D194, D209, D405): the Path tool's selected one, with its line and anchors and whether its points can be edited, and the others, lines only. */
   const pathRef = useRef<{ primary: { ref: ActionRef; frame: PathFrame; editable: boolean; kind: 'points' | 'curves' | null; handles: AnchorHandle[] } | null; others: { ref: ActionRef; frame: PathFrame }[] } | null>(null)
+  /** What the recording keeps in view (D403): the things in hand whose lives have gone by while it runs. */
+  const keptRef = useRef<ReadonlySet<string>>(NOTHING_KEPT)
   /** The selected Shape in Edit mode, with its line where it is drawn and what can be edited (D233, D240). */
   const shapeRef = useRef<ShownShape | null>(null)
   /** The Shape the Object tool is drawing, point by point (D233). */
@@ -503,32 +567,38 @@ export function PreviewPane() {
       // While Shift looks ahead, whatever was alive where the gesture began stays drawn (D138).
       // The selection shows in every tool but the Shape tool, whose handles show it; the box's handles belong to Select alone (D208, D236, D247).
       // The cameras' frames show when asked, and always with the Camera tool, which picks by them (D373, D374).
+      // While a recording runs, what is in hand stays in view though its life has gone by (D403).
+      keptRef.current = keptInHand(s, now, keptRef.current)
+      keepInView(keptRef.current)
       renderer.setView({ hidden: s.hidden, held: s.selection, showMasks: s.showMasks, showCameras: s.showCameras || s.tool === 'camera' })
       const over = overlayFor('world')
       renderer.update(s.model, now, over.selection, over.mode, over.pixel, over.axes, gestureRef.current?.restore, over.anchored, over.handles)
       laidOut = 'world'
-      // The selected path, or the first path of the selected object, shows its shape; with the path itself selected and its points written out, each point wears a handle (D192, D194).
-      // Which paths show (D205, D209): with the Path tool, every object's, but for those hidden for now; otherwise the selected object's when Paths is on; and the selected path always. The selected path carries the handles.
-      const found: { ref: ActionRef; frame: PathFrame; selected: boolean }[] = []
+      // Which paths show (D389, D405): with Show Paths, every path running at the moment drawn, of whatever is there then, the path of what is selected in the selection's own color; with the Path tool, also the path of what is selected, the one in force at that moment, and the selected path, which shows its shape and, with its points written out, a handle on each (D192, D194). No other tool shows a path of its own. One hidden for now stays hidden (D209).
+      const found: { ref: ActionRef; frame: PathFrame; lead: boolean; held: boolean }[] = []
       if (s.model) {
         const ref = s.selectedActions.length === 1 ? s.selectedActions[0] : undefined
-        const selectedObject = s.selection.length === 1 ? s.model.objects.find((o) => o.name === s.selection[0]) : undefined
         const inPathTool = s.tool === 'path'
-        const sources = inPathTool ? s.model.objects : selectedObject && s.showPaths ? [selectedObject] : ref ? s.model.objects.filter((o) => o.name === ref.object) : []
-        for (const o of sources) {
-          for (let index = 0; index < o.actions.length; index++) {
-            const action = o.actions[index]!
-            if (action.verb !== 'path' || action.overridden) continue
-            const selected = !!ref && ref.object === o.name && ref.index === index
-            if (!selected && (inPathTool ? s.hiddenPaths.includes(`${o.name}:${index}`) : !s.showPaths)) continue
+        for (const o of s.model.objects) {
+          const own = o.actions.map((action, index) => ({ action, index })).filter(({ action }) => action.verb === 'path' && !action.overridden)
+          if (own.length === 0) continue
+          // Of a selected object's paths, the Path tool shows the one in force now.
+          const inForce = inPathTool && s.selection.includes(o.name) ? (pathInForce(own, now)?.index ?? -1) : -1
+          const there = inView(s.model, o, now) && !s.hidden.includes(o.name)
+          for (const { action, index } of own) {
+            // The path in hand is the Path tool's: the one selected, with its handles; or, with one thing selected and none of its animations, that thing's path in force, its points showing though nothing more is selected, so a press on one picks the path and moves the point (D411).
+            const lead = inPathTool && (ref ? ref.object === o.name && ref.index === index : s.selectedActions.length === 0 && s.selection.length === 1 && s.selection[0] === o.name && inForce === index)
+            const running = s.showPaths && there && begun(action.start, now) && !isOver(action.end, now)
+            if (!lead && !running && inForce !== index) continue
+            if (!lead && s.hiddenPaths.includes(`${o.name}:${index}`)) continue
             // The line the object actually travels, whatever else moves it (D223).
             const frame = travelFrame(s.model, o, action)
             if (!frame || frame.curve.length === 0) continue
-            found.push({ ref: { object: o.name, index }, frame, selected })
+            found.push({ ref: { object: o.name, index }, frame, lead, held: !inPathTool && s.selection.includes(o.name) })
           }
         }
       }
-      const lead = found.find((p) => p.selected)
+      const lead = found.find((p) => p.lead)
       let primary: NonNullable<typeof pathRef.current>['primary'] = null
       const pathRound: boolean[] = []
       if (lead && s.model) {
@@ -550,14 +620,17 @@ export function PreviewPane() {
         }
         primary = { ref: lead.ref, frame: lead.frame, editable: kind !== null, kind, handles }
       }
-      const others = found.filter((p) => !p.selected).map((p) => ({ ref: p.ref, frame: p.frame }))
+      const others = found.filter((p) => !p.lead).map((p) => ({ ref: p.ref, frame: p.frame, held: p.held }))
       pathRef.current = primary || others.length > 0 ? { primary, others } : null
       // A path whose shape is code has no points to drag and is drawn dashed to say so (D226).
       renderer.setPath(primary ? primary.frame.curve : null, 1 / viewport.zoom, primary?.editable ? primary.frame.anchors : null, s.pathPoints, !!primary && !primary.editable, primary?.handles ?? [], pathRound)
       renderer.setOtherPaths(
-        others.map((o) => ({ points: o.frame.curve, dashed: !pathEditable(o.ref) })),
+        others.map((o) => ({ points: o.frame.curve, dashed: !pathEditable(o.ref), held: o.held })),
         1 / viewport.zoom,
       )
+      // With Move path, the path in hand wears a box, with the handle that turns it (D394).
+      const turning = primary && s.tool === 'path' && s.pathMode === 'move' ? s.model?.objects.find((o) => o.name === primary.ref.object)?.actions[primary.ref.index] : undefined
+      renderer.setPathBox(primary && turning ? pathBoxOf(primary.frame, pathAngle(turning), 1 / viewport.zoom) : null, 1 / viewport.zoom)
       // The Shape tool shows the selected Shape's points as handles when they are written out, in Create mode and in Edit mode (D233, D236), or its curves' anchors, with the controls of the picked ones (D240).
       let shape: ShownShape | null = null
       const shapeRound: boolean[] = []
@@ -774,6 +847,8 @@ export function PreviewPane() {
       if (e.key !== 'Shift' || e.repeat || gestureRef.current || dragRef.current) return
       if (e.target instanceof Element && e.target.closest('input, textarea')) return
       const s = useStore.getState()
+      // A recording has the playhead: Shift means nothing more while it runs (D397).
+      if (s.recording) return
       // Over the preview, or over the timeline with an animation selected (D180).
       if (!s.model || (!hoverRef.current && !s.hoverTimeline)) return
       // With an animation selected, Shift jumps to its end: what is dragged then is its end state, and nothing new is made (D157).
@@ -973,13 +1048,17 @@ export function PreviewPane() {
   /**
    * Move a whole path with the Path tool (D203): the drag carries every anchor by how far the
    * pointer goes, as one undo step; a press that does not move puts a point at `insertAt`
-   * instead, when there is one.
+   * instead, when there is one. A path that begins where its object is goes with its object
+   * (D387), so the drag moves the object as the path begins, whatever the shape is written as.
    */
   const beginPathMove = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, world: Point, insertAt: number | null) => {
     const viewport = surfaceOf()
     if (!viewport) return
     const bounds = host.getBoundingClientRect()
-    const starts = frameOf(ref)?.anchors ?? []
+    const frame = frameOf(ref)
+    const starts = frame?.anchors ?? []
+    // Where the path begins, which is where its object is then: the line's first point, for a shape with no anchors.
+    const origin = pathBeginsAtObject(ref) ? (starts[0] ?? frame?.curve[0]) : undefined
     let dragged = false
     capture(
       host,
@@ -993,7 +1072,8 @@ export function PreviewPane() {
         const now = viewport.toWorld(ev.clientX - bounds.left, ev.clientY - bounds.top)
         const dx = now.x - world.x
         const dy = now.y - world.y
-        setPathPoints(ref, starts.map((p, index) => ({ index, world: gridded({ x: p.x + dx, y: p.y + dy }) })))
+        if (origin) carryPath(ref, gridded({ x: origin.x + dx, y: origin.y + dy }))
+        else setPathPoints(ref, starts.map((p, index) => ({ index, world: gridded({ x: p.x + dx, y: p.y + dy }) })))
       },
       () => {
         if (dragged) endGesture()
@@ -1001,6 +1081,41 @@ export function PreviewPane() {
           insertPathPoints(ref, insertAt, [gridded(world)])
           useStore.getState().setPathPoints([insertAt])
         }
+      },
+    )
+  }
+
+  /**
+   * Turn a whole path with the Path tool (D394): the handle above its box goes round the point
+   * the path begins at, and the path's `angle` takes the turn, by the angle step when snapping
+   * is on, as one undo step.
+   */
+  const beginPathTurn = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, frame: PathFrame, world: Point) => {
+    const viewport = surfaceOf()
+    const pivot = frame.anchors[0] ?? frame.curve[0]
+    const s = useStore.getState()
+    const action = s.model?.objects.find((o) => o.name === ref.object)?.actions[ref.index]
+    if (!viewport || !pivot || !action) return
+    const bounds = host.getBoundingClientRect()
+    const base = pathAngle(action)
+    const from = Math.atan2(world.y - pivot.y, world.x - pivot.x)
+    let dragged = false
+    capture(
+      host,
+      e.pointerId,
+      (ev) => {
+        if (!dragged) {
+          if (Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 3) return
+          dragged = true
+          beginGesture()
+        }
+        const now = viewport.toWorld(ev.clientX - bounds.left, ev.clientY - bounds.top)
+        const turned = base + ((Math.atan2(now.y - pivot.y, now.x - pivot.x) - from) * 180) / Math.PI
+        const snap = useStore.getState().previewSnap
+        setPathAngle(ref, snap.on ? snapTo(turned, snap.angle) : turned)
+      },
+      () => {
+        if (dragged) endGesture()
       },
     )
   }
@@ -1073,6 +1188,9 @@ export function PreviewPane() {
     useStore.getState().setPathPoints(indices)
     const frame0 = frameOf(ref)
     const starts = indices.map((i) => (follow ? world : (frame0?.anchors[i] ?? world)))
+    // A point not dragged, where it is as the drag begins: with the first point among those dragged, it is what the rest of the path is held still by (D388).
+    const still = frame0 ? frame0.anchors.findIndex((_, i) => !indices.includes(i)) : -1
+    const stay = frame0 && still >= 0 ? { index: still, world: frame0.anchors[still]! } : undefined
     let dragged = false
     capture(
       host,
@@ -1083,7 +1201,7 @@ export function PreviewPane() {
         const now = viewport.toWorld(ev.clientX - bounds.left, ev.clientY - bounds.top)
         const dx = now.x - world.x
         const dy = now.y - world.y
-        setPathPoints(ref, indices.map((index, k) => ({ index, world: gridded({ x: starts[k]!.x + dx, y: starts[k]!.y + dy }) })))
+        setPathPoints(ref, indices.map((index, k) => ({ index, world: gridded({ x: starts[k]!.x + dx, y: starts[k]!.y + dy }) })), stay)
       },
       () => endGesture(),
     )
@@ -1393,13 +1511,12 @@ export function PreviewPane() {
     const s = useStore.getState()
     const obj = s.model?.objects.find((o) => o.name === name)
     const paths = obj ? obj.actions.map((a, index) => ({ a, index })).filter(({ a }) => a.verb === 'path' && !a.classAction && !a.overridden) : []
-    // Like a click on its clip: the path is selected and the playhead at its start, where its handles can be dragged (D157).
+    // The path is selected with the Path tool in hand, in Edit, where its handles show (D405). The playhead stays (D388): a path's points drag at any time.
     const edit = (index: number) => {
       const fresh = useStore.getState()
-      const action = fresh.model?.objects.find((o) => o.name === name)?.actions[index]
       fresh.selectAction(name, index)
-      if (action) fresh.setTime(action.start)
-      fresh.setTool('select')
+      fresh.setTool('path')
+      fresh.setPathMode('edit')
     }
     const items: MenuItems = []
     if (paths.length === 1) items.push({ label: 'Edit path', run: () => edit(paths[0]!.index) })
@@ -1408,7 +1525,10 @@ export function PreviewPane() {
       label: 'Add path',
       run: () => {
         // One point, where the object is; the Path tool adds the rest.
-        if (addPath(name, useStore.getState().time) !== null) useStore.getState().setTool('path')
+        if (addPath(name, useStore.getState().time) !== null) {
+          useStore.getState().setTool('path')
+          useStore.getState().setPathMode('create')
+        }
       },
     })
     return items
@@ -1580,7 +1700,7 @@ export function PreviewPane() {
       gestureRef.current = null
     }
 
-    // A path under the pointer comes first (D194, D203, D208): a point of it or its line. With Select, only the selected path answers; with the Path tool, any path shown, which the press picks.
+    // With the Path tool, a path under the pointer comes first (D194, D203, D208): a point of it or its line, of any path shown, which the press picks. No other tool takes a press on a path (D405): the path in hand is the Path tool's alone, so a press on an object at the end of its path is a press on the object.
     // A camera in hand is all the press is about: no path under the pointer comes before it. The Camera tool works on a camera's own path, and no other.
     const aCamera = (name: string | undefined): boolean => !!name && model.objects.find((o) => o.name === name)?.className === CAMERA
     const shown = pictured || (on && 'camera' in on) || (camerasOnly && !aCamera(pathRef.current?.primary?.ref.object)) ? null : pathRef.current
@@ -1592,6 +1712,14 @@ export function PreviewPane() {
       const control = nearestPoint(shown.primary.handles.map((h) => h.point), located.world, 8 * pixel)
       if (control !== null) {
         beginPathHandleDrag(host, e, shown.primary.ref, shown.primary.handles[control]!, located.world)
+        return
+      }
+    }
+    // With Move path, the handle above the path's box turns the path about the point it begins at (D394).
+    if (pathTool && store.pathMode === 'move' && shown?.primary && !e.shiftKey) {
+      layoutRef.current(inCameraView ? 'camera' : 'world')
+      if (renderer.onPathTurnHandle(located.world)) {
+        beginPathTurn(host, e, shown.primary.ref, shown.primary.frame, located.world)
         return
       }
     }
@@ -1610,8 +1738,8 @@ export function PreviewPane() {
       const isSelected = !!pathAction && pathAction.object === hitPath.ref.object && pathAction.index === hitPath.ref.index
       if (!isSelected) store.selectAction(hitPath.ref.object, hitPath.ref.index)
       if (pathTool && store.pathMode === 'move') {
-        // Move path: any point or the line carries the whole path (D208), a shape that is code by its offset (D223).
-        if (pathEditable(hitPath.ref)) beginPathMove(host, e, hitPath.ref, located.world, null)
+        // Move path: any point or the line carries the whole path (D208): one that begins where its object is by its object (D387), another whose shape is code by its offset (D223).
+        if (pathEditable(hitPath.ref) || pathBeginsAtObject(hitPath.ref)) beginPathMove(host, e, hitPath.ref, located.world, null)
         else beginPathShift(host, e, hitPath.ref, located.world)
         return
       }
@@ -1628,22 +1756,22 @@ export function PreviewPane() {
       }
       return
     }
-    // The Path tool elsewhere (D203, D208): on an object, its path, the one that owns its place at the playhead or else its first, is picked, or, with none, one starts where the object is and the same press draws on from it; on empty space with a path in hand, a corner or a drawn line; with one object selected and no path in hand, its path starts and the press is its second point.
+    // The Path tool elsewhere (D203, D208, D411): on an object, its path, the one in force at the playhead (D389), is picked. The rest is by mode. Create draws: on an object with no path, one starts where the object is and the same press draws on from it; on empty space with a path in hand, a corner or a drawn line; with one object selected and no path in hand, its path starts and the press is its second point. Edit makes nothing: an object with no path is picked itself, a drag from empty space boxes the points of the path in hand, and a click there lets everything go, as with the Shape tool (D255).
     if (pathTool) {
-      const editing = store.pathMode === 'edit'
+      const creating = store.pathMode === 'create'
       if (located.hit) {
         const pressed = model.objects.find((o) => o.name === located.hit)
         if (!pressed) return
         // What the press picks (D247): the object's own path, its outermost group's, or its class's, a relative path every member follows.
         const cls = store.pick === 'class' ? pressed.classes[0] : undefined
         if (cls) {
-          const classPaths = pressed.actions.map((a, index) => ({ a, index })).filter(({ a }) => a.verb === 'path' && a.classAction?.className === cls && !a.overridden)
-          const found = classPaths[classPaths.length - 1]
+          const classPaths = pressed.actions.map((action, index) => ({ action, index })).filter(({ action }) => action.verb === 'path' && action.classAction?.className === cls && !action.overridden)
+          const found = pathInForce(classPaths, store.time)
           if (found) {
             if (!(pathAction && pathAction.object === pressed.name && pathAction.index === found.index)) store.selectAction(pressed.name, found.index)
             return
           }
-          if (!editing) return
+          if (!creating) return
           addClassPath(cls, store.time)
           const fresh = useStore.getState()
           const again = fresh.model?.objects.find((o) => o.name === pressed.name)
@@ -1656,23 +1784,44 @@ export function PreviewPane() {
         }
         const owner = store.pick === 'group' ? model.objects.find((o) => o.name === pickTargets(model, pressed.name, 'group')[0]) : pressed
         if (!owner) return
-        const paths = owner.actions.map((a, index) => ({ a, index })).filter(({ a }) => a.verb === 'path' && !a.classAction && !a.overridden)
-        if (paths.length > 0) {
-          const holding = pathHolds(owner, 'x', store.time)
-          const chosen = paths.find(({ a }) => a === holding) ?? paths[0]!
+        const chosen = pathInForce(owner.actions.map((action, index) => ({ action, index })).filter(({ action }) => action.verb === 'path' && !action.classAction && !action.overridden), store.time)
+        if (chosen) {
           if (!(pathAction && pathAction.object === owner.name && pathAction.index === chosen.index)) store.selectAction(owner.name, chosen.index)
           return
         }
-        if (!editing) return
+        if (!creating) {
+          if (store.pathMode === 'edit' && !(store.selection.length === 1 && store.selection[0] === owner.name && store.selectedActions.length === 0)) store.select([owner.name])
+          return
+        }
         const index = addPath(owner.name, store.time)
         // A group's line runs from the middle of its members (D247).
         const from = owner.className === GROUP ? (renderer.frameOf(owner.name) ?? positionAt(model, owner, store.time)) : positionAt(useStore.getState().model ?? model, owner, store.time)
         if (index !== null) beginStroke(host, e, { object: owner.name, index }, { x: from.x, y: from.y }, false)
         return
       }
-      if (!editing) return
-      if (pathAction && shown?.primary?.editable) {
-        beginStroke(host, e, pathAction, located.world, true)
+      if (store.pathMode === 'edit') {
+        const extend = e.ctrlKey || e.metaKey
+        beginMarquee(host, e, located, (box) => {
+          const s = useStore.getState()
+          if (!box) {
+            if (!extend) s.select([])
+            return
+          }
+          const edited = pathRef.current?.primary
+          const inside = edited?.editable ? edited.frame.anchors.map((p, i) => (box.has(p) ? i : -1)).filter((i) => i >= 0) : []
+          // The path whose points the box holds is picked with them, where it was only shown.
+          const picked = s.selectedActions.length === 1 && !!edited && s.selectedActions[0]!.object === edited.ref.object && s.selectedActions[0]!.index === edited.ref.index
+          if (edited && inside.length > 0 && !picked) s.selectAction(edited.ref.object, edited.ref.index)
+          useStore.getState().setPathPoints(extend && picked ? [...new Set([...s.pathPoints, ...inside])] : inside)
+        })
+        return
+      }
+      if (!creating) return
+      // The path in hand takes the corner or the line: the one selected, or the one shown for the thing selected, which the press picks.
+      const inHand = shown?.primary?.editable ? shown.primary.ref : null
+      if (inHand && (!pathAction || (pathAction.object === inHand.object && pathAction.index === inHand.index))) {
+        if (!pathAction) store.selectAction(inHand.object, inHand.index)
+        beginStroke(host, e, inHand, located.world, true)
         return
       }
       if (!pathAction && store.selection.length === 1) {
@@ -1708,14 +1857,9 @@ export function PreviewPane() {
       const extend = ctrl
       beginMarquee(host, e, located, (box) => {
         const s = useStore.getState()
-        // With a path selected, the box picks its points, and a click on empty space lets them go first (D198).
-        const pointsMode = !!pathRef.current?.primary?.editable && s.selectedActions.length === 1
+        // The box picks things, never a path's points: those are the Path tool's (D405).
         if (!box) {
-          if (pointsMode && s.pathPoints.length > 0) s.setPathPoints([])
-          else if (!extend) s.select([])
-        } else if (pointsMode) {
-          const inside = pathRef.current!.primary!.frame.anchors.map((p, i) => (box.has(p) ? i : -1)).filter((i) => i >= 0)
-          s.setPathPoints(extend ? [...new Set([...s.pathPoints, ...inside])] : inside)
+          if (!extend) s.select([])
         } else {
           // A box drawn with the Camera tool takes the cameras it touches (D373).
           const names = camerasOnly ? box.cameras() : box.objects()
@@ -1745,20 +1889,10 @@ export function PreviewPane() {
     /** What the gesture is about: positions, the angle, or the size. A match here makes a selected action the target. */
     const primaryAttrs = (obj: SceneObject): string[] => (op === 'move' ? ['x', 'y'] : op === 'rotate' ? ['rotation'] : resizeAttrs(obj.className))
 
-    // Moving an object that a path places moves the path (D197, D205), as a drag during a move edits the move: the first anchor at the path's start, the last anywhere after, with the playhead taken to the path's end while it runs. The path selected, or merely owning the place; with Shift, only the selected path.
-    const selectedRef = store.selectedActions.find((r) => r.object === subject.name)
-    const pathSelected = selectedRef && subject.actions[selectedRef.index]?.verb === 'path' ? selectedRef.index : null
-    const making = !!gestureRef.current && !gestureRef.current.editing
-    if (op === 'move' && objects.length === 1 && !isGroup && !pictured && !(e.ctrlKey || e.metaKey) && (!e.shiftKey || (pathSelected !== null && !making))) {
-      const target = pathDragTarget(subject.name, pathSelected, store.time)
-      if (target) {
-        if (target.showTime !== null) store.setTime(target.showTime)
-        beginPathEdit(host, e, target.ref, located.world, target.index, null, false, true)
-        return
-      }
-    }
-
-    let kind: Drag['kind'] = e.shiftKey ? 'timed' : 'plain'
+    // An object that a path places is dragged as one that a move places (D388): the path is a move with a shape, so the rules below are all there are, and a press never takes the playhead anywhere.
+    // While a recording runs, or waits for this, what is dragged is recorded (D397): Shift means nothing more then, and no animation in hand takes the drag. A Shape's resize, which rewrites its points, is recorded as a morph to the outline it leaves (D412).
+    const recorded = store.recording
+    let kind: Drag['kind'] = recorded ? 'recorded' : e.shiftKey ? 'timed' : 'plain'
     let actionIndex = -1
     let derived = false
     let showTime: number | null = null
@@ -1766,9 +1900,10 @@ export function PreviewPane() {
     let editAt: number | null = null
     const selected = store.selectedActions.find((r) => r.object === subject.name)
     const selectedAction = selected ? subject.actions[selected.index] : undefined
-    const matches = objects.length === 1 && !!selectedAction && primaryAttrs(subject).some((a) => a in selectedAction.changes)
-    const previewing = gestureRef.current?.editing ? gestureRef.current : null
-    if (previewing && selectedAction && objects.length === 1 && e.shiftKey && selectedAction.verb !== 'path') {
+    // A path is about the place (D388): selected, a move of its object is about its end, as a move's is.
+    const matches = !recorded && objects.length === 1 && !!selectedAction && (selectedAction.verb === 'path' ? op === 'move' : primaryAttrs(subject).some((a) => a in selectedAction.changes))
+    const previewing = !recorded && gestureRef.current?.editing ? gestureRef.current : null
+    if (previewing && selectedAction && objects.length === 1 && e.shiftKey && (selectedAction.verb !== 'path' || op === 'move')) {
       // Shift held on the selected animation previews one of its ends: any drag sets that end's state, whatever the animation changes so far (D157, D188).
       if (previewing.editEnd === 'start') editAt = selectedAction.start
       else {
@@ -1865,7 +2000,8 @@ export function PreviewPane() {
       names: targets.map((o) => o.name),
       primary: primary.name,
       group: isGroup,
-      grouping: objects.length > 1 && e.shiftKey ? names : null,
+      // Several things animated as one are a group (D124): a Shift-drag makes it, and so does a recorded one.
+      grouping: objects.length > 1 && (e.shiftKey || recorded) ? names : null,
       handle,
       // A camera's frame keeps the picture's proportions (D361).
       keepAspect: e.altKey || isCamera,
@@ -1921,8 +2057,11 @@ export function PreviewPane() {
         if (!drag.moved) {
           if (drag.grouping) {
             // A Shift-drag on several objects makes them a group, or finds the group they already are, and animates it (D124).
+            const known = new Set(useStore.getState().model?.objects.map((o) => o.name))
             const name = createGroup(drag.grouping)
             if (!name) return
+            // A group made for a recorded drag goes again with its animation, should the review not keep that (D404).
+            if (drag.kind === 'recorded' && !known.has(name)) noteGroup(name)
             const fresh = useStore.getState()
             const groupObj = fresh.model?.objects.find((o) => o.name === name)
             const frameNow = renderer.frameOf(name)
@@ -1943,6 +2082,11 @@ export function PreviewPane() {
             drag.derived = false
           }
           if (drag.showTime !== null) useStore.getState().setTime(drag.showTime)
+          if (drag.kind === 'recorded') {
+            if (!useStore.getState().selection.includes(drag.primary)) useStore.getState().select([drag.primary])
+            // A recording that waited for its first action runs from here.
+            useStore.getState().runRecording()
+          }
           if (drag.kind === 'timed') {
             if (!useStore.getState().selection.includes(drag.primary)) useStore.getState().select([drag.primary])
             if (useStore.getState().pin === 'start' && !gestureRef.current) gestureRef.current = { restore: restoreTime, from: restoreTime, duration: proposed }
@@ -2022,6 +2166,11 @@ export function PreviewPane() {
               // A Shape's points scale about the anchor in its own space and are written (D233); points that are code scale by `scale` instead. With Shift, the scaled outline is the target of a morph written at the first move (D257).
               if (obj.className === SHAPE && drag.shapeBase) {
                 const about = { x: drag.shapeBase.center.x + anchorLocal.x / drag.shapeBase.scale, y: drag.shapeBase.center.y + anchorLocal.y / drag.shapeBase.scale }
+                if (drag.kind === 'recorded' && (drag.shapeBase.points || drag.shapeBase.segs)) {
+                  // While a recording runs the outline as resized is the target of a morph, at the pace it is resized (D412).
+                  if (recordOutline(name, { fx, fy }, { fx: 1, fy: 1 }, (from, m) => scalePathData(from, about, m['fx'] ?? 1, m['fy'] ?? 1))) drag.created = true
+                  continue
+                }
                 if (drag.kind === 'timed' && (drag.shapeBase.points || drag.shapeBase.segs)) {
                   if (!drag.created) {
                     if (addMorph(name, restoreTime, proposed, gestureRef.current?.editing ? 'start' : useStore.getState().pin) === null) continue
@@ -2071,7 +2220,27 @@ export function PreviewPane() {
             if (live.collide && drag.movers) {
               // Outlines collide (D136): the dragged thing walks toward the pointer and stops or pushes.
               const pushing: Pushing = live.push ? 'on' : 'off'
-              if (drag.kind === 'plain') walk(drag.movers.dragged, { x: ddx, y: ddy }, drag.movers.obstacles, pushing)
+              // While a recording runs, time runs under the drag (D412): what has not been pushed is met where it is now, what has gone is met no more, and what has come is met.
+              if (drag.kind === 'recorded' && live.model && drag.metAt !== live.time) {
+                drag.metAt = live.time
+                const known = new Map(drag.movers.obstacles.map((o) => [o.name, o]))
+                const met: Mover[] = []
+                for (const o of live.model.objects) {
+                  if (o.className === GROUP || o.className === CAMERA || dragged.has(o.name) || maskDrawnBy(live.model, o.name) || !existsAt(live.model, o, live.time)) continue
+                  const was = known.get(o.name)
+                  // What the drag has pushed is where the drag put it.
+                  if (was && (Math.abs(was.shift.x) > 1e-9 || Math.abs(was.shift.y) > 1e-9)) {
+                    met.push(was)
+                    continue
+                  }
+                  const f = renderer.frameOf(o.name)
+                  if (!f) continue
+                  drag.base.set(o.name, baseValues(live.model, o, live.time))
+                  met.push(makeMover(o.name, [outlineOf(o, f, o.className === SHAPE ? shapeWorldCurve(live.model, o, live.time) : undefined)], live.anchored.includes(o.name) || !o.decl, live.soft.includes(o.name)))
+                }
+                drag.movers.obstacles = met
+              }
+              if (drag.kind === 'plain' || drag.kind === 'recorded') walk(drag.movers.dragged, { x: ddx, y: ddy }, drag.movers.obstacles, pushing)
               else {
                 // An animation moves in a straight line from where it starts to where it ends, and that line is what meets and pushes: the sweep starts over from the start each time (D206).
                 resetMover(drag.movers.dragged)
@@ -2145,7 +2314,26 @@ export function PreviewPane() {
             drag.pushedShifts.set(o.name, { x: o.shift.x, y: o.shift.y })
           }
         }
-        if (drag.kind === 'timed') {
+        if (drag.kind === 'recorded') {
+          const v = values.get(drag.primary)
+          if (!v) return
+          const live = useStore.getState()
+          // The recording stopped with the drag still held: what was dragged is written already, and the rest of the drag writes nothing.
+          if (!live.recording) return
+          // What a group in hand carries, of what is in view: their lives are widened with its animation, as a thing's own is (D403).
+          if (!drag.carried) drag.carried = live.model?.objects.find((o) => o.name === drag.primary)?.className === GROUP ? groupMembers(live.model, drag.primary).filter((n) => keptRef.current.has(n)) : []
+          const fine = Math.max(1, 2 / viewport.zoom)
+          // The gesture's animation begins at the playhead, from what the thing shows there, and ends with the gesture (D412).
+          if (recordShown(drag.primary, v, { base: drag.base.get(drag.primary), fine, carried: drag.carried, batch: true })) drag.created = true
+          // What the drag pushes is recorded too, each thing from where it is first moved to where it is last.
+          if (drag.movers)
+            for (const o of drag.movers.obstacles) {
+              const pushedTo = Math.abs(o.shift.x) > 1e-9 || Math.abs(o.shift.y) > 1e-9 ? values.get(o.name) : undefined
+              if (pushedTo) recordShown(o.name, pushedTo, { base: drag.base.get(o.name), fine, pushed: true, batch: true })
+            }
+          // Everything the step asks is written in one edit, once a frame.
+          flushRecordedSoon()
+        } else if (drag.kind === 'timed') {
           // While an animation is being edited, a new one of another kind takes its span (D157).
           const pinNow = gestureRef.current?.editing ? 'start' : useStore.getState().pin
           const v = values.get(drag.primary)
@@ -2197,6 +2385,7 @@ export function PreviewPane() {
           return !shift || (Math.abs(shift.x) < 1e-9 && Math.abs(shift.y) < 1e-9)
         })
         if (idle.length > 0) deleteActions(idle.map(([object, index]) => ({ object, index })), true)
+        // A gesture being recorded is written out as it ends (D412).
         endGesture()
         if (gestureRef.current && !ev.shiftKey) {
           // Shift already released: the gesture is over, the playhead goes back, or rests at the end of the chain.
@@ -2271,7 +2460,8 @@ export function PreviewPane() {
    * and the playhead stays where it is. The trail becomes a line, over an object as over empty
    * space, written on as any Shift-made animation when Shift is held (D103, D298). A press let go
    * of where it began is a dot (D311). The pencil never draws an object's path: that is the Path
-   * tool's.
+   * tool's. While a recording runs the playhead runs under the stroke: the line begins where the
+   * stroke began and is written on over the time it took, at the pace it was drawn (D412).
    */
   const beginSketch = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, world0: Point, paneX: number, paneY: number) => {
     const viewport = surfaceOf()
@@ -2279,6 +2469,10 @@ export function PreviewPane() {
     const trailWorld: Point[] = [world0]
     const trail: Point[] = [{ x: paneX, y: paneY }]
     const withShift = e.shiftKey
+    // A stroke drawn while a recording runs: the playhead's time at each place of it. A recording that waited for its first action runs from here.
+    const recorded = useStore.getState().recording
+    if (recorded) useStore.getState().runRecording()
+    const times: number[] = [useStore.getState().time]
     setSketch([...trail])
     setSketchInk(viewport.zoom)
     capture(
@@ -2290,6 +2484,7 @@ export function PreviewPane() {
         const py = ev.clientY - bounds.top
         trailWorld.push(viewport.toWorld(px, py))
         trail.push({ x: px, y: py })
+        times.push(useStore.getState().time)
         setSketch([...trail])
       },
       () => {
@@ -2302,6 +2497,17 @@ export function PreviewPane() {
         const length = gesture?.duration ?? 1
         const moved = trail.some((p) => Math.hypot(p.x - trail[0]!.x, p.y - trail[0]!.y) >= 3)
         const st = styleRef.current
+        if (recorded) {
+          beginGesture()
+          try {
+            const drawn = sketchLine(moved ? trailWorld : [world0], st.stroke, st.strokeWidth, st.strokeOpacity, times[0]!)
+            if (drawn && moved) recordWriteOn(drawn, trailWorld, times)
+          } finally {
+            endGesture()
+          }
+          paintRef.current()
+          return
+        }
         const name = sketchLine(moved ? trailWorld : [world0], st.stroke, st.strokeWidth, st.strokeOpacity, s.time)
         const end = name && withShift ? writeOnLine(name, pinNow, from, length) : null
         if (end !== null) madeWithShift(end, pinNow)
@@ -2547,6 +2753,8 @@ export function PreviewPane() {
   const selectedIsPath = selectedActions.length === 1 && !!model && model.objects.find((o) => o.name === selectedActions[0]!.object)?.actions[selectedActions[0]!.index]?.verb === 'path'
   const pathSelected = selectedIsPath && pathEditable(selectedActions[0]!)
   const codePathSelected = selectedIsPath && !pathSelected
+  /** The one thing selected has a path, which the Path tool shows with its points (D411). */
+  const selectedHasPath = selection.length === 1 && selectedActions.length === 0 && !!model?.objects.find((o) => o.name === selection[0])?.actions.some((a) => a.verb === 'path' && !a.overridden)
 
   return (
     <div
@@ -2740,15 +2948,17 @@ export function PreviewPane() {
             <button className={`preview-toggle${shapeShown.filled ? ' on' : ''}`} onClick={() => writeShapeStyle({ filled: !shapeShown.filled })} title="Fill, or a line" aria-pressed={shapeShown.filled}>
               Fill
             </button>
-            {shapeShown.filled && <ColorPicker value={shapeShown.fill} onChange={(fill) => writeShapeStyle({ fill })} title="Fill" />}
-            {shapeShown.filled && <NumberField label="Fill opacity" value={shapeShown.fillOpacity} unit="" min={0} step={0.05} onChange={(fillOpacity) => writeShapeStyle({ fillOpacity: Math.min(1, fillOpacity) })} />}
-            <ColorPicker value={shapeShown.stroke} onChange={(stroke) => writeShapeStyle({ stroke })} title="Outline" />
+            {/* Each color's opacity is set in its picker (D391). */}
+            {shapeShown.filled && <ColorPicker value={shapeShown.fill} onChange={(fill) => writeShapeStyle({ fill })} opacity={shapeShown.fillOpacity} onOpacity={(fillOpacity) => writeShapeStyle({ fillOpacity })} title="Fill" />}
+            <ColorPicker value={shapeShown.stroke} onChange={(stroke) => writeShapeStyle({ stroke })} opacity={shapeShown.strokeOpacity} onOpacity={(strokeOpacity) => writeShapeStyle({ strokeOpacity })} title="Outline" />
             <NumberField label="Width" value={shapeShown.strokeWidth} unit="px" min={0} onChange={(strokeWidth) => writeShapeStyle({ strokeWidth })} />
-            <NumberField label="Outline opacity" value={shapeShown.strokeOpacity} unit="" min={0} step={0.05} onChange={(strokeOpacity) => writeShapeStyle({ strokeOpacity: Math.min(1, strokeOpacity) })} />
           </div>
         )}
         {tool === 'path' && (
           <div className="preview-modes" role="group" aria-label="Path tool mode">
+            <button className={pathMode === 'create' ? 'active' : ''} onClick={() => setPathMode('create')} title="Draw a path" aria-pressed={pathMode === 'create'}>
+              Create
+            </button>
             <button className={pathMode === 'edit' ? 'active' : ''} onClick={() => setPathMode('edit')} title="Edit the points" aria-pressed={pathMode === 'edit'}>
               Edit
             </button>
@@ -2773,7 +2983,7 @@ export function PreviewPane() {
         )}
         {tool === 'pencil' && (
           <div className="paint-bar" role="group" aria-label="Pencil">
-            <ColorPicker value={style.stroke} onChange={(stroke) => setShapeStyle({ stroke })} title="Line color" />
+            <ColorPicker value={style.stroke} onChange={(stroke) => setShapeStyle({ stroke })} opacity={style.strokeOpacity} onOpacity={(strokeOpacity) => setShapeStyle({ strokeOpacity })} title="Line color" />
             <NumberField label="Width" value={style.strokeWidth} unit="px" onChange={(strokeWidth) => setShapeStyle({ strokeWidth })} />
           </div>
         )}
@@ -2789,7 +2999,7 @@ export function PreviewPane() {
             <button
               className="preview-toggle"
               onClick={() => setAnchor(anchor === 'edge' ? 'center' : 'edge')}
-              title={anchor === 'edge' ? 'Resizing keeps the far side' : 'Resizing keeps the center'}
+              title="What a resize keeps in place"
             >
               {anchor === 'edge' ? 'Edge' : 'Center'}
             </button>
@@ -2818,8 +3028,9 @@ export function PreviewPane() {
         {tool === 'camera' && <span className="hint">Click a camera; Shift animates</span>}
         {tool === 'shape' && shapeMode === 'create' && <span className="hint">{drafting ? 'Click for corners, drag to draw; the first point closes and fills, Escape leaves a line' : 'Click to start a shape'}</span>}
         {tool === 'shape' && shapeMode === 'edit' && <span className="hint">{shapeRef.current?.editable ? 'Drag a point, or a box around several; right-click a point or the line for curves and corners' : 'Click a shape, or drag a box around one'}</span>}
-        {tool === 'path' && pathMode === 'move' && <span className="hint">Drag any point or line of a path to move the whole path</span>}
-        {tool === 'path' && pathMode === 'edit' && <span className="hint">{pathSelected ? (pathRef.current?.primary?.kind === 'curves' ? 'Drag a point, or the handles of a clicked one; click for a corner' : 'Click for a corner, drag to draw') : codePathSelected ? 'Shape is code: edit it in the code pane' : selection.length === 1 ? 'Click the object, or where the path goes' : 'Click an object, or a path'}</span>}
+        {tool === 'path' && pathMode === 'move' && <span className="hint">Drag a path's line to move it, the handle over its box to turn it</span>}
+        {tool === 'path' && pathMode === 'create' && <span className="hint">{pathSelected || selectedHasPath ? 'Click for a corner, drag to draw' : codePathSelected ? 'Shape is code: edit it in the code pane' : selection.length === 1 ? 'Click the object, or where the path goes' : 'Click an object, or a path'}</span>}
+        {tool === 'path' && pathMode === 'edit' && <span className="hint">{pathSelected || selectedHasPath ? 'Drag a point, or a box around several; click the line for a point' : codePathSelected ? 'Shape is code: edit it in the code pane' : selection.length === 1 ? 'No path here: Create draws one' : 'Click an object, or a path'}</span>}
         {tool === 'select' && codePathSelected && <span className="hint">Shape is code: edit it in the code pane</span>}
         {selectedGroup && model ? (
           <span className="dim">

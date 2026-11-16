@@ -3,7 +3,7 @@ import { groupMembers } from '../model/groups'
 import { CAMERA, GROUP } from '../model/registry'
 import { maskDrawnBy, maskFor, masksOn } from '../model/masks'
 import { hasPathData } from '../model/pathData'
-import { cameraAt, camerasOf, containers, existsAt, groupBox, isAttached, opacityAt, parseColor, shapePieces, textPadding, textStyleAt, textUnitStates, valueAt, viewAt, viewOf, worldPose, type Pose, type ShapePiece } from '../model/sample'
+import { cameraAt, camerasOf, containers, existsAt, groupBox, inView, isAttached, opacityAt, parseColor, shapePieces, textPadding, textStyleAt, textUnitStates, valueAt, viewAt, viewOf, worldPose, type Pose, type ShapePiece } from '../model/sample'
 import { SHAPE } from '../model/registry'
 import { drawText, estimateMeasure, fontSpec, layoutOf, sameUnitStates, textMeasure, unitOverflow, type TextMeasure, type TextStyle, type UnitState } from '../model/text'
 import { fontsVersion } from '../project/fonts'
@@ -297,6 +297,28 @@ class Cross {
 
 const guideMaterial = new THREE.MeshBasicMaterial({ color: 0x3b82f6, depthTest: false, transparent: true })
 const pathMaterial = new THREE.MeshBasicMaterial({ color: 0x86efac, depthTest: false, transparent: true, opacity: 0.9 })
+/** The path of what is selected, among the paths Show Paths shows (D405): the white of the selection's own outline. */
+const heldPathMaterial = new THREE.MeshBasicMaterial({ color: LIGHT, depthTest: false, transparent: true, opacity: 0.95 })
+
+/** Straight pieces as one mesh's triangles (D401): each a band of a width along its piece, as a mesh for each piece drew them. */
+function bandGeometry(pieces: [{ x: number; y: number }, { x: number; y: number }][], width: number): THREE.BufferGeometry {
+  const positions = new Float32Array(pieces.length * 18)
+  const half = width / 2
+  let at = 0
+  for (const [a, b] of pieces) {
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const length = Math.hypot(dx, dy)
+    if (length === 0) continue
+    const nx = (-dy / length) * half
+    const ny = (dx / length) * half
+    positions.set([a.x + nx, a.y + ny, 0, a.x - nx, a.y - ny, 0, b.x - nx, b.y - ny, 0, a.x + nx, a.y + ny, 0, b.x - nx, b.y - ny, 0, b.x + nx, b.y + ny, 0], at)
+    at += 18
+  }
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.BufferAttribute(at === positions.length ? positions : positions.subarray(0, at), 3))
+  return geometry
+}
 
 /** A handle on each point of an editable path, the one last placed or picked a little larger (D194). */
 const POINT_PX = 7
@@ -591,21 +613,30 @@ class ShapeHandles {
 /** The line of a selected path, its start as a dot and its end as a diamond (D192), and a handle on each point when the points can be edited (D194); dashed when the shape is code and has no points to edit (D226). */
 class PathLine {
   readonly group = new THREE.Group()
-  private readonly segments: THREE.Mesh[] = []
+  /** The whole line as one mesh (D401): a recorded path has thousands of pieces, and a mesh for each made every frame slow. */
+  private readonly line = new THREE.Mesh(new THREE.BufferGeometry(), pathMaterial)
   private readonly start = new THREE.Mesh(unitCircle, pathMaterial)
   private readonly end = new THREE.Mesh(unitPlane, pathMaterial)
   private readonly anchors = new AnchorMarks()
   private readonly controls = new Controls()
+  /** What the line was last built from: it is built again only when one of these changes. */
+  private built: { points: readonly { x: number; y: number }[]; count: number; pixel: number; dashed: boolean } | null = null
+  private pieces = 0
+  private length = 0
 
   constructor() {
+    this.line.renderOrder = ORDER + 6
+    this.line.position.z = 0.85
+    this.line.frustumCulled = false
     this.start.renderOrder = ORDER + 7
     this.end.renderOrder = ORDER + 7
     this.end.rotation.z = Math.PI / 4
-    this.group.add(this.start, this.end, this.anchors.group, this.controls.group)
+    this.group.add(this.line, this.start, this.end, this.anchors.group, this.controls.group)
     this.group.visible = false
   }
 
-  set(points: { x: number; y: number }[], pixel: number, anchors: { x: number; y: number }[] | null = null, active: number[] = [], dashed = false, handles: ControlHandle[] = [], round: boolean[] = []): void {
+  /** `held` draws the line in the color of what is in hand (D405). */
+  set(points: { x: number; y: number }[], pixel: number, anchors: { x: number; y: number }[] | null = null, active: number[] = [], dashed = false, handles: ControlHandle[] = [], round: boolean[] = [], held = false): void {
     if (points.length === 0) {
       this.group.visible = false
       return
@@ -614,23 +645,19 @@ class PathLine {
     // The controls of the picked anchors of a curves path (D246), and a round mark on each smooth anchor (D252).
     this.controls.set(handles, pixel)
     this.anchors.set(anchors ?? [], pixel, active, round)
-    const pieces = dashed ? dashes(points, DASH_PX * pixel, GAP_PX * pixel) : points.slice(1).map((b, i) => [points[i]!, b] as [{ x: number; y: number }, { x: number; y: number }])
-    while (this.segments.length < pieces.length) {
-      const mesh = new THREE.Mesh(unitPlane, pathMaterial)
-      mesh.renderOrder = ORDER + 6
-      this.group.add(mesh)
-      this.segments.push(mesh)
+    const material = held ? heldPathMaterial : pathMaterial
+    this.line.material = material
+    this.start.material = material
+    this.end.material = material
+    const was = this.built
+    if (!was || was.points !== points || was.count !== points.length || was.pixel !== pixel || was.dashed !== dashed) {
+      const pieces = dashed ? dashes(points, DASH_PX * pixel, GAP_PX * pixel) : points.slice(1).map((b, i) => [points[i]!, b] as [{ x: number; y: number }, { x: number; y: number }])
+      this.line.geometry.dispose()
+      this.line.geometry = bandGeometry(pieces, LINE_PX * 1.5 * pixel)
+      this.pieces = pieces.length
+      this.length = pieces.reduce((sum, [a, b]) => sum + Math.hypot(b.x - a.x, b.y - a.y), 0)
+      this.built = { points, count: points.length, pixel, dashed }
     }
-    this.segments.forEach((mesh, i) => {
-      const piece = pieces[i]
-      mesh.visible = !!piece
-      if (!piece) return
-      const [a, b] = piece
-      const length = Math.hypot(b.x - a.x, b.y - a.y)
-      mesh.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, 0.85)
-      mesh.rotation.z = Math.atan2(b.y - a.y, b.x - a.x)
-      mesh.scale.set(length, LINE_PX * 1.5 * pixel, 1)
-    })
     const first = points[0]!
     const last = points[points.length - 1]!
     this.start.position.set(first.x, first.y, 0.86)
@@ -640,7 +667,12 @@ class PathLine {
   }
 
   count(): number {
-    return this.group.visible ? this.segments.filter((m) => m.visible).length : 0
+    return this.group.visible ? this.pieces : 0
+  }
+
+  /** How much line is drawn, the dashes of a dashed one and not its gaps, for a check. */
+  drawn(): number {
+    return this.group.visible ? this.length : 0
   }
 
   controlCount(): number {
@@ -762,7 +794,7 @@ export class SceneRenderer {
   private readonly cameraLines: FrameLine[] = []
   /** What was last asked to be drawn over the scene, kept so it can be laid out again in another view's pixels (D366): the selected path, the other paths, a Shape's handles, and the guides. */
   private pathSpec: { points: { x: number; y: number }[] | null; anchors: { x: number; y: number }[] | null; active: number[]; dashed: boolean; handles: ControlHandle[]; round: boolean[] } = { points: null, anchors: null, active: [], dashed: false, handles: [], round: [] }
-  private otherSpec: { points: { x: number; y: number }[]; dashed: boolean }[] = []
+  private otherSpec: { points: { x: number; y: number }[]; dashed: boolean; held?: boolean }[] = []
   private shapeSpec: { points: { x: number; y: number }[] | null; active: number[]; handles: ControlHandle[]; round: boolean[] } = { points: null, active: [], handles: [], round: [] }
   private guideSpec: { lines: GuideLine[]; view: { left: number; right: number; top: number; bottom: number } } | null = null
   private readonly items = new Map<string, Item>()
@@ -772,6 +804,13 @@ export class SceneRenderer {
   private readonly resizeHandles: Marker[] = []
   private readonly rotateHandle = new Marker(unitCircle)
   private readonly anchorCross = new Cross()
+  /** The box around the path in hand with Move path (D394): its outline, the handle that turns the path on its stem, and the cross on the point it turns about. */
+  private readonly pathBox = new Outline()
+  private readonly pathTurnHandle = new Marker(unitCircle)
+  private readonly pathTurnStem: THREE.Mesh
+  private readonly pathPivot = new Cross()
+  private pathBoxSpec: { frame: Frame; pivot: { x: number; y: number } } | null = null
+  private pathTurnGrip: { x: number; y: number; radius: number } | null = null
   /** One diamond per anchored object on screen (D161). */
   private readonly anchorMarks: Marker[] = []
   private readonly stem: THREE.Mesh
@@ -824,7 +863,10 @@ export class SceneRenderer {
     this.stem = new THREE.Mesh(unitPlane, lightMaterial)
     this.stem.renderOrder = ORDER + 1
     this.stem.visible = false
-    this.overlay.add(this.gizmoOutline.group, this.rotateRing, this.rotateHandle.group, this.anchorCross.group, this.stem, this.guides.group, this.pathLine.group, this.shapeHandles.group)
+    this.pathTurnStem = new THREE.Mesh(unitPlane, lightMaterial)
+    this.pathTurnStem.renderOrder = ORDER + 1
+    this.pathTurnStem.visible = false
+    this.overlay.add(this.gizmoOutline.group, this.rotateRing, this.rotateHandle.group, this.anchorCross.group, this.stem, this.guides.group, this.pathLine.group, this.shapeHandles.group, this.pathBox.group, this.pathTurnStem, this.pathTurnHandle.group, this.pathPivot.group)
     this.group.add(this.overlay)
   }
 
@@ -994,7 +1036,7 @@ export class SceneRenderer {
       const byName = new Map(model.objects.map((o) => [o.name, o]))
       const alive = (name: string): boolean => {
         const o = byName.get(name)
-        return !!o && (existsAt(model, o, time) || (keepAliveFrom !== undefined && existsAt(model, o, keepAliveFrom)))
+        return !!o && (inView(model, o, time) || (keepAliveFrom !== undefined && existsAt(model, o, keepAliveFrom)))
       }
       // A mask masks while it exists (D331): outside its life, what it lists is whole. Hidden in the view, it does not mask there (D335).
       for (const mask of model.masks) {
@@ -1195,7 +1237,7 @@ export class SceneRenderer {
     if (model) {
       this.liveCamera = cameraAt(model, time, keepAliveFrom)?.name ?? null
       for (const camera of camerasOf(model)) {
-        if (!existsAt(model, camera, time) && !(keepAliveFrom !== undefined && existsAt(model, camera, keepAliveFrom))) continue
+        if (!inView(model, camera, time) && !(keepAliveFrom !== undefined && existsAt(model, camera, keepAliveFrom))) continue
         const v = viewOf(model, camera, time)
         this.cameraFrames.set(camera.name, { x: v.x, y: v.y, rotation: v.rotation, width: this.composition.width / v.zoom, height: this.composition.height / v.zoom })
       }
@@ -1218,6 +1260,7 @@ export class SceneRenderer {
     if (again) {
       this.applyPath(pixel)
       this.applyOtherPaths(pixel)
+      this.applyPathBox(pixel)
       this.applyShapeHandles(pixel)
       if (this.guideSpec) this.guides.set(this.guideSpec.lines, this.guideSpec.view, pixel)
     }
@@ -1333,13 +1376,60 @@ export class SceneRenderer {
     else this.pathLine.hide()
   }
 
+  /**
+   * The box around the path in hand with Move path (D394): around its line as the path lies, a
+   * handle above it that turns the path, and a cross on the point it turns about, where it
+   * begins. Null for none.
+   */
+  setPathBox(box: { frame: Frame; pivot: { x: number; y: number } } | null, pixel: number): void {
+    this.pathBoxSpec = box
+    this.applyPathBox(pixel)
+  }
+
+  private applyPathBox(pixel: number): void {
+    const s = this.pathBoxSpec
+    if (!s) {
+      this.pathBox.hide()
+      this.pathTurnHandle.hide()
+      this.pathPivot.hide()
+      this.pathTurnStem.visible = false
+      this.pathTurnGrip = null
+      return
+    }
+    this.pathBox.set(s.frame, pixel)
+    const angle = (s.frame.rotation * Math.PI) / 180
+    const cos = Math.cos(angle)
+    const sin = Math.sin(angle)
+    const local = (lx: number, ly: number) => ({ x: s.frame.x + lx * cos - ly * sin, y: s.frame.y + lx * sin + ly * cos })
+    const p = local(0, s.frame.height / 2 + ROTATE_OFFSET * pixel)
+    this.pathTurnHandle.set(p.x, p.y, angle, ROTATE_PX * pixel, pixel)
+    const mid = local(0, s.frame.height / 2 + (ROTATE_OFFSET * pixel) / 2)
+    this.pathTurnStem.visible = true
+    this.pathTurnStem.position.set(mid.x, mid.y, 0.6)
+    this.pathTurnStem.rotation.z = angle
+    this.pathTurnStem.scale.set(LINE_PX * pixel, ROTATE_OFFSET * pixel, 1)
+    this.pathPivot.set(s.pivot.x, s.pivot.y, PIVOT_PX * pixel, pixel)
+    this.pathTurnGrip = { x: p.x, y: p.y, radius: 13 * pixel }
+  }
+
+  /** Whether a place in the scene is on the handle that turns the path in hand. */
+  onPathTurnHandle(world: { x: number; y: number }): boolean {
+    const g = this.pathTurnGrip
+    return !!g && Math.hypot(world.x - g.x, world.y - g.y) <= g.radius
+  }
+
+  /** Where the handle that turns the path in hand is, for a check; null when no path wears its box. */
+  pathTurnHandleAt(): { x: number; y: number } | null {
+    return this.pathTurnGrip ? { x: this.pathTurnGrip.x, y: this.pathTurnGrip.y } : null
+  }
+
   /** How many controls the selected path shows right now. */
   pathControlCount(): number {
     return this.pathLine.controlCount()
   }
 
-  /** The other paths shown, as lines without handles (D205), each dashed when its shape is code (D226). */
-  setOtherPaths(curves: { points: { x: number; y: number }[]; dashed: boolean }[], pixel: number): void {
+  /** The other paths shown, as lines without handles (D205), each dashed when its shape is code (D226), and in the selection's color when it is the path of what is selected (D405). */
+  setOtherPaths(curves: { points: { x: number; y: number }[]; dashed: boolean; held?: boolean }[], pixel: number): void {
     this.otherSpec = curves
     this.applyOtherPaths(pixel)
   }
@@ -1353,7 +1443,7 @@ export class SceneRenderer {
     }
     this.otherLines.forEach((line, i) => {
       const curve = curves[i]
-      if (curve) line.set(curve.points, pixel, null, [], curve.dashed)
+      if (curve) line.set(curve.points, pixel, null, [], curve.dashed, [], [], curve.held === true)
       else line.hide()
     })
   }
@@ -1383,6 +1473,11 @@ export class SceneRenderer {
   /** How many path lines show right now, the selected one included. */
   pathLineCount(): number {
     return (this.pathLine.group.visible ? 1 : 0) + this.otherLines.filter((l) => l.group.visible).length
+  }
+
+  /** How many of the path lines shown are in the color of what is selected (D405), for a check. */
+  heldPathCount(): number {
+    return this.otherSpec.filter((c) => c.held === true).length
   }
 
   clearGuides(): void {
@@ -1671,8 +1766,9 @@ export class SceneRenderer {
   private apply(item: Item, obj: SceneObject, model: SceneModel, time: number, index: number, keepAliveFrom?: number): void {
     const mesh = item.mesh
     // Outside its life, or at zero opacity, an object is not drawn and nothing else about it is sampled. While a Shift
-    // gesture looks ahead, whatever was alive where it began stays drawn, so it can be dragged into an animation (D138).
-    const alive = existsAt(model, obj, time) || (keepAliveFrom !== undefined && existsAt(model, obj, keepAliveFrom))
+    // gesture looks ahead, whatever was alive where it began stays drawn, so it can be dragged into an animation (D138);
+    // while a recording runs, what is in hand stays drawn though its life has gone by (D403).
+    const alive = inView(model, obj, time) || (keepAliveFrom !== undefined && existsAt(model, obj, keepAliveFrom))
     const opacity = alive ? opacityAt(model, obj, time) : 0
     if (opacity <= 0.0005) {
       mesh.visible = false

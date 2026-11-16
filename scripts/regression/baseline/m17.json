@@ -1,0 +1,344 @@
+{
+ "results": {
+  "SELECT1": {
+   "timeAfter": "Loop",
+   "timeBefore": "Recording",
+   "clip": {
+    "things": [
+     "a"
+    ],
+    "anims": []
+   },
+   "ctrlAnimation": {
+    "things": [
+     "a",
+     "b"
+    ],
+    "anims": [
+     "b:0"
+    ]
+   },
+   "ctrlAnimationAgain": {
+    "things": [
+     "a",
+     "b"
+    ],
+    "anims": []
+   },
+   "animation": {
+    "things": [
+     "b"
+    ],
+    "anims": [
+     "b:0"
+    ]
+   },
+   "ctrlClip": {
+    "things": [
+     "b",
+     "a"
+    ],
+    "anims": [
+     "b:0"
+    ]
+   },
+   "ctrlClipAgain": {
+    "things": [
+     "b"
+    ],
+    "anims": [
+     "b:0"
+    ]
+   },
+   "undone": {
+    "things": [
+     "b",
+     "a"
+    ],
+    "anims": [
+     "b:0"
+    ]
+   },
+   "boxInside": {
+    "things": [
+     "a"
+    ],
+    "anims": [
+     "a:0"
+    ]
+   },
+   "boxOnClip": {
+    "things": [
+     "a"
+    ],
+    "anims": []
+   },
+   "boxOverBoth": {
+    "things": [
+     "a",
+     "b"
+    ],
+    "anims": []
+   },
+   "boxAdds": {
+    "things": [
+     "b",
+     "a"
+    ],
+    "anims": [
+     "a:0"
+    ]
+   },
+   "boxCollapsed": {
+    "things": [
+     "a"
+    ],
+    "anims": []
+   },
+   "error": null
+  },
+  "PATHTOOL1": {
+   "pickedUp": {
+    "things": [
+     "p"
+    ],
+    "anims": [],
+    "mode": "edit",
+    "points": [],
+    "handles": true
+   },
+   "boxed": {
+    "things": [
+     "p"
+    ],
+    "anims": [
+     "p:0"
+    ],
+    "mode": "edit",
+    "points": [
+     1
+    ],
+    "handles": true
+   },
+   "boxedMore": {
+    "things": [
+     "p"
+    ],
+    "anims": [
+     "p:0"
+    ],
+    "mode": "edit",
+    "points": [
+     1,
+     2
+    ],
+    "handles": true
+   },
+   "unchanged": true,
+   "letGo": {
+    "things": [],
+    "anims": [],
+    "mode": "edit",
+    "points": [],
+    "handles": false
+   },
+   "noPath": {
+    "things": [
+     "q"
+    ],
+    "anims": [],
+    "mode": "create",
+    "points": [],
+    "handles": false
+   },
+   "editOnThing": {
+    "things": [
+     "q"
+    ],
+    "anims": [],
+    "mode": "edit",
+    "points": [],
+    "handles": false,
+    "q": []
+   },
+   "createOnThing": {
+    "things": [
+     "q"
+    ],
+    "anims": [
+     "q:0"
+    ],
+    "mode": "create",
+    "points": [
+     1
+    ],
+    "handles": true,
+    "q": [
+     "path"
+    ]
+   },
+   "createGoesOn": {
+    "things": [
+     "p"
+    ],
+    "anims": [
+     "p:0"
+    ],
+    "mode": "create",
+    "points": [
+     3
+    ],
+    "handles": true,
+    "p": [
+     "path"
+    ],
+    "added": 1
+   },
+   "error": null
+  },
+  "PUSH1": {
+   "verbs": {
+    "a": [
+     "path"
+    ],
+    "b": [
+     "path"
+    ],
+    "c": [],
+    "d": []
+   },
+   "pushedAlong": true,
+   "inside": true,
+   "rests": true,
+   "lives": {
+    "b": 6,
+    "d": 0.5
+   },
+   "review": [
+    "a path",
+    "b path"
+   ],
+   "asBefore": true,
+   "error": null
+  },
+  "TAKES1": {
+   "typed": {
+    "a": [
+     "rotate at once"
+    ],
+    "written": false,
+    "was": 0,
+    "is": 45
+   },
+   "slider": {
+    "a": [
+     "rotate at once",
+     "fade over time"
+    ],
+    "onACurve": true,
+    "ends": 0.2,
+    "written": false
+   },
+   "paint": {
+    "a": [
+     "rotate at once",
+     "fade over time",
+     "to at once"
+    ],
+    "changes": true
+   },
+   "arrows": {
+    "a": [
+     "rotate at once",
+     "fade over time",
+     "to at once",
+     "path over time"
+    ],
+    "went": -488
+   },
+   "shape": {
+    "s": [
+     "morph over time"
+    ],
+    "pointsAsWritten": true,
+    "wider": true
+   },
+   "pencil": {
+    "kind": "Shape",
+    "begins": true,
+    "acts": [
+     "to over time"
+    ],
+    "drawn": [
+     "drawn"
+    ],
+    "half": true
+   },
+   "review": [
+    "a rotate",
+    "a fade",
+    "a to",
+    "a path",
+    "s morph",
+    "line1 to"
+   ],
+   "asBefore": true,
+   "things": [
+    "a",
+    "s"
+   ],
+   "error": null
+  },
+  "WHEEL1": {
+   "camera": {
+    "acts": [
+     "to"
+    ],
+    "changes": [
+     "x",
+     "y",
+     "zoom"
+    ],
+    "overTime": true,
+    "closer": true,
+    "asWritten": true,
+    "onACurve": true
+   },
+   "atTheMiddle": {
+    "acts": [
+     "to",
+     "to"
+    ],
+    "changes": [
+     "zoom"
+    ]
+   },
+   "review": [
+    "cam to",
+    "cam to"
+   ],
+   "error": null
+  },
+  "REVIEW2": {
+   "off": {
+    "dialog": false,
+    "review": true,
+    "c": [
+     "path"
+    ]
+   },
+   "on": {
+    "dialog": true,
+    "review": [
+     "c path"
+    ],
+    "c": [
+     "path",
+     "path"
+    ]
+   },
+   "error": null
+  }
+ },
+ "volatile": {}
+}

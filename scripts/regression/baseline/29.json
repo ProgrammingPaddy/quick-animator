@@ -5,7 +5,7 @@
    "xEnd": -300,
    "mid": [
     0,
-    200
+    0
    ],
    "line": {
     "visible": true,
@@ -18,7 +18,7 @@
     "function"
    ],
    "draw": false,
-   "visibleParts": 173,
+   "visibleParts": 4,
    "warnings": [],
    "err": null
   },
@@ -33,7 +33,7 @@
    "orient": true,
    "draw": false,
    "clipLabel": "path",
-   "visibleParts": 126,
+   "visibleParts": 4,
    "start": [
     -300,
     0
@@ -111,7 +111,7 @@
      }
     ],
     "time": 0,
-    "tool": "select"
+    "tool": "path"
    },
    "rLabels": [
     "Jump to code",

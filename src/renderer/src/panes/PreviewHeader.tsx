@@ -58,13 +58,13 @@ export function PreviewHeader() {
         ))}
       </div>
       <div className="preview-section" role="group" aria-label="What is shown over the scene">
-        <button className={showPaths ? 'on' : ''} onClick={toggleShowPaths} title={showPaths ? "Showing the selected object's paths" : 'Showing a path only while it is selected'} aria-pressed={showPaths}>
+        <button className={showPaths ? 'on' : ''} onClick={toggleShowPaths} title="Show running paths" aria-pressed={showPaths}>
           Show Paths
         </button>
-        <button className={showMasks ? 'on' : ''} onClick={toggleShowMasks} title={showMasks ? 'Showing the edges of the masks on what is selected, or of every mask with nothing selected' : "Showing a mask's edge only while it is selected"} aria-pressed={showMasks}>
+        <button className={showMasks ? 'on' : ''} onClick={toggleShowMasks} title="Show mask edges" aria-pressed={showMasks}>
           Show Masks
         </button>
-        <button className={showCameras ? 'on' : ''} onClick={toggleShowCameras} title={showCameras ? "Showing every camera's frame" : "Showing a camera's frame only while it is selected"} aria-pressed={showCameras}>
+        <button className={showCameras ? 'on' : ''} onClick={toggleShowCameras} title="Show camera frames" aria-pressed={showCameras}>
           Show Cameras
         </button>
       </div>
@@ -80,28 +80,28 @@ export function PreviewHeader() {
             const action = ref ? s.model?.objects.find((o) => o.name === ref.object)?.actions[ref.index] : undefined
             if (action) s.setTime(next === 'end' ? action.end : action.start)
           }}
-          title={pin === 'start' ? 'Shift-drags start at the playhead' : 'Shift-drags end at the playhead'}
+          title="Where a Shift-drag's animation sits"
         >
           {pin === 'start' ? 'Starts at playhead' : 'Ends at playhead'}
         </button>
         {pin === 'start' && (
-          <button className={`preview-toggle${chain ? ' on' : ''}`} onClick={() => setChain(!chain)} title={chain ? 'Shift-drags follow one another' : 'Shift-drags all start at the playhead'} aria-pressed={chain}>
+          <button className={`preview-toggle${chain ? ' on' : ''}`} onClick={() => setChain(!chain)} title="Shift-drags follow one another" aria-pressed={chain}>
             Chain
           </button>
         )}
-        <button className={previewSnap.on ? 'on' : ''} onClick={() => setPreviewSnap({ on: !previewSnap.on })} title={previewSnap.on ? 'Snapping to the grid' : 'Free placement'} aria-pressed={previewSnap.on}>
+        <button className={previewSnap.on ? 'on' : ''} onClick={() => setPreviewSnap({ on: !previewSnap.on })} title="Snap to the grid" aria-pressed={previewSnap.on}>
           Snap
         </button>
         {previewSnap.on && <NumberField label="Grid, in pixels" value={previewSnap.grid} unit="px" onChange={(grid) => setPreviewSnap({ grid })} />}
         {previewSnap.on && <NumberField label="Angle step, in degrees" value={previewSnap.angle} unit={'°'} onChange={(angle) => setPreviewSnap({ angle })} />}
-        <button className={previewSnap.edges ? 'on' : ''} onClick={() => setPreviewSnap({ edges: !previewSnap.edges })} title={previewSnap.edges ? 'Aligning to edges and centers' : 'Not aligning to other objects'} aria-pressed={previewSnap.edges}>
+        <button className={previewSnap.edges ? 'on' : ''} onClick={() => setPreviewSnap({ edges: !previewSnap.edges })} title="Align to edges and centers" aria-pressed={previewSnap.edges}>
           Edges
         </button>
-        <button className={collide ? 'on' : ''} onClick={() => setCollide(!collide)} title={collide ? 'Objects collide' : 'Objects pass through each other'} aria-pressed={collide}>
+        <button className={collide ? 'on' : ''} onClick={() => setCollide(!collide)} title="Objects collide" aria-pressed={collide}>
           Collision
         </button>
         {collide && (
-          <button className={push ? 'on' : ''} onClick={() => setPush(!push)} title={push ? 'Dragged objects push others' : 'Dragged objects stop at others'} aria-pressed={push}>
+          <button className={push ? 'on' : ''} onClick={() => setPush(!push)} title="Dragged objects push others" aria-pressed={push}>
             Push
           </button>
         )}

@@ -50,6 +50,7 @@ export const HOTKEYS: readonly Hotkey[] = [
   { id: 'marker', label: 'Marker', what: 'A marker at the playhead.', scope: 'global', defaults: ['M'] },
   { id: 'markerNamed', label: 'Named marker', what: 'A marker at the playhead, its text typed at once. No key until one is given here.', scope: 'global', defaults: [] },
   { id: 'previewView', label: 'Preview views', what: 'What the preview shows, in turn: Preview, Camera, Side by side.', scope: 'global', defaults: ['C'] },
+  { id: 'record', label: 'Record', what: 'Start or stop recording: while the playhead runs, what is done is written as it was done.', scope: 'global', defaults: ['T'] },
   { id: 'razor', label: 'Razor', what: "The timeline's razor, or back to the pointer: with the razor, a click on an animation slices it there.", scope: 'global', defaults: ['R'] },
   { id: 'closeShape', label: 'Close shape', what: 'Close the shape being drawn, which fills it; Escape leaves it a line.', scope: 'preview', defaults: ['Enter'] },
   { id: 'animateDrag', label: 'Shift while dragging', what: 'Makes the drag an animation from the playhead; with an animation selected, previews and sets its other end; with a shape point, a morph.', scope: 'preview', defaults: ['Shift'], fixed: true },

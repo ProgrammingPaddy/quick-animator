@@ -15,6 +15,9 @@ export interface ProjectSettings {
   background: string
 }
 
+/** The Path tool's modes (D411): Create draws a path, Edit works on its points, Move path moves and turns it whole. */
+export type PathMode = 'create' | 'edit' | 'move'
+
 /** The kinds of object the GUI adds; a Mask is a rectangle that masks every layer beneath it (D331). */
 export type ObjectKind = 'Rect' | 'Circle' | 'Text' | 'Shape' | 'Mask'
 export const OBJECT_KINDS: ObjectKind[] = ['Rect', 'Circle', 'Text', 'Shape', 'Mask']
@@ -99,6 +102,19 @@ export interface ActionRef {
   index: number
 }
 
+/**
+ * An animation a recording wrote (D404): what it is on, its kind, and when, which is how it is
+ * found again in the code; and whose lives it widened, the thing's own or those of what its group
+ * carried (D403).
+ */
+export interface RecordedClip {
+  object: string
+  verb: string
+  start: number
+  end: number
+  holds: string[]
+}
+
 /** What the links dialog is about: an object, or one of its actions, and the attribute to start on (D172, D182). */
 export interface LinksTarget {
   object: string
@@ -163,6 +179,10 @@ export interface Prefs {
   hotkeys?: Readonly<Record<string, readonly string[]>>
   /** Whether the code pane shows every time as frames beside it, and frames as seconds (D276); on unless turned off. */
   timeHints?: boolean
+  /** Whether the playhead goes back to where a recording began when it stops (D397); on unless turned off. */
+  recordReturn?: boolean
+  /** Whether a recording that wrote anything ends in a review of what it wrote (D404, D410); on unless turned off. */
+  recordReview?: boolean
   /** Whether an object's clip in the timeline carries its opacity along its bottom, with the handles of its fades (D284); on unless turned off. */
   clipOpacity?: boolean
   /** How many of the colors used lately show beside a color, 0 to 12 (D309); 4 unless set. */
@@ -232,7 +252,7 @@ function loadPrefs(): Prefs {
     if (saved.hotkeys && typeof saved.hotkeys === 'object') {
       for (const [id, keys] of Object.entries(saved.hotkeys)) if (Array.isArray(keys) && keys.every((k) => typeof k === 'string')) hotkeys[id] = keys
     }
-    return { objectLength: length === null ? null : typeof length === 'number' && length > 0 ? length : DEFAULT_PREFS.objectLength, cameraLength: shot === null ? null : typeof shot === 'number' && shot > 0 ? shot : DEFAULT_PREFS.cameraLength, hotkeys, timeHints: saved.timeHints !== false, clipOpacity: saved.clipOpacity !== false, recentColors: typeof saved.recentColors === 'number' && Number.isFinite(saved.recentColors) ? Math.max(0, Math.min(RECENT_COLORS_MAX, Math.round(saved.recentColors))) : DEFAULT_PREFS.recentColors, ...(Array.isArray(saved.timelineOrder) ? { timelineOrder: sectionOrder(saved.timelineOrder) } : {}), hideInExport: saved.hideInExport === true }
+    return { objectLength: length === null ? null : typeof length === 'number' && length > 0 ? length : DEFAULT_PREFS.objectLength, cameraLength: shot === null ? null : typeof shot === 'number' && shot > 0 ? shot : DEFAULT_PREFS.cameraLength, hotkeys, timeHints: saved.timeHints !== false, recordReturn: saved.recordReturn !== false, recordReview: saved.recordReview !== false, clipOpacity: saved.clipOpacity !== false, recentColors: typeof saved.recentColors === 'number' && Number.isFinite(saved.recentColors) ? Math.max(0, Math.min(RECENT_COLORS_MAX, Math.round(saved.recentColors))) : DEFAULT_PREFS.recentColors, ...(Array.isArray(saved.timelineOrder) ? { timelineOrder: sectionOrder(saved.timelineOrder) } : {}), hideInExport: saved.hideInExport === true }
   } catch {
     return DEFAULT_PREFS
   }
@@ -311,6 +331,7 @@ const WHEEL_STEP_KEY = 'quick-animator.wheelStep'
 const PIN_KEY = 'quick-animator.pin'
 const CHAIN_KEY = 'quick-animator.chain'
 const FRAME_SNAP_KEY = 'quick-animator.frameSnap'
+const RECORD_WAIT_KEY = 'quick-animator.recordWait'
 const ANCHOR_KEY = 'quick-animator.anchor'
 const SHOW_PATHS_KEY = 'quick-animator.showPaths'
 const OBJECTS_VIEW_KEY = 'quick-animator.objectsView'
@@ -327,6 +348,11 @@ function loadSplit(): number {
   } catch {
     return 0.5
   }
+}
+
+/** A recording stopped (D397): the playhead goes back to where it began, unless the preferences leave it where it is. */
+function recordingStopped(s: { time: number; playStart: number | null; prefs: Prefs }): { recording: boolean; armed: boolean; playing: boolean; time: number } {
+  return { recording: false, armed: false, playing: false, time: s.prefs.recordReturn === false ? s.time : (s.playStart ?? s.time) }
 }
 
 function loadChoice<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
@@ -432,6 +458,16 @@ interface State {
   playStart: number | null
   /** Whether playback wraps at the content end. Off by default: it stops there. */
   loop: boolean
+  /** How fast time runs while playing and while recording, in percent of real time (D398): playback follows it too, so a take is rehearsed at the rate it will be recorded at. */
+  rate: number
+  /** Recording (D397, D412): while the playhead runs, what is done is written as it was done. */
+  recording: boolean
+  /** A recording that waits for its first action: the playhead holds until something is dragged (D397). */
+  armed: boolean
+  /** Whether a recording waits for its first action before the playhead runs (D397). */
+  recordWait: boolean
+  /** The animations the recording that just ended wrote, to be looked over (D404); null with nothing to look over. */
+  recordReview: RecordedClip[] | null
   /** Whether timeline drags snap to whole seconds and to other actions' starts and ends (D64). */
   snap: boolean
   /** Whether every time the timeline writes lands on the project's frame grid (D119). */
@@ -486,7 +522,7 @@ interface State {
   error: SceneError | null
   tool: Tool
   /** With the Path tool: edit a path's points, or move whole paths (D208). */
-  pathMode: 'edit' | 'move'
+  pathMode: PathMode
   /** The Shape tool draws a new shape, or edits the points of the selected one (D236). */
   shapeMode: 'create' | 'edit'
   /** The timeline's pointer, with everything it has always done, or its razor, which slices an animation where it is clicked (D264). */
@@ -541,6 +577,14 @@ interface State {
   /** Play or pause. Playing from the end starts over. */
   togglePlaying: () => void
   toggleLoop: () => void
+  setRate: (rate: number) => void
+  /** Start recording at the playhead, or stop it: stopped, the playhead goes back to where the recording began, unless the preferences leave it (D397). */
+  toggleRecording: () => void
+  toggleRecordWait: () => void
+  /** The first action of a recording that waited for it: the playhead runs from now on. */
+  runRecording: () => void
+  /** What the recording that just ended wrote, to be looked over, or null once that is settled (D404). */
+  setRecordReview: (clips: RecordedClip[] | null) => void
   toggleSnap: () => void
   toggleFrameSnap: () => void
   setWheelStep: (frames: number) => void
@@ -548,6 +592,8 @@ interface State {
   stepFrames: (frames: number) => void
   select: (names: string[]) => void
   selectAction: (object: string, index: number) => void
+  /** Things and animations selected together (D408, D409): the things named, and the things the animations are on. */
+  selectWith: (names: string[], refs: ActionRef[]) => void
   selectActions: (refs: ActionRef[]) => void
   /** Add an action to the selected actions, or take it out (D97). */
   toggleSelectedAction: (object: string, index: number) => void
@@ -575,7 +621,7 @@ interface State {
   openClassesDialog: (names: string[]) => void
   closeClassesDialog: () => void
   setTool: (tool: Tool) => void
-  setPathMode: (mode: 'edit' | 'move') => void
+  setPathMode: (mode: PathMode) => void
   setShapeMode: (mode: 'create' | 'edit') => void
   setTimelineTool: (tool: 'select' | 'razor') => void
   setPick: (pick: Pick) => void
@@ -636,6 +682,11 @@ function createAppStore() {
       playing: false,
       playStart: null,
       loop: false,
+      rate: 100,
+      recording: false,
+      armed: false,
+      recordWait: loadChoice<'on' | 'off'>(RECORD_WAIT_KEY, ['on', 'off'], 'off') === 'on',
+      recordReview: null,
       snap: true,
       frameSnap: loadChoice<'on' | 'off'>(FRAME_SNAP_KEY, ['on', 'off'], 'on') === 'on',
       wheelStep: loadWheelStep(),
@@ -666,7 +717,7 @@ function createAppStore() {
       model: null,
       error: null,
       tool: 'select',
-      pathMode: 'edit',
+      pathMode: 'create',
       shapeMode: 'create',
       timelineTool: 'select',
       pick: 'object',
@@ -693,15 +744,31 @@ function createAppStore() {
       exportOpen: false,
 
       setTime: (time) => set({ time: Math.max(0, time) }),
-      setPlaying: (playing) => set((s) => (playing && !s.playing ? { playing, playStart: s.time } : { playing })),
+      // A recording ends with whatever stops the playhead (D397).
+      setPlaying: (playing) => set((s) => (playing && !s.playing ? { playing, playStart: s.time } : playing ? { playing } : { playing, recording: false, armed: false })),
       togglePlaying: () =>
         set((s) => {
+          if (s.recording) return recordingStopped(s)
           // Pausing returns the playhead to where playback started (D126); playing from the end starts over (D59).
           if (s.playing) return { playing: false, time: s.playStart ?? s.time }
           const from = s.playbackEnd !== null && s.time >= s.playbackEnd ? 0 : s.time
           return { playing: true, time: from, playStart: from }
         }),
       toggleLoop: () => set((s) => ({ loop: !s.loop })),
+      setRate: (rate) => set({ rate: Math.max(1, Math.round(rate) || 100) }),
+      toggleRecording: () =>
+        set((s) => {
+          if (s.recording) return recordingStopped(s)
+          // A recording begins at the playhead: at once, or with the first thing dragged.
+          return s.recordWait ? { recording: true, armed: true, playing: false, playStart: s.time } : { recording: true, armed: false, playing: true, playStart: s.time }
+        }),
+      toggleRecordWait: () =>
+        set((s) => {
+          saveChoice(RECORD_WAIT_KEY, s.recordWait ? 'off' : 'on')
+          return { recordWait: !s.recordWait }
+        }),
+      runRecording: () => set((s) => (s.recording && s.armed ? { armed: false, playing: true } : {})),
+      setRecordReview: (recordReview) => set({ recordReview, contextMenu: null }),
       toggleSnap: () => set((s) => ({ snap: !s.snap })),
       toggleFrameSnap: () =>
         set((s) => {
@@ -720,26 +787,34 @@ function createAppStore() {
       stepFrames: (frames) => {
         const { time, settings } = get()
         const next = snapToFrame(time, settings.fps) + frames / settings.fps
-        set({ playing: false, time: Math.max(0, snapToFrame(next, settings.fps)) })
+        set({ playing: false, recording: false, armed: false, time: Math.max(0, snapToFrame(next, settings.fps)) })
       },
       select: (selection) => changeSelection({ selection: normalized(selection), selectedActions: [] }),
       selectAction: (object, index) => changeSelection({ selection: [object], selectedActions: [{ object, index }] }),
       selectActions: (refs) => changeSelection({ selection: objectsOf(refs), selectedActions: refs }),
+      selectWith: (names, refs) => {
+        const things = normalized(names)
+        changeSelection({ selection: [...things, ...objectsOf(refs).filter((n) => !things.includes(n))], selectedActions: refs })
+      },
       toggleSelectedAction: (object, index) => {
-        const current = get().selectedActions
+        const { selectedActions: current, selection, model } = get()
         const without = current.filter((r) => !(r.object === object && r.index === index))
         const refs = without.length < current.length ? without : [...current, { object, index }]
-        changeSelection({ selection: objectsOf(refs), selectedActions: refs })
+        // The animation goes in or out and nothing else changes (D408): what was selected stays, and the animation's thing is selected with it. A selected group that carries the thing gives way to it, as a Ctrl-click on the thing does (D124).
+        const kept = model ? selection.filter((n) => n === object || !(model.objects.find((o) => o.name === n)?.className === GROUP && groupCarries(model, n).includes(object))) : selection
+        changeSelection({ selection: kept.includes(object) ? kept : [...kept, object], selectedActions: refs })
       },
       toggleSelected: (name) => {
-        const { selection: current, model } = get()
+        const { selection: current, selectedActions, model } = get()
         // Ctrl-click on something the selected group carries picks that thing alone; otherwise it joins or leaves (D89, D124).
         const group = current.length === 1 && model ? model.objects.find((o) => o.name === current[0] && o.className === GROUP) : undefined
         if (group && model && name !== group.name && groupCarries(model, group.name).includes(name)) {
           changeSelection({ selection: [name], selectedActions: [] })
           return
         }
-        changeSelection({ selection: normalized(current.includes(name) ? current.filter((n) => n !== name) : [...current, name]), selectedActions: [] })
+        // The animations selected stay, those of a thing that leaves going with it (D408).
+        const next = normalized(current.includes(name) ? current.filter((n) => n !== name) : [...current, name])
+        changeSelection({ selection: next, selectedActions: selectedActions.filter((r) => next.includes(r.object)) })
       },
       setTransformMode: (transformMode) => set({ transformMode }),
       setPreviewSnap: (partial) =>
@@ -807,17 +882,29 @@ function createAppStore() {
       openClassesDialog: (classesDialog) => set({ classesDialog, contextMenu: null }),
       closeClassesDialog: () => set((s) => (s.classesDialog ? { classesDialog: null } : s)),
       // The Shape tool opens in Edit when one Shape is selected, alone or with one of its morphs, else in Create (D236 revised, D257).
-      setTool: (tool) =>
+      // The Path tool opens in Edit with a path to edit, the selected one or one of the one thing selected, and in Create with none (D411). It selects nothing by being picked up.
+      setTool: (tool) => {
+        const before = get()
+        if (tool === 'path' && before.tool !== 'path') {
+          const ref = before.selectedActions.length === 1 ? before.selectedActions[0]! : null
+          const selected = !!ref && before.model?.objects.find((o) => o.name === ref.object)?.actions[ref.index]?.verb === 'path'
+          const one = before.selection.length === 1 && before.selectedActions.length === 0 ? before.model?.objects.find((o) => o.name === before.selection[0]) : undefined
+          const has = !!one && one.actions.some((action) => action.verb === 'path' && !action.overridden)
+          set({ pathMode: selected || has ? 'edit' : 'create' })
+        }
         set((s) => {
           const shape = s.selection.length === 1 ? s.model?.objects.find((o) => o.name === s.selection[0] && o.className === 'Shape') : undefined
           const ref = s.selectedActions[0]
           const withMorph = s.selectedActions.length === 1 && !!ref && !!shape && ref.object === shape.name && shape.actions[ref.index]?.verb === 'morph'
           return {
             tool,
+            // The points picked are the tool's that shows them (D405): another tool has none in hand, so Delete there never takes a point that is not shown.
+            pathPoints: tool === s.tool ? s.pathPoints : [],
             hiddenPaths: tool === 'path' ? s.hiddenPaths : [],
             ...(tool === 'shape' ? { shapeMode: shape && (s.selectedActions.length === 0 || withMorph) ? ('edit' as const) : ('create' as const) } : {}),
           }
-        }),
+        })
+      },
       setPathMode: (pathMode) => set({ pathMode }),
       setShapeMode: (shapeMode) => set({ shapeMode }),
       setTimelineTool: (timelineTool) => set({ timelineTool }),
@@ -902,8 +989,9 @@ function createAppStore() {
           return { showDefaults }
         }),
       setHelp: (help) => set({ help }),
-      setExportOpen: (exportOpen) => set({ exportOpen, contextMenu: null }),
-      setPrefsOpen: (prefsOpen) => set({ prefsOpen, contextMenu: null }),
+      // A recording stops when the export or the preferences open over it (D404).
+      setExportOpen: (exportOpen) => set((s) => ({ ...(exportOpen && s.recording ? recordingStopped(s) : {}), exportOpen, contextMenu: null })),
+      setPrefsOpen: (prefsOpen) => set((s) => ({ ...(prefsOpen && s.recording ? recordingStopped(s) : {}), prefsOpen, contextMenu: null })),
       userPresets: loadUserPresets(),
       setUserPresets: (items) => {
         saveUserPresets(items)
@@ -944,7 +1032,7 @@ export function applySelection(state: SelectionState): void {
   applying = true
   try {
     const s = useStore.getState()
-    if (state.selectedActions.length > 0) s.selectActions(state.selectedActions)
+    if (state.selectedActions.length > 0) s.selectWith(state.selection, state.selectedActions)
     else s.select(state.selection)
   } finally {
     applying = false
