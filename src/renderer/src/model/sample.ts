@@ -226,6 +226,12 @@ export function pathInForce<T extends { action: { start: number; end: number } }
   return paths.length > 0 ? paths.reduce((first, p) => (p.action.start < first.action.start ? p : first)) : undefined
 }
 
+/** Whether a path has only its first point, the thing itself (D194): one added and not drawn yet, which the Path tool's Create goes on with (D414). */
+export function pathOnlyBegun(action: { verb: string; changes: Record<string, unknown> }): boolean {
+  const raw = action.changes['shape']
+  return action.verb === 'path' && Array.isArray(raw) && raw.length < 2
+}
+
 /** An animation that returns is gone once over (D285): nothing of it shows, and nothing of it is held. */
 function gone(action: Action, time: number): boolean {
   return action.timing.return !== undefined && over(action.end, time)

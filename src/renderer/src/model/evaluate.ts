@@ -29,9 +29,26 @@ function hslHex(hue: number, saturation: number, lightness: number): string {
   return `#${hex(r)}${hex(g)}${hex(b)}`
 }
 
+/** Where each line of the source last asked about begins: found once for a source, since every object and animation asks for its line. */
+let lineStarts: { source: string; starts: number[] } | null = null
+
 /** The 1-based line of a position in the source. */
 function lineAt(source: string, pos: number): number {
-  return source.slice(0, Math.max(0, pos)).split('\n').length
+  if (lineStarts?.source !== source) {
+    const starts = [0]
+    for (let i = source.indexOf('\n'); i !== -1; i = source.indexOf('\n', i + 1)) starts.push(i + 1)
+    lineStarts = { source, starts }
+  }
+  // How many lines begin at or before the position.
+  const starts = lineStarts.starts
+  let low = 0
+  let high = starts.length
+  while (low < high) {
+    const mid = (low + high) >> 1
+    if (starts[mid]! <= pos) low = mid + 1
+    else high = mid
+  }
+  return Math.max(1, low)
 }
 
 /** An error raised while resolving times, carrying the line of the statement it came from. */

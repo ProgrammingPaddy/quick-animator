@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { groupCarries, normalizeSelection } from '../model/groups'
 import { GROUP } from '../model/registry'
+import { pathOnlyBegun } from '../model/sample'
 import type { SceneError, SceneModel } from '../model/types'
 import { DEFAULT_SETTINGS } from '../../../shared/api'
 import { snapToFrame } from './time'
@@ -185,6 +186,8 @@ export interface Prefs {
   recordReview?: boolean
   /** Whether an object's clip in the timeline carries its opacity along its bottom, with the handles of its fades (D284); on unless turned off. */
   clipOpacity?: boolean
+  /** Whether a drag inside a clip in the timeline draws a selection box, the clip's title alone moving it (D413); off, so the whole clip moves it, unless turned on. */
+  clipBox?: boolean
   /** How many of the colors used lately show beside a color, 0 to 12 (D309); 4 unless set. */
   recentColors?: number
   /** The order of the timeline's sections, top first (D339); Objects, Groups, Classes, Masks unless set. */
@@ -252,7 +255,7 @@ function loadPrefs(): Prefs {
     if (saved.hotkeys && typeof saved.hotkeys === 'object') {
       for (const [id, keys] of Object.entries(saved.hotkeys)) if (Array.isArray(keys) && keys.every((k) => typeof k === 'string')) hotkeys[id] = keys
     }
-    return { objectLength: length === null ? null : typeof length === 'number' && length > 0 ? length : DEFAULT_PREFS.objectLength, cameraLength: shot === null ? null : typeof shot === 'number' && shot > 0 ? shot : DEFAULT_PREFS.cameraLength, hotkeys, timeHints: saved.timeHints !== false, recordReturn: saved.recordReturn !== false, recordReview: saved.recordReview !== false, clipOpacity: saved.clipOpacity !== false, recentColors: typeof saved.recentColors === 'number' && Number.isFinite(saved.recentColors) ? Math.max(0, Math.min(RECENT_COLORS_MAX, Math.round(saved.recentColors))) : DEFAULT_PREFS.recentColors, ...(Array.isArray(saved.timelineOrder) ? { timelineOrder: sectionOrder(saved.timelineOrder) } : {}), hideInExport: saved.hideInExport === true }
+    return { objectLength: length === null ? null : typeof length === 'number' && length > 0 ? length : DEFAULT_PREFS.objectLength, cameraLength: shot === null ? null : typeof shot === 'number' && shot > 0 ? shot : DEFAULT_PREFS.cameraLength, hotkeys, timeHints: saved.timeHints !== false, recordReturn: saved.recordReturn !== false, recordReview: saved.recordReview !== false, clipOpacity: saved.clipOpacity !== false, clipBox: saved.clipBox === true, recentColors: typeof saved.recentColors === 'number' && Number.isFinite(saved.recentColors) ? Math.max(0, Math.min(RECENT_COLORS_MAX, Math.round(saved.recentColors))) : DEFAULT_PREFS.recentColors, ...(Array.isArray(saved.timelineOrder) ? { timelineOrder: sectionOrder(saved.timelineOrder) } : {}), hideInExport: saved.hideInExport === true }
   } catch {
     return DEFAULT_PREFS
   }
@@ -887,9 +890,11 @@ function createAppStore() {
         const before = get()
         if (tool === 'path' && before.tool !== 'path') {
           const ref = before.selectedActions.length === 1 ? before.selectedActions[0]! : null
-          const selected = !!ref && before.model?.objects.find((o) => o.name === ref.object)?.actions[ref.index]?.verb === 'path'
+          const picked = ref ? before.model?.objects.find((o) => o.name === ref.object)?.actions[ref.index] : undefined
+          // A path with only its first point is not drawn yet: Create goes on with it (D414).
+          const selected = picked?.verb === 'path' && !pathOnlyBegun(picked)
           const one = before.selection.length === 1 && before.selectedActions.length === 0 ? before.model?.objects.find((o) => o.name === before.selection[0]) : undefined
-          const has = !!one && one.actions.some((action) => action.verb === 'path' && !action.overridden)
+          const has = !!one && one.actions.some((action) => action.verb === 'path' && !action.overridden && !pathOnlyBegun(action))
           set({ pathMode: selected || has ? 'edit' : 'create' })
         }
         set((s) => {

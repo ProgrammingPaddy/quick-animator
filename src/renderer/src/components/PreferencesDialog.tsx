@@ -150,6 +150,12 @@ function GeneralTab() {
         </label>
       </div>
       <div className="row">
+        <label className="check" title="A drag inside a clip draws a box; its title moves it">
+          <input type="checkbox" checked={prefs.clipBox === true} onChange={(e) => setPrefs({ clipBox: e.target.checked })} />
+          box select inside clips
+        </label>
+      </div>
+      <div className="row">
         <label className="check" title="When a recording stops, the playhead goes back to where it began">
           <input type="checkbox" checked={prefs.recordReturn !== false} onChange={(e) => setPrefs({ recordReturn: e.target.checked })} />
           playhead goes back after recording

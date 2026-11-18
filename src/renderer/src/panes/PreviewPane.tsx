@@ -11,7 +11,7 @@ import { groupMembers } from '../model/groups'
 import { maskDrawnBy } from '../model/masks'
 import { anchorIsSmooth, placeBetween, scalePathData, type AnchorKind, type Seg } from '../model/pathData'
 import { attrSchema, CAMERA, GROUP, SHAPE, type AttrValue } from '../model/registry'
-import { begun, existsAt, inView, keepInView, over as isOver, ownBounds, pathAngle, pathControlsWorld, pathInForce, positionAt, shapeOwnAnchors, shapeOwnPoints, shapeOwnSegs, shapeWorldCurve, shapeWorldFrame, shapeWorldOf, shapeWorldPoints, shownValue, travelFrame, type PathFrame, type Point } from '../model/sample'
+import { begun, existsAt, inView, keepInView, over as isOver, ownBounds, pathAngle, pathControlsWorld, pathInForce, pathOnlyBegun, positionAt, shapeOwnAnchors, shapeOwnPoints, shapeOwnSegs, shapeWorldCurve, shapeWorldFrame, shapeWorldOf, shapeWorldPoints, shownValue, travelFrame, type PathFrame, type Point } from '../model/sample'
 import type { SceneModel, SceneObject } from '../model/types'
 import { newProject, pickProject } from '../project/controller'
 import { askSystemFonts } from '../project/fonts'
@@ -84,8 +84,9 @@ function nearestSegment(points: Point[], at: Point, radius: number): number | nu
   return best
 }
 
-/** A drawn line kept as its corners: the points that bend it by more than the tolerance (D194). */
-/** Of an object's paths, the one in force at a time (D389): the one running then, else the last to have ended, else the first to come. */
+/** Whether two times are the same moment, to well under a frame. */
+const sameMoment = (a: number, b: number): boolean => Math.abs(a - b) < 1e-4
+
 const NOTHING_KEPT: ReadonlySet<string> = new Set()
 
 /**
@@ -423,6 +424,9 @@ export function PreviewPane() {
   /** The Shape the Object tool is drawing, point by point (D233). */
   const shapeDraftRef = useRef<string | null>(null)
   const [drafting, setDrafting] = useState(false)
+  /** The path Create is drawing (D414): the one it made, or one taken up by its last point, and where the playhead was then. */
+  const pathDraftRef = useRef<{ object: string; index: number; time: number } | null>(null)
+  const [pathDraft, setPathDraft] = useState<{ object: string; index: number; time: number } | null>(null)
   /** A line being drawn for the selected path, in pane pixels, until the pointer is let go (D194). */
   const [sketch, setSketch] = useState<{ x: number; y: number }[] | null>(null)
   /** Whether the trail being drawn is a line of the pencil's, shown as it will be, rather than a path (D311). */
@@ -507,6 +511,25 @@ export function PreviewPane() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool, shapeMode])
   const setPathMode = useStore((s) => s.setPathMode)
+  // The path being drawn is Create's alone: another mode or tool lets it go (D414).
+  useEffect(() => {
+    if (pathDraftRef.current && (tool !== 'path' || pathMode !== 'create')) takeUpPath(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, pathMode])
+  /** Whether a press on empty space in Create goes on with the selected path (D414), which the hint says. */
+  const drawingPath = useStore((s) => {
+    const ref = s.selectedActions.length === 1 ? s.selectedActions[0]! : null
+    if (ref) {
+      const action = s.model?.objects.find((o) => o.name === ref.object)?.actions[ref.index]
+      if (action?.verb !== 'path') return false
+      return pathOnlyBegun(action) || (!!pathDraft && pathDraft.object === ref.object && pathDraft.index === ref.index && sameMoment(s.time, pathDraft.time))
+    }
+    // The path shown for the one thing selected (D411) is gone on with only while it has but its first point.
+    if (s.selectedActions.length > 0 || s.selection.length !== 1) return false
+    const one = s.model?.objects.find((o) => o.name === s.selection[0])
+    const shown = one ? pathInForce(one.actions.map((action) => ({ action })).filter(({ action }) => action.verb === 'path' && !action.classAction && !action.overridden), s.time) : undefined
+    return !!shown && pathOnlyBegun(shown.action)
+  })
   const previewView = useStore((s) => s.previewView)
   const previewSplit = useStore((s) => s.previewSplit)
   const setAddKind = useStore((s) => s.setAddKind)
@@ -1002,15 +1025,40 @@ export function PreviewPane() {
     return s.model && obj && action ? travelFrame(s.model, obj, action) : null
   }
 
+  /** Take a path up as the one Create is drawing, or with null let it go (D414). */
+  const takeUpPath = (ref: ActionRef | null) => {
+    const draft = ref ? { object: ref.object, index: ref.index, time: useStore.getState().time } : null
+    pathDraftRef.current = draft
+    setPathDraft(draft)
+  }
+
+  /**
+   * Whether Create goes on with a path (D414): it is the one being drawn, with the playhead where
+   * it was when the path was made or taken up, or it has only its first point, so is not drawn
+   * yet. Any other path is left as it is, and a press on empty space begins a new one.
+   */
+  const goesOn = (ref: ActionRef): boolean => {
+    const s = useStore.getState()
+    const action = s.model?.objects.find((o) => o.name === ref.object)?.actions[ref.index]
+    if (!action || action.verb !== 'path') return false
+    if (pathOnlyBegun(action)) return true
+    const draft = pathDraftRef.current
+    return !!draft && draft.object === ref.object && draft.index === ref.index && sameMoment(s.time, draft.time)
+  }
+
   /**
    * Draw for a path (D194, D199): a stroke from `from` adds the corners of the drawn line after
    * the last anchor and makes the path smooth; a press that does not move adds one corner where
    * it lands when `clickAdds`, else nothing. A path started on an object draws from the object's
-   * own place, its first anchor.
+   * own place, its first anchor. With `begun`, the press that made the path opened a gesture, and
+   * it ends here: the path, its first points, and the line drawn are one undo step.
    */
-  const beginStroke = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, from: Point, clickAdds: boolean) => {
+  const beginStroke = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, from: Point, clickAdds: boolean, begun = false) => {
     const viewport = surfaceOf()
-    if (!viewport) return
+    if (!viewport) {
+      if (begun) endGesture()
+      return
+    }
     const bounds = host.getBoundingClientRect()
     const samples: Point[] = [from]
     const pane: { x: number; y: number }[] = [{ x: e.clientX - bounds.left, y: e.clientY - bounds.top }]
@@ -1027,20 +1075,20 @@ export function PreviewPane() {
       },
       () => {
         setSketch(null)
-        if (!moved && !clickAdds) return
         const frame = frameOf(ref)
         const count = frame?.anchors.length ?? 0
-        const points = moved ? simplify(samples, 4 / viewport.zoom) : [gridded(from)]
+        const points = !moved && !clickAdds ? [] : moved ? simplify(samples, 4 / viewport.zoom) : [gridded(from)]
         // A line drawn from the last anchor goes on from it rather than doubling it.
         const last = frame?.anchors[count - 1]
         if (last && points.length > 1 && Math.hypot(points[0]!.x - last.x, points[0]!.y - last.y) < 4 / viewport.zoom) points.shift()
-        if (points.length === 0) return
-        beginGesture()
-        insertPathPoints(ref, count, points)
-        // A drawn line is a curve: the path turns smooth, as curves with handles (D249).
-        if (moved) smoothPath(ref)
-        endGesture()
-        useStore.getState().setPathPoints([count + points.length - 1])
+        if (points.length > 0) {
+          if (!begun) beginGesture()
+          insertPathPoints(ref, count, points)
+          // A drawn line is a curve: the path turns smooth, as curves with handles (D249).
+          if (moved) smoothPath(ref)
+        }
+        if (begun || points.length > 0) endGesture()
+        if (points.length > 0) useStore.getState().setPathPoints([count + points.length - 1])
       },
     )
   }
@@ -1745,6 +1793,8 @@ export function PreviewPane() {
       }
       if (pathEditable(hitPath.ref)) {
         if (hitPath.point !== null) {
+          // In Create a press on a path's last point takes the path up, as a pen does: the presses after it go on from there (D414).
+          if (pathTool && store.pathMode === 'create' && !ctrlHeld && hitPath.point === hitPath.frame.anchors.length - 1) takeUpPath(hitPath.ref)
           beginPathEdit(host, e, hitPath.ref, located.world, hitPath.point, null, ctrlHeld)
           return
         }
@@ -1756,9 +1806,19 @@ export function PreviewPane() {
       }
       return
     }
-    // The Path tool elsewhere (D203, D208, D411): on an object, its path, the one in force at the playhead (D389), is picked. The rest is by mode. Create draws: on an object with no path, one starts where the object is and the same press draws on from it; on empty space with a path in hand, a corner or a drawn line; with one object selected and no path in hand, its path starts and the press is its second point. Edit makes nothing: an object with no path is picked itself, a drag from empty space boxes the points of the path in hand, and a click there lets everything go, as with the Shape tool (D255).
+    // The Path tool elsewhere (D203, D208, D411): on an object, its path, the one in force at the playhead (D389), is picked. The rest is by mode. Create draws (D414): on an object with no path, one starts where the object is and the same press draws on from it; on empty space, the path being drawn takes a corner or a drawn line, and with none being drawn a new path begins at the playhead for the thing in hand, the press its second point, whatever paths that thing has. Edit makes nothing: an object with no path is picked itself, a drag from empty space boxes the points of the path in hand, and a click there lets everything go, as with the Shape tool (D255).
     if (pathTool) {
       const creating = store.pathMode === 'create'
+      /** A new path of a class, for every member, reached through the member `member` (D247): its place among that member's animations. */
+      const newClassPath = (member: string, cls: string): ActionRef | null => {
+        // Selected through that member in the step that makes it, so undo takes both back together.
+        addClassPath(cls, store.time, member)
+        const fresh = useStore.getState()
+        const made = fresh.model?.objects.find((o) => o.name === member)?.actions.map((a, index) => ({ a, index })).filter(({ a }) => a.verb === 'path' && a.classAction?.className === cls && !a.overridden).pop()
+        if (!made) return null
+        fresh.selectAction(member, made.index)
+        return { object: member, index: made.index }
+      }
       if (located.hit) {
         const pressed = model.objects.find((o) => o.name === located.hit)
         if (!pressed) return
@@ -1772,14 +1832,15 @@ export function PreviewPane() {
             return
           }
           if (!creating) return
-          addClassPath(cls, store.time)
+          // One gesture from the press to the release: the path and the line drawn from it are one undo step.
+          beginGesture()
+          const made = newClassPath(pressed.name, cls)
           const fresh = useStore.getState()
           const again = fresh.model?.objects.find((o) => o.name === pressed.name)
-          const made = again ? again.actions.map((a, index) => ({ a, index })).filter(({ a }) => a.verb === 'path' && a.classAction?.className === cls && !a.overridden).pop() : undefined
-          if (again && fresh.model && made) {
-            fresh.selectAction(pressed.name, made.index)
-            beginStroke(host, e, { object: pressed.name, index: made.index }, positionAt(fresh.model, again, store.time), false)
-          }
+          if (made && again && fresh.model) {
+            takeUpPath(made)
+            beginStroke(host, e, made, positionAt(fresh.model, again, store.time), false, true)
+          } else endGesture()
           return
         }
         const owner = store.pick === 'group' ? model.objects.find((o) => o.name === pickTargets(model, pressed.name, 'group')[0]) : pressed
@@ -1793,10 +1854,14 @@ export function PreviewPane() {
           if (store.pathMode === 'edit' && !(store.selection.length === 1 && store.selection[0] === owner.name && store.selectedActions.length === 0)) store.select([owner.name])
           return
         }
+        beginGesture()
         const index = addPath(owner.name, store.time)
         // A group's line runs from the middle of its members (D247).
         const from = owner.className === GROUP ? (renderer.frameOf(owner.name) ?? positionAt(model, owner, store.time)) : positionAt(useStore.getState().model ?? model, owner, store.time)
-        if (index !== null) beginStroke(host, e, { object: owner.name, index }, { x: from.x, y: from.y }, false)
+        if (index !== null) {
+          takeUpPath({ object: owner.name, index })
+          beginStroke(host, e, { object: owner.name, index }, { x: from.x, y: from.y }, false, true)
+        } else endGesture()
         return
       }
       if (store.pathMode === 'edit') {
@@ -1817,21 +1882,29 @@ export function PreviewPane() {
         return
       }
       if (!creating) return
-      // The path in hand takes the corner or the line: the one selected, or the one shown for the thing selected, which the press picks.
+      // The path in hand: the one selected, or the one shown for the thing selected. Being drawn, it takes the corner or the line, picked by the press where it was only shown.
       const inHand = shown?.primary?.editable ? shown.primary.ref : null
-      if (inHand && (!pathAction || (pathAction.object === inHand.object && pathAction.index === inHand.index))) {
-        if (!pathAction) store.selectAction(inHand.object, inHand.index)
-        beginStroke(host, e, inHand, located.world, true)
+      const held = inHand && (!pathAction || (pathAction.object === inHand.object && pathAction.index === inHand.index)) ? inHand : null
+      if (held && goesOn(held)) {
+        if (!pathAction) store.selectAction(held.object, held.index)
+        takeUpPath(held)
+        beginStroke(host, e, held, located.world, true)
         return
       }
-      if (!pathAction && store.selection.length === 1) {
-        const name = store.selection[0]!
-        const index = addPath(name, store.time)
-        if (index !== null) {
-          insertPathPoints({ object: name, index }, 1, [gridded(located.world)])
-          beginStroke(host, e, { object: name, index }, located.world, false)
-        }
-      }
+      // Any other path is left as it is (D414): a new one begins at the playhead, for the thing the path in hand belongs to, a class's for the class, or for the one thing selected, and the press is its second point.
+      const of = held ? model.objects.find((o) => o.name === held.object)?.actions[held.index] : undefined
+      const name = held ? held.object : !pathAction && store.selection.length === 1 ? store.selection[0]! : null
+      if (name === null) return
+      const cls = of?.classAction?.className
+      // One gesture from the press to the release: the path, the point pressed, and the line drawn on are one undo step.
+      beginGesture()
+      const index = cls ? null : addPath(name, store.time)
+      const made = cls ? newClassPath(name, cls) : index !== null ? { object: name, index } : null
+      if (made) {
+        insertPathPoints(made, 1, [gridded(located.world)])
+        takeUpPath(made)
+        beginStroke(host, e, made, located.world, false, true)
+      } else endGesture()
       return
     }
 
@@ -3029,7 +3102,7 @@ export function PreviewPane() {
         {tool === 'shape' && shapeMode === 'create' && <span className="hint">{drafting ? 'Click for corners, drag to draw; the first point closes and fills, Escape leaves a line' : 'Click to start a shape'}</span>}
         {tool === 'shape' && shapeMode === 'edit' && <span className="hint">{shapeRef.current?.editable ? 'Drag a point, or a box around several; right-click a point or the line for curves and corners' : 'Click a shape, or drag a box around one'}</span>}
         {tool === 'path' && pathMode === 'move' && <span className="hint">Drag a path's line to move it, the handle over its box to turn it</span>}
-        {tool === 'path' && pathMode === 'create' && <span className="hint">{pathSelected || selectedHasPath ? 'Click for a corner, drag to draw' : codePathSelected ? 'Shape is code: edit it in the code pane' : selection.length === 1 ? 'Click the object, or where the path goes' : 'Click an object, or a path'}</span>}
+        {tool === 'path' && pathMode === 'create' && <span className="hint">{(pathSelected || selectedHasPath) && drawingPath ? 'Click for a corner, drag to draw' : pathSelected || selectedHasPath ? 'Click begins a new path; a path\'s last point goes on with it' : codePathSelected ? 'Shape is code: edit it in the code pane' : selection.length === 1 ? 'Click the object, or where the path goes' : 'Click an object, or a path'}</span>}
         {tool === 'path' && pathMode === 'edit' && <span className="hint">{pathSelected || selectedHasPath ? 'Drag a point, or a box around several; click the line for a point' : codePathSelected ? 'Shape is code: edit it in the code pane' : selection.length === 1 ? 'No path here: Create draws one' : 'Click an object, or a path'}</span>}
         {tool === 'select' && codePathSelected && <span className="hint">Shape is code: edit it in the code pane</span>}
         {selectedGroup && model ? (

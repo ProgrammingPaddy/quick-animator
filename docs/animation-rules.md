@@ -444,14 +444,19 @@ path of what is selected in white; the Path tool draws the path of what is selec
 force at the playhead, the one running, else the last to have ended, else the first to come,
 and the selected path with its handles. No other tool shows a path of its own or takes a press
 on one: with Select a press on a thing at the end of its path is a press on the thing. The Path
-tool has three modes. Create draws: a click on a thing with no path starts one, a click on empty
-space adds a corner after the last point, and a drag draws a line. Edit makes nothing new: a
-point drags, a drag from empty space boxes the points of the path in hand, Ctrl adding to them,
-a click on the line adds a point, and a click on empty space lets everything go. Move path
-carries and turns the path whole. The tool opens in Edit when there is a path to edit, the
-selected one or one on the one thing selected, and in Create with none. Taking it up selects
-nothing: the path in force of the one thing selected shows with its points, and a press on a
-point, a box around some, or a corner added in Create picks it.
+tool has three modes. Create draws: a click on a thing with no path starts one, and a click on
+empty space begins a new path at the playhead for the thing in hand, a new `path` statement
+whatever paths the thing has; the clicks after it add corners to the path being drawn, and a
+drag draws a line. The path being drawn is let go when the playhead moves, something else is
+picked, or the mode changes, and a click then begins another; a click on a path's last point
+takes that path up again, and a path with only its first point is always gone on with. Edit
+makes nothing new: a point drags, a drag from empty space boxes the points of the path in hand,
+Ctrl adding to them, a click on the line adds a point, and a click on empty space lets
+everything go. Move path carries and turns the path whole. The tool opens in Edit when there is
+a path to edit, the selected one or one on the one thing selected, and in Create with none, or
+with one that has only its first point. Taking it up selects nothing: the path in force of the
+one thing selected shows with its points, and a press on a point, or a box around some, picks
+it.
 
 An object a path places is dragged as one a move places, and no press moves the playhead: at
 the path's first frame the drag writes whatever put the object there, the declaration, a move's

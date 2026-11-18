@@ -2384,13 +2384,15 @@ export function convertPathToCurves(ref: ActionRef, smoothen?: boolean): void {
 
 /**
  * Add a path to a class (D247): `all('name').path`, relative, so every member follows it from
- * its own place, beginning at the playhead; the Path tool adds the rest of its points.
+ * its own place, beginning at the playhead; the Path tool adds the rest of its points. With
+ * `member`, the path is selected through that member in the same step.
  */
-export function addClassPath(className: string, time: number): void {
+export function addClassPath(className: string, time: number, member?: string): void {
   const { source, model } = state()
   if (!model) return
   const at = roundSeconds(time)
-  applyEdits([appendStatement(source, `all('${className}').path({\n  shape: [\n    [0, 0],\n  ],\n  relative: true,\n  at: ${formatNumber(at)},\n  duration: 1,\n})`)])
+  const through = member === undefined ? undefined : model.objects.find((o) => o.name === member)
+  applyEdits([appendStatement(source, `all('${className}').path({\n  shape: [\n    [0, 0],\n  ],\n  relative: true,\n  at: ${formatNumber(at)},\n  duration: 1,\n})`)], through ? actionSelected(through.name, through.actions.length) : undefined)
 }
 
 /** Move one point of a path to a place in the scene (D194). */

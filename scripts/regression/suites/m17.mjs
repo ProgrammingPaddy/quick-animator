@@ -1,4 +1,4 @@
-// The second look at recording (D407 to D412): the time beside the player; Ctrl and a click taking one thing in or out of the selection and nothing else; a box in the timeline taking the animations of the one clip it is in; the review turned off; the Path tool's Create and Edit, with a box for the points; and a recording taking everything done, what a drag pushes, typed values, sliders, paint, the arrow keys, a Shape's resize, the pencil, and the wheel on the camera.
+// The second look at recording (D407 to D412): the time beside the player; Ctrl and a click taking one thing in or out of the selection and nothing else; a box in the timeline from empty space, which takes clips alone again (D413, whose own checks are suite m18); the review turned off; the Path tool's Create and Edit, with a box for the points; and a recording taking everything done, what a drag pushes, typed values, sliders, paint, the arrow keys, a Shape's resize, the pencil, and the wheel on the camera.
 const NL = String.fromCharCode(10)
 const J = (lines) => JSON.stringify(lines.join(NL))
 const RECT = (name, x, y, until, more = []) => [`${name} = Rect({`, `  x: ${x},`, `  y: ${y},`, '  width: 120,', '  height: 120,', ...more, ...(until === null ? [] : [`  until: ${until},`]), '})', '']
@@ -31,7 +31,7 @@ const deleteAll = async () => { [...document.querySelectorAll('.record-dialog .d
 `
 
 export default {
-  // The timeline's selection (D407 to D409): the time stands after Loop; Ctrl and a click on an animation leaves a clip selected for itself selected, and taken out again leaves its own clip selected; Ctrl and a click on a clip leaves the animations selected; a box from empty space inside one clip takes the animations it touches, the clip when it touches none, the clips when over several, and with Ctrl adds to what was selected.
+  // The timeline's selection (D407 to D409): the time stands after Loop; Ctrl and a click on an animation leaves a clip selected for itself selected, and taken out again leaves its own clip selected; Ctrl and a click on a clip leaves the animations selected; a box from empty space takes the clips it touches and never an animation (D413), over one clip or several, and with Ctrl adds them to what was selected, the animations selected staying.
   SELECT1: `${HELP}
 const out = {};
 await begin(${J(CLIPS)}, 0);
@@ -59,7 +59,7 @@ S().select([]); await tick(100);
 const a = box('.oclip[data-object="a"]');
 const mv = box('.oclip[data-object="a"] .clip[data-pick="a:0"]');
 await sweep(rowsEl, a.r + 60, mv.cy + 4, mv.r - 10, mv.cy - 4);
-out.boxInside = sel();
+out.boxOverAnimation = sel();
 S().select([]); await tick(100);
 await sweep(rowsEl, a.r + 60, a.t + 4, a.r - 10, a.t + 10);
 out.boxOnClip = sel();
@@ -70,6 +70,9 @@ out.boxOverBoth = sel();
 S().select(['b']); await tick(100);
 await sweep(rowsEl, a.r + 60, mv.cy + 4, mv.r - 10, mv.cy - 4, { ctrlKey: true });
 out.boxAdds = sel();
+S().selectWith(['b'], [{ object: 'b', index: 0 }]); await tick(100);
+await sweep(rowsEl, a.r + 60, mv.cy + 4, mv.r - 10, mv.cy - 4, { ctrlKey: true });
+out.boxKeepsAnimations = sel();
 S().toggleCollapsed('timeline', 'a'); S().select([]); await tick(200);
 const folded = box('.oclip[data-object="a"]');
 await sweep(rowsEl, folded.r + 60, folded.cy + 2, folded.l + 20, folded.cy - 2);
@@ -78,7 +81,7 @@ S().toggleCollapsed('timeline', 'a'); S().select([]);
 out.error = S().error;
 return out`,
 
-  // The Path tool's modes (D411): picked up with a thing selected it opens in Edit and shows the thing's path with its points, selecting nothing; a box there picks the path and the points it holds and changes nothing, Ctrl adding; a click on empty space lets everything go; with no path the tool opens in Create; in Edit a press on a thing with no path picks the thing and makes nothing; in Create it starts the path and draws; and in Create a click on empty space goes on from the path shown for the thing selected, picking it, and starts no second path.
+  // The Path tool's modes (D411): picked up with a thing selected it opens in Edit and shows the thing's path with its points, selecting nothing; a box there picks the path and the points it holds and changes nothing, Ctrl adding; a click on empty space lets everything go; with no path the tool opens in Create; in Edit a press on a thing with no path picks the thing and makes nothing; in Create it starts the path and draws; and in Create a click on empty space begins a new path for the thing selected, the path it had left as it was (D414, whose own checks are suite m18).
   PATHTOOL1: `${HELP}
 const out = {};
 await begin(${J(PATHS)}, 0);
@@ -109,7 +112,7 @@ S().setTool('path'); S().setPathMode('create'); await tick(250);
 const count = () => (src().match(/\\[-?\\d+, -?\\d+\\],/g) ?? []).length;
 const had = count();
 await press(host(), at(500, -300).x, at(500, -300).y);
-out.createGoesOn = { ...state(), p: acts('p'), added: count() - had };
+out.createBegins = { ...state(), p: acts('p'), added: count() - had };
 S().setTool('select'); S().select([]);
 out.error = S().error;
 return out`,

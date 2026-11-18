@@ -1,0 +1,317 @@
+{
+ "results": {
+  "BOX1": {
+   "spot": "oclip-body",
+   "offMoves": {
+    "things": [
+     "a"
+    ],
+    "anims": [],
+    "moved": true
+   },
+   "offUndone": true,
+   "onClick": {
+    "things": [
+     "a"
+    ],
+    "anims": []
+   },
+   "onBoxInside": {
+    "things": [
+     "a"
+    ],
+    "anims": [
+     "a:0"
+    ],
+    "unchanged": true
+   },
+   "onBoxNone": {
+    "things": [
+     "a"
+    ],
+    "anims": []
+   },
+   "onBoxPastEdge": {
+    "things": [
+     "a"
+    ],
+    "anims": [
+     "a:0"
+    ]
+   },
+   "onBoxOverBoth": {
+    "things": [
+     "a",
+     "b"
+    ],
+    "anims": [],
+    "unchanged": true
+   },
+   "onCtrlBox": {
+    "things": [
+     "b",
+     "a"
+    ],
+    "anims": [
+     "a:0"
+    ]
+   },
+   "onCtrlClick": {
+    "things": [
+     "b",
+     "a"
+    ],
+    "anims": []
+   },
+   "onClickAmong": {
+    "things": [
+     "a"
+    ],
+    "anims": []
+   },
+   "onTitleMoves": {
+    "things": [
+     "a"
+    ],
+    "anims": [],
+    "moved": true
+   },
+   "onAnimationDrags": {
+    "things": [
+     "a"
+    ],
+    "anims": [
+     "a:0"
+    ],
+    "moved": true
+   },
+   "onUndone": true,
+   "onBoxFromOutside": {
+    "things": [
+     "a"
+    ],
+    "anims": []
+   },
+   "onCollapsed": {
+    "things": [
+     "a"
+    ],
+    "anims": [],
+    "unchanged": true
+   },
+   "onRazor": {
+    "things": [
+     "a"
+    ],
+    "anims": [],
+    "unchanged": true
+   },
+   "kept": true,
+   "error": null
+  },
+  "BOX2": {
+   "picks": [
+    "a:0",
+    "a:1"
+   ],
+   "spot": "oclip-body",
+   "onClick": {
+    "things": [
+     "a",
+     "b"
+    ],
+    "anims": []
+   },
+   "onBoxOne": {
+    "things": [
+     "a"
+    ],
+    "anims": [
+     "a:0"
+    ],
+    "unchanged": true
+   },
+   "onBoxOneAfterClick": {
+    "things": [
+     "a"
+    ],
+    "anims": [
+     "a:0"
+    ]
+   },
+   "onCtrlBoxOther": {
+    "things": [
+     "a"
+    ],
+    "anims": [
+     "a:0",
+     "a:1"
+    ]
+   },
+   "onBoxNone": {
+    "things": [
+     "a",
+     "b"
+    ],
+    "anims": []
+   },
+   "onBoxToThings": {
+    "things": [
+     "a",
+     "b"
+    ],
+    "anims": [],
+    "unchanged": true
+   },
+   "onTitleMoves": {
+    "things": [
+     "a",
+     "b"
+    ],
+    "anims": [],
+    "moved": true
+   },
+   "offMoves": {
+    "things": [
+     "a",
+     "b"
+    ],
+    "anims": [],
+    "moved": true
+   },
+   "undone": true,
+   "error": null
+  },
+  "CREATE1": {
+   "opens": {
+    "things": [
+     "p"
+    ],
+    "anims": [],
+    "mode": "edit"
+   },
+   "createHint": "Click begins a new path; a path's last point goes on with it",
+   "begins": {
+    "things": [
+     "p"
+    ],
+    "anims": [
+     "p:1"
+    ],
+    "paths": [
+     0,
+     0
+    ],
+    "old": 3,
+    "made": 2,
+    "hint": "Click for a corner, drag to draw"
+   },
+   "goesOn": {
+    "paths": 2,
+    "made": 3
+   },
+   "movedHint": "Click begins a new path; a path's last point goes on with it",
+   "another": {
+    "things": [
+     "p"
+    ],
+    "anims": [
+     "p:2"
+    ],
+    "paths": [
+     0,
+     0,
+     1
+    ],
+    "made": 2,
+    "first": 3
+   },
+   "againHint": "Click begins a new path; a path's last point goes on with it",
+   "takenUp": {
+    "things": [
+     "p"
+    ],
+    "anims": [
+     "p:0"
+    ],
+    "picked": [
+     2
+    ],
+    "hint": "Click for a corner, drag to draw",
+    "paths": 3
+   },
+   "wentOn": {
+    "paths": 3,
+    "old": 4
+   },
+   "onThing": {
+    "things": [
+     "p"
+    ],
+    "anims": [
+     "p:1"
+    ],
+    "paths": 3
+   },
+   "begunOpens": {
+    "things": [
+     "q"
+    ],
+    "anims": [
+     "q:0"
+    ],
+    "mode": "create",
+    "points": 1,
+    "hint": "Click for a corner, drag to draw"
+   },
+   "begunGoesOn": {
+    "paths": 1,
+    "points": 2
+   },
+   "undone": true,
+   "error": null
+  },
+  "CREATE2": {
+   "click": {
+    "paths": 2,
+    "points": 2,
+    "undone": true,
+    "sel": {
+     "things": [
+      "p"
+     ],
+     "anims": []
+    }
+   },
+   "drawn": {
+    "paths": 2,
+    "points": 3,
+    "undone": true
+   },
+   "fromThing": {
+    "paths": 1,
+    "points": 2,
+    "things": [
+     "q"
+    ],
+    "anims": [
+     "q:0"
+    ],
+    "undone": true
+   },
+   "pressed": {
+    "paths": 1,
+    "points": 1,
+    "undone": true
+   },
+   "clicks": [
+    4,
+    3,
+    2,
+    true
+   ],
+   "error": null
+  }
+ },
+ "volatile": {}
+}

@@ -59,13 +59,11 @@
      "b:0"
     ]
    },
-   "boxInside": {
+   "boxOverAnimation": {
     "things": [
      "a"
     ],
-    "anims": [
-     "a:0"
-    ]
+    "anims": []
    },
    "boxOnClip": {
     "things": [
@@ -85,8 +83,15 @@
      "b",
      "a"
     ],
+    "anims": []
+   },
+   "boxKeepsAnimations": {
+    "things": [
+     "b",
+     "a"
+    ],
     "anims": [
-     "a:0"
+     "b:0"
     ]
    },
    "boxCollapsed": {
@@ -177,22 +182,21 @@
      "path"
     ]
    },
-   "createGoesOn": {
+   "createBegins": {
     "things": [
      "p"
     ],
     "anims": [
-     "p:0"
+     "p:1"
     ],
     "mode": "create",
-    "points": [
-     3
-    ],
+    "points": [],
     "handles": true,
     "p": [
+     "path",
      "path"
     ],
-    "added": 1
+    "added": 2
    },
    "error": null
   },

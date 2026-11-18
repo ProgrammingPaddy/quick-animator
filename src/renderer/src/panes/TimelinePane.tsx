@@ -570,20 +570,37 @@ export function TimelinePane() {
 
   /**
    * A press on empty space in the rows (D92, D315): let go of where it began, it selects nothing,
-   * so the arrows go back to scrubbing; dragged, it draws a box. Over several object clips the box
-   * selects the clips it touches; inside one, the animations of that clip it touches, as it takes
-   * clips, and the clip itself when it touches none of them or the clip is collapsed (D409). With
-   * Ctrl held, what it takes is added to what was selected. The razor draws no box.
+   * so the arrows go back to scrubbing; dragged, it draws a box, which selects the object clips
+   * it touches and never an animation (D413, taking back D409).
    */
   const beginMarquee = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
     if (e.target instanceof Element && e.target.closest('.clip, .oclip, .opacity-handle, .tl-row-header, button, input')) return
+    boxFrom(e, null, e.ctrlKey || e.metaKey ? undefined : () => select([]))
+  }
+
+  /** Whether the last press in a clip drew a box: the click that ends such a press is not one on the clip. */
+  const boxedRef = useRef(false)
+
+  /**
+   * The box (D92, D413), from empty space or, with the preference for it, from inside the clip
+   * `home`. It selects the object clips it touches. One that began in a clip and has reached no
+   * other takes instead the animations of that clip it touches, with the clip, and the clip
+   * alone when it touches none of them or the clip is collapsed; a class's clip gives the
+   * class's animations so, and the class when the box touches none. With Ctrl held, what the
+   * box takes is added to what was selected. A press let go of where it began is `onClick`.
+   * The razor draws no box.
+   */
+  const boxFrom = (e: ReactPointerEvent<HTMLElement>, home: HTMLElement | null, onClick?: () => void) => {
+    const rows = rowsRef.current
+    if (!rows) return
     const extend = e.ctrlKey || e.metaKey
     const began = useStore.getState()
     const before = extend ? { names: began.selection, refs: began.selectedActions } : { names: [], refs: [] }
     const origin = { x: e.clientX, y: e.clientY }
-    const rows = e.currentTarget
     const boxing = began.timelineTool !== 'razor'
+    const homeClass = home?.dataset['class']
+    boxedRef.current = false
     let moved = false
     capture(
       rows,
@@ -591,6 +608,7 @@ export function TimelinePane() {
       (ev) => {
         if (!boxing || (!moved && Math.hypot(ev.clientX - origin.x, ev.clientY - origin.y) < 3)) return
         moved = true
+        boxedRef.current = true
         const box = { left: Math.min(origin.x, ev.clientX), right: Math.max(origin.x, ev.clientX), top: Math.min(origin.y, ev.clientY), bottom: Math.max(origin.y, ev.clientY) }
         setMarquee(box)
         const touches = (el: HTMLElement): boolean => {
@@ -598,29 +616,34 @@ export function TimelinePane() {
           return r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top
         }
         const clips = [...rows.querySelectorAll<HTMLElement>('.oclip[data-object]')].filter(touches)
-        const only = clips.length === 1 && !clips[0]!.classList.contains('collapsed') ? clips[0]! : null
-        const inside: ActionRef[] = only
-          ? [...only.querySelectorAll<HTMLElement>('.clip[data-pick]')].filter(touches).map((el) => {
+        const within = home && !home.classList.contains('collapsed') && clips.every((el) => el === home) ? home : null
+        const inside: ActionRef[] = within
+          ? [...within.querySelectorAll<HTMLElement>('.clip[data-pick]')].filter(touches).map((el) => {
               const pick = el.dataset['pick']!
               const cut = pick.lastIndexOf(':')
               return { object: pick.slice(0, cut), index: Number(pick.slice(cut + 1)) }
             })
           : []
-        const touched = clips.map((el) => el.dataset['object']!)
+        const now = useStore.getState()
+        // A class's clip is no object's: with nothing else touched and none of its animations, the class stays selected, as the press left it.
+        const touched = homeClass && clips.length === 0 ? (inside.length > 0 ? [] : (now.model?.classes.get(homeClass) ?? [])) : clips.map((el) => el.dataset['object']!)
         const names = [...before.names, ...touched.filter((name) => !before.names.includes(name))]
         const refs = [...before.refs, ...inside.filter((r) => !isActionSelected(before.refs, r.object, r.index))]
-        const now = useStore.getState()
-        const same = names.length === now.selection.length && names.every((name, i) => name === now.selection[i]) && refs.length === now.selectedActions.length && refs.every((r, i) => r.object === now.selectedActions[i]!.object && r.index === now.selectedActions[i]!.index)
+        const things = refs.length > 0 ? [...names, ...refs.map((r) => r.object).filter((name, i, all) => !names.includes(name) && all.indexOf(name) === i)] : names
+        const same = things.length === now.selection.length && things.every((name, i) => name === now.selection[i]) && refs.length === now.selectedActions.length && refs.every((r, i) => r.object === now.selectedActions[i]!.object && r.index === now.selectedActions[i]!.index)
         if (same) return
         if (refs.length > 0) now.selectWith(names, refs)
         else select(names)
       },
       () => {
         setMarquee(null)
-        if (!moved && !extend) select([])
+        if (!moved) onClick?.()
       },
     )
   }
+
+  /** Whether a press in a clip draws a box (D413): with the preference for it, anywhere in the clip but its title, which moves the clip as before. */
+  const boxesInside = (e: ReactPointerEvent<HTMLElement>): boolean => useStore.getState().prefs.clipBox === true && !(e.target instanceof Element && e.target.closest('.oclip-title'))
 
   /** Whether a block's start and end may be dragged: a written time reference is left alone. */
   const timingLocks = (stmt: NonNullable<Action['stmt']>, mode: ClipMode | 'start' | 'end'): boolean => {
@@ -874,14 +897,21 @@ export function TimelinePane() {
     if (mode === 'move' && ownHandlers(e.target)) return
     e.stopPropagation()
     const s = useStore.getState()
+    // With the preference for it, a drag inside the clip draws a box and the title alone moves it; a click selects as ever (D413).
+    const boxes = mode === 'move' && boxesInside(e)
     if (e.ctrlKey || e.metaKey) {
-      toggleSelected(obj.name)
+      if (boxes) boxFrom(e, e.currentTarget.closest<HTMLElement>('.oclip'), () => toggleSelected(obj.name))
+      else toggleSelected(obj.name)
       return
     }
     // What shows as selected: the selection, and what its groups carry (D351).
     const among = s.selection.includes(obj.name) || (!!s.model && carriedBy(s.model, s.selection).has(obj.name))
     const alone = s.selection.length === 1 && s.selection[0] === obj.name
     if (!among) select([obj.name])
+    if (boxes) {
+      boxFrom(e, e.currentTarget.closest<HTMLElement>('.oclip'), among && !alone ? () => select([obj.name]) : undefined)
+      return
+    }
     if (!obj.decl || obj.codeDriven || !canEdit()) return
     dragLives(e, { names: among ? s.selection : [obj.name], lead: obj, mode, onClick: mode === 'move' && among && !alone ? () => select([obj.name]) : undefined })
   }
@@ -891,7 +921,14 @@ export function TimelinePane() {
     if (e.button !== 0) return
     if (mode === 'move' && ownHandlers(e.target)) return
     e.stopPropagation()
-    selectClass(node.group.className)
+    boxedRef.current = false
+    // With the preference for it, a drag inside the clip draws a box (D413); with Ctrl the box adds to what is selected, so the press leaves that alone.
+    const boxes = mode === 'move' && boxesInside(e)
+    if (!(boxes && (e.ctrlKey || e.metaKey))) selectClass(node.group.className)
+    if (boxes) {
+      boxFrom(e, e.currentTarget.closest<HTMLElement>('.oclip'))
+      return
+    }
     if (!canEdit()) return
     dragLives(e, { names: node.group.members.map((member) => member.name), lead: null, className: node.group.className, mode })
   }
@@ -1545,10 +1582,13 @@ export function TimelinePane() {
     const { classAction } = item
     const locked = !classAction.stmt || !editable
     const isSelected = selectedClassActions.has(classAction)
+    // What a box takes for it (D413): the member a click selects it through.
+    const through = locked ? undefined : activeMembers(classAction)[0]
     return (
       <div
         key={item.id}
         className={`clip${locked ? ' locked' : ''}${isSelected ? ' selected' : ''}${thin ? ' thin' : ''}`}
+        {...(through ? { 'data-pick': `${through.object.name}:${through.object.actions.indexOf(through)}` } : {})}
         style={{ left: xAt(item.start) - originX, top: laneTop + (lanes.get(item.id) ?? 0) * (thin ? THIN_H + 1 : LANE_H), width: Math.max(thin ? 2 : 8, (item.end - item.start) * view.pps), background: VERB_COLORS[classAction.verb], color: labelOn(VERB_COLORS[classAction.verb]) }}
         onPointerDown={locked ? undefined : razor ? sliceClassHere(classAction) : beginClassClipDrag(classAction, 'move')}
         onDoubleClick={
@@ -1622,7 +1662,7 @@ export function TimelinePane() {
     const allSelected = group.members.length > 0 && group.members.every((m) => selection.includes(m.name))
     const selected = allSelected || group.actions.some((a) => selectedClassActions.has(a))
     return (
-      <div key={key} onPointerDown={beginClassLifeDrag(node, 'move')} onClick={(e) => { if (!ownHandlers(e.target)) selectClass(group.className) }} onDoubleClick={classDoubleClick(group.className, start)} className={`oclip class${selected ? ' selected' : ''}${isCollapsed ? ' collapsed' : ''}`} style={{ left, top, width: clipWidth, height: classClipHeight(node, start, end, isCollapsed) }} data-class={group.className} data-start={start} data-end={end} onContextMenu={classMenu(node)}>
+      <div key={key} onPointerDown={beginClassLifeDrag(node, 'move')} onClick={(e) => { if (!ownHandlers(e.target) && !boxedRef.current) selectClass(group.className) }} onDoubleClick={classDoubleClick(group.className, start)} className={`oclip class${selected ? ' selected' : ''}${isCollapsed ? ' collapsed' : ''}`} style={{ left, top, width: clipWidth, height: classClipHeight(node, start, end, isCollapsed) }} data-class={group.className} data-start={start} data-end={end} onContextMenu={classMenu(node)}>
         <div className="oclip-title" title={`Class ${group.className}`}>
           <button
             className="oclip-fold"
