@@ -75,6 +75,7 @@ import {
 import { requestSavePreset } from '../project/userPresets'
 import { dropTargets } from '../state/dropTargets'
 import { isActionSelected, OBJECT_KINDS, sectionOrder, useStore, type ActionRef, type TimelineSection } from '../state/store'
+import { animateHeld, useAnimateKey } from '../state/animateKey'
 import { formatTime, snapToFrame, timecode } from '../state/time'
 
 /** Zoom limits in pixels per second. At the top, single frames at 60 fps sit about 65 px apart. */
@@ -350,6 +351,7 @@ function MarkerInput({ initial, placeholder, onDone }: { initial: string; placeh
 }
 
 export function TimelinePane() {
+  const animateName = useAnimateKey()
   const playing = useStore((s) => s.playing)
   const clipOpacity = useStore((s) => s.prefs.clipOpacity !== false)
   const timelineOrder = useStore((s) => s.prefs.timelineOrder)
@@ -446,8 +448,8 @@ export function TimelinePane() {
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
       const v = viewRef.current
-      if (e.shiftKey) {
-        // Shift and the wheel lengthen or shorten the selected actions, here as in the preview (D111).
+      if (animateHeld(e)) {
+        // Shift, or the key held to animate (D425), and the wheel lengthen or shorten the selected actions, here as in the preview (D111).
         const s = useStore.getState()
         if (s.selectedActions.length > 0) {
           adjustDurations(s.selectedActions, (-Math.sign(e.deltaY) * s.wheelStep) / s.settings.fps, s.pin)
@@ -2099,7 +2101,7 @@ export function TimelinePane() {
             </svg>
           </button>
         </span>
-        <NumberField label="Frames per wheel tick with Shift" value={wheelStep} unit="f" onChange={setWheelStep} />
+        <NumberField label={`Frames per wheel tick with ${animateName}`} value={wheelStep} unit="f" onChange={setWheelStep} />
         <span className="dim">
           {fps} fps{contentEnd !== null ? `, ends at ${timecode(contentEnd, fps)}` : ''}
           {!editable ? ', code has an error' : ''}

@@ -164,9 +164,9 @@
     ]
    },
    "afterWheel": {
-    "decl": "wide = Camera({\n  x: -25,\n  y: 76,\n  zoom: 4,\n})",
+    "decl": "wide = Camera({\n  x: -152,\n  y: 76,\n  zoom: 4,\n})",
     "zoom": 4,
-    "stillUnder": true
+    "stillUnder": false
    },
    "wheelWithSelect": {
     "twiceAsClose": 2,
@@ -465,6 +465,7 @@
    "sections": [
     "Lifetime",
     "Position",
+    "Lens",
     "Classes"
    ],
    "rows": [
@@ -472,8 +473,14 @@
     "until",
     "x",
     "y",
-    "zoom",
+    "z",
+    "rotationY",
+    "rotationX",
     "rotation",
+    "focalLength",
+    "fov",
+    "zoom",
+    "projection",
     "class"
    ],
    "otherSays": "closeCamerahas the picture",
@@ -493,7 +500,7 @@
    ],
    "hotkey": [
     [
-     "Preview views",
+     "Next preview view",
      "C"
     ]
    ]

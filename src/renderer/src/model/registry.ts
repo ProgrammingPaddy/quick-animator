@@ -4,6 +4,8 @@
  * document all read from here, so they can never disagree.
  */
 
+import { fovOf, NORMAL_LENS, standDistance } from './lens'
+
 export type AttrType = 'number' | 'color' | 'string' | 'boolean' | 'points' | 'pathdata'
 /** A plain value: a number, a word, yes or no, or a list of points, `[[x, y], ...]`, for a Shape (D232); path data is a string (D238). */
 export type AttrValue = number | string | boolean | number[][]
@@ -32,7 +34,7 @@ export interface ClassSchema {
 const common: AttrSchema[] = [
   { name: 'x', type: 'number', default: 0, doc: 'Center, in pixels to the right of the frame center.', animatable: true },
   { name: 'y', type: 'number', default: 0, doc: 'Center, in pixels above the frame center.', animatable: true },
-  { name: 'z', type: 'number', default: 0, doc: 'Depth, toward the camera.', animatable: true },
+  { name: 'z', type: 'number', default: 0, doc: 'Depth, in pixels toward the viewer from the plane everything is on unless told. Nearer covers farther, and a camera sees it larger.', animatable: true },
   { name: 'rotation', type: 'number', default: 0, doc: 'Degrees, counterclockwise.', animatable: true },
   { name: 'scale', type: 'number', default: 1, doc: 'Size multiplier.', animatable: true },
   { name: 'opacity', type: 'number', default: 1, doc: '0 is invisible and costs nothing, 1 is solid. This is the one visibility control (D52).', animatable: true },
@@ -125,12 +127,18 @@ export const classes: Record<string, ClassSchema> = {
   },
   Camera: {
     name: 'Camera',
-    doc: 'What the picture is taken through (D357): it frames the final render, and is not drawn. The top camera alive has the picture.',
+    doc: 'What the picture is taken through (D357, D433): a place, a direction, and a lens. It frames the final render, and is not drawn. The top camera alive has the picture.',
     attrs: [
-      { name: 'x', type: 'number', default: 0, doc: "The point of the scene at the middle of the picture, in pixels to the right of the scene's middle.", animatable: true },
-      { name: 'y', type: 'number', default: 0, doc: "The point of the scene at the middle of the picture, in pixels above the scene's middle.", animatable: true },
-      { name: 'zoom', type: 'number', default: 1, doc: "How close: 1 shows the project's size as it is, 2 twice as close, 0.5 twice as much.", animatable: true },
+      { name: 'x', type: 'number', default: 0, doc: "Where the camera is, in pixels to the right of the scene's middle. Looking straight on, the point of the scene at the middle of the picture.", animatable: true },
+      { name: 'y', type: 'number', default: 0, doc: "Where the camera is, in pixels above the scene's middle. Looking straight on, the point of the scene at the middle of the picture.", animatable: true },
+      { name: 'z', type: 'number', default: 2666.67, doc: "Where the camera is, in pixels toward the viewer from depth 0. Unset: where a 50 mm lens takes in the project's size at depth 0, 1.389 times its longer side, so a flat scene shows as it is.", animatable: true, derive: () => Math.round(standDistance() * 100) / 100 },
+      { name: 'rotationY', type: 'number', default: 0, doc: 'The pan, in degrees: the camera turned on the spot about the upright axis, to its left for a positive angle.', animatable: true },
+      { name: 'rotationX', type: 'number', default: 0, doc: 'The tilt, in degrees: the camera turned on the spot about its own level axis, up for a positive angle.', animatable: true },
       { name: 'rotation', type: 'number', default: 0, doc: 'The roll, in degrees, counterclockwise.', animatable: true },
+      { name: 'focalLength', type: 'number', default: NORMAL_LENS, doc: "The lens, in millimetres on a sensor 36 mm across the picture's longer side: 50 is a normal lens, 24 a wide one, 85 and more a long one.", animatable: true },
+      { name: 'fov', type: 'number', default: 39.6, doc: "The same lens written as the angle it takes in across the picture's longer side, in degrees. Written with focalLength, this one counts.", animatable: true, derive: (a) => Math.round(fovOf(typeof a['focalLength'] === 'number' ? a['focalLength'] : NORMAL_LENS) * 10) / 10 },
+      { name: 'zoom', type: 'number', default: 1, doc: 'Zooms the lens: 2 is twice the focal length, 0.5 half. The camera stays where it is.', animatable: true },
+      { name: 'projection', type: 'string', default: 'perspective', doc: "'orthographic' is a camera with no perspective: a thing is one size at any distance, and zoom is the scale.", animatable: false, options: ['perspective', 'orthographic'] },
       { name: 'class', type: 'string', default: '', doc: "Class names separated by spaces, like CSS classes. An action on all('name') applies to every member (D80).", animatable: false },
       { name: 'at', type: 'number', default: 0, doc: 'When the camera begins, in seconds or a time reference. With several alive, the one declared last has the picture (D358).', animatable: false },
       { name: 'until', type: 'number', default: 0, doc: 'When the camera ends, in seconds or a time reference: the picture goes back to the camera beneath it. Unset, it lasts to the end of the content.', animatable: false },
@@ -168,7 +176,7 @@ export const VERB_ATTRS: Record<Verb, readonly string[] | null> = {
   to: null,
   move: ['x', 'y', 'z'],
   path: ['x', 'y', 'rotation'],
-  rotate: ['rotation'],
+  rotate: ['rotation', 'rotationX', 'rotationY'],
   resize: ['width', 'height', 'radius', 'fontSize', 'scale'],
   fade: ['opacity'],
   // A morph changes a Shape's outline, named here by its curves so the menus offer it to Shapes alone; the target itself is `to` (D257).

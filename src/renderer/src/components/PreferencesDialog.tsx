@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { updateSettings } from '../project/controller'
 import { roundSeconds } from '../project/operations'
-import { bindingsOf, conflictsOf, HOTKEYS, keyLabel, keyOf, NO_OVERRIDES, SCOPE_LABEL, SCOPES, type Hotkey } from '../state/hotkeys'
+import { animateBinding, bindingsOf, conflictsOf, heldKeyOf, HOTKEYS, keyLabel, keyOf, NO_OVERRIDES, sayKey, SCOPE_LABEL, SCOPES, type Hotkey } from '../state/hotkeys'
 import { DEFAULT_PREFS, RECENT_COLORS_MAX, SECTION_LABEL, sectionOrder, TIMELINE_SECTIONS, useStore, type TimelineSection } from '../state/store'
 import { NumberField } from './NumberField'
 
@@ -155,6 +155,7 @@ function GeneralTab() {
           box select inside clips
         </label>
       </div>
+      <span className="dim">Recording</span>
       <div className="row">
         <label className="check" title="When a recording stops, the playhead goes back to where it began">
           <input type="checkbox" checked={prefs.recordReturn !== false} onChange={(e) => setPrefs({ recordReturn: e.target.checked })} />
@@ -255,11 +256,13 @@ function HotkeysTab() {
       setRecording(null)
       return
     }
-    const key = keyOf(e.nativeEvent)
+    // The key that is held is Shift, Ctrl, or Alt alone, which type nothing (D431); a key that is pressed takes its modifiers with it.
+    const key = hotkey.held ? heldKeyOf(e.nativeEvent) : keyOf(e.nativeEvent)
     if (!key) return
     set(hotkey.id, [key])
     setRecording(null)
   }
+  const animateName = animateBinding(overrides)
   return (
     <div className="hotkeys">
       {SCOPES.map((scope) => (
@@ -270,12 +273,12 @@ function HotkeysTab() {
             const conflicts = h.fixed ? [] : bindings.flatMap((b) => conflictsOf(h, b, overrides))
             const changed = overrides[h.id] !== undefined
             return (
-              <div key={h.id} className={`hotkey-row${conflicts.length > 0 ? ' conflict' : ''}`} title={h.what}>
+              <div key={h.id} className={`hotkey-row${conflicts.length > 0 ? ' conflict' : ''}`} title={sayKey(h.what, animateName)}>
                 <span className="hotkey-label">{h.label}</span>
                 <span className="hotkey-keys">
                   {recording === h.id ? (
                     <button className="hotkey-chip recording" autoFocus onKeyDown={(e) => record(e, h)} onBlur={() => setRecording(null)}>
-                      Press a key
+                      {h.held ? 'Shift, Ctrl, or Alt' : 'Press a key'}
                     </button>
                   ) : bindings.length === 0 && !h.fixed ? (
                     <button className="hotkey-chip unset" title="Click, then press a key" onClick={() => setRecording(h.id)}>
@@ -283,7 +286,7 @@ function HotkeysTab() {
                     </button>
                   ) : (
                     bindings.map((b) => (
-                      <button key={b} className="hotkey-chip" disabled={h.fixed} title={h.fixed ? 'Fixed' : 'Click, then press the new key'} onClick={() => setRecording(h.id)}>
+                      <button key={b} className="hotkey-chip" disabled={h.fixed} title={h.fixed ? 'Fixed' : h.held ? 'Click, then press Shift, Ctrl, or Alt' : 'Click, then press the new key'} onClick={() => setRecording(h.id)}>
                         {keyLabel(b)}
                       </button>
                     ))
@@ -294,7 +297,7 @@ function HotkeysTab() {
                     </button>
                   )}
                 </span>
-                {conflicts.length > 0 && <span className="hotkey-conflict">Also {conflicts.map((c) => `${c.label}${c.scope === h.scope ? '' : `, ${SCOPE_LABEL[c.scope].toLowerCase()}`}`).join('; ')}</span>}
+                {conflicts.length > 0 && <span className="hotkey-conflict">Also {[...new Set(conflicts)].map((c) => `${c.label}${c.scope === h.scope || h.held ? '' : `, ${SCOPE_LABEL[c.scope].toLowerCase()}`}`).join('; ')}</span>}
               </div>
             )
           })}

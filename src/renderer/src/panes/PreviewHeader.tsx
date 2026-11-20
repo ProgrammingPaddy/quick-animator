@@ -1,6 +1,7 @@
 import { NumberField } from '../components/NumberField'
 import { keysLabel, NO_OVERRIDES } from '../state/hotkeys'
 import { PREVIEW_VIEWS, useStore, type Pick, type PreviewView } from '../state/store'
+import { useAnimateKey } from '../state/animateKey'
 
 const PICK_LABEL: Record<Pick, string> = { object: 'Object', group: 'Group', class: 'Class' }
 const PICK_TIP: Record<Pick, string> = { object: 'A click picks the object', group: 'A click picks the group it is in', class: 'A click picks every object of its class' }
@@ -19,6 +20,7 @@ const VIEW_TIP: Record<PreviewView, string> = { preview: "The scene, with the ca
  * the preview's own bars (D308).
  */
 export function PreviewHeader() {
+  const animateName = useAnimateKey()
   const pick = useStore((s) => s.pick)
   const setPick = useStore((s) => s.setPick)
   const pin = useStore((s) => s.pin)
@@ -80,12 +82,12 @@ export function PreviewHeader() {
             const action = ref ? s.model?.objects.find((o) => o.name === ref.object)?.actions[ref.index] : undefined
             if (action) s.setTime(next === 'end' ? action.end : action.start)
           }}
-          title="Where a Shift-drag's animation sits"
+          title={`Where a ${animateName}-drag's animation sits`}
         >
           {pin === 'start' ? 'Starts at playhead' : 'Ends at playhead'}
         </button>
         {pin === 'start' && (
-          <button className={`preview-toggle${chain ? ' on' : ''}`} onClick={() => setChain(!chain)} title="Shift-drags follow one another" aria-pressed={chain}>
+          <button className={`preview-toggle${chain ? ' on' : ''}`} onClick={() => setChain(!chain)} title={`${animateName}-drags follow one another`} aria-pressed={chain}>
             Chain
           </button>
         )}

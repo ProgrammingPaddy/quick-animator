@@ -1,4 +1,5 @@
 import { attrSchema, CAMERA, defaultFor, GROUP, SHAPE, type AttrType, type AttrValue } from './registry'
+import { focalOf, frameScale, NORMAL_LENS, standDistance, type View } from './lens'
 import { DEFAULT_EASE_FRACTION, easingFor, namedEasings, unease, type Easing } from './easing'
 import { boundsOf, flattenPathData, hasPathData, parsePathData, pathAnchors, placeBetween, polygonPathData, serializePathData, smoothPathData, translatePathData, type Anchor, type Seg, type Subpath } from './pathData'
 import { blendMorph, morphPairs, type MorphPair } from './morph'
@@ -992,6 +993,33 @@ export function shapeOwnPieces(model: SceneModel, obj: SceneObject, time: number
   if (d !== null) return pathDataOf(d).pieces.map((sp) => ({ curve: sp.points, closed: sp.closed, filled: sp.points.length >= 3, at: sp.at }))
   const frame = shapeFrame(model, obj, time)
   return frame.curve.length > 0 ? [{ curve: frame.curve, closed: frame.closed, filled: frame.closed && frame.curve.length >= 4 }] : []
+}
+
+const finePieces = new WeakMap<Seg[], Map<number, ShapePiece[]>>()
+
+/**
+ * The pieces a Shape is drawn with when it shows larger than its own size (D424): its curves in
+ * straight pieces within `tolerance` of the curve, in the shape's own units, where its own size
+ * asks for half a unit. Lines are lines at any size, and a curve through points is drawn in its
+ * own steps, so only a path's curves, and what morphs make of an outline, get finer. Kept per
+ * outline and fineness.
+ */
+export function shapePiecesWithin(model: SceneModel, obj: SceneObject, time: number, tolerance: number): ShapePiece[] {
+  if (tolerance >= 0.5) return shapePieces(model, obj, time)
+  const morphs = morphActions(obj)
+  const segs = morphs.length > 0 ? morphedSegs(model, obj, time, morphs, NONE) : shapeOwnSegs(model, obj, time)
+  if (!segs) return shapePieces(model, obj, time)
+  let kept = finePieces.get(segs)
+  if (!kept) {
+    kept = new Map()
+    finePieces.set(segs, kept)
+  }
+  let pieces = kept.get(tolerance)
+  if (!pieces) {
+    pieces = flattenPathData(segs, tolerance).map((sp) => ({ curve: sp.points, closed: sp.closed, filled: sp.points.length >= 3, at: sp.at }))
+    kept.set(tolerance, pieces)
+  }
+  return pieces
 }
 
 /** A Shape's morphs, in stack order (D257). */
@@ -2026,18 +2054,22 @@ export function groupBox(model: SceneModel, group: SceneObject, time: number): B
   return { x: pose.x, y: pose.y, rotation: pose.rotation, width: box.width * pose.scale, height: box.height * pose.scale }
 }
 
-/**
- * What the picture is taken through at a moment (D357): the point of the scene at its middle,
- * how close, and the roll in degrees. With no camera, the scene's middle as it is.
- */
-export interface View {
-  x: number
-  y: number
-  zoom: number
-  rotation: number
-}
+export type { View } from './lens'
 
-export const NO_VIEW: View = { x: 0, y: 0, zoom: 1, rotation: 0 }
+/** What the picture is taken through with no camera (D358): the scene's middle, straight on, from where a camera stands unless told, through the lens it has unless told. */
+export const NO_VIEW: View = Object.freeze({
+  x: 0,
+  y: 0,
+  get z(): number {
+    return standDistance()
+  },
+  rotationX: 0,
+  rotationY: 0,
+  rotation: 0,
+  zoom: 1,
+  focal: NORMAL_LENS,
+  orthographic: false,
+})
 
 /** The closest and the widest a camera frames: a zoom outside these is taken as the nearer one, so nothing divides by nothing. */
 const MIN_CAMERA_ZOOM = 0.001
@@ -2065,7 +2097,17 @@ export function cameraAt(model: SceneModel, time: number, keepAliveFrom?: number
   return null
 }
 
-/** What one camera frames at a time, whether or not it has the picture: its place and roll through the groups that carry it, and its zoom. */
+/** Whether an attribute of an object is written at all: on the object, or by one of its animations. */
+function writes(obj: SceneObject, attr: string): boolean {
+  return obj.attrs[attr] !== undefined || obj.actions.some((a) => !a.overridden && attr in a.changes)
+}
+
+/**
+ * What one camera frames at a time, whether or not it has the picture (D433): its place and roll
+ * through the groups that carry it, its depth, its pan and tilt, and its lens with its zoom. The
+ * lens is `focalLength`, or `fov` where that is written, which then counts (D422). With no `z`
+ * written it stands exactly where a 50 mm lens takes in the project's size.
+ */
 export function viewOf(model: SceneModel, camera: SceneObject, time: number): View {
   const at = positionAt(model, camera, time)
   let pose: Pose = { x: at.x, y: at.y, rotation: numValue(valueAt(model, camera, 'rotation', time)), scale: 1 }
@@ -2073,7 +2115,18 @@ export function viewOf(model: SceneModel, camera: SceneObject, time: number): Vi
   const zoom = valueAt(model, camera, 'zoom', time)
   // A group that scales what it carries scales the frame, which is the zoom the other way.
   const carriedScale = pose.scale > 0 ? pose.scale : 1
-  return { x: pose.x, y: pose.y, zoom: Math.max(MIN_CAMERA_ZOOM, (typeof zoom === 'number' && Number.isFinite(zoom) ? zoom : 1) / carriedScale), rotation: pose.rotation }
+  const length = numValue(valueAt(model, camera, 'focalLength', time))
+  return {
+    x: pose.x,
+    y: pose.y,
+    z: writes(camera, 'z') ? numValue(valueAt(model, camera, 'z', time)) : standDistance(),
+    rotationX: numValue(valueAt(model, camera, 'rotationX', time)),
+    rotationY: numValue(valueAt(model, camera, 'rotationY', time)),
+    rotation: pose.rotation,
+    zoom: Math.max(MIN_CAMERA_ZOOM, (typeof zoom === 'number' && Number.isFinite(zoom) ? zoom : 1) / carriedScale),
+    focal: writes(camera, 'fov') ? focalOf(numValue(valueAt(model, camera, 'fov', time))) : length >= 1 ? length : NORMAL_LENS,
+    orthographic: valueAt(model, camera, 'projection', time) === 'orthographic',
+  }
 }
 
 /** What the picture is taken through at a time (D357, D358): the view of the camera that has it, or the scene's middle. Kept for the time last asked, since every thing held on the screen asks. */
@@ -2100,24 +2153,31 @@ export function isAttached(model: SceneModel, obj: SceneObject): boolean {
   return held
 }
 
-/** A pose in the picture, from its middle in the project's pixels, as the scene has it: where the camera puts it. */
+/**
+ * A pose in the picture, from its middle in the project's pixels, as the plane of the picture has
+ * it: where the camera puts it (D362). For a camera that looks straight on that plane is one of
+ * the scene's own, and the pose is a pose in the scene; for one that is turned it is that plane
+ * turned with the camera, which is where whoever draws it puts it (D434).
+ */
 export function throughView(view: View, pose: Pose): Pose {
   if (view === NO_VIEW) return pose
   const a = (view.rotation * Math.PI) / 180
   const cos = Math.cos(a)
   const sin = Math.sin(a)
-  return { x: view.x + (cos * pose.x - sin * pose.y) / view.zoom, y: view.y + (sin * pose.x + cos * pose.y) / view.zoom, rotation: pose.rotation + view.rotation, scale: pose.scale / view.zoom }
+  const s = frameScale(view)
+  return { x: view.x + (cos * pose.x - sin * pose.y) / s, y: view.y + (sin * pose.x + cos * pose.y) / s, rotation: pose.rotation + view.rotation, scale: pose.scale / s }
 }
 
-/** A point of the scene as the picture has it, from its middle in the project's pixels: the inverse of `throughView`. */
+/** A point of the picture's plane as the picture has it, from its middle in the project's pixels: the inverse of `throughView`. */
 export function intoView(view: View, point: Point): Point {
   if (view === NO_VIEW) return point
   const a = (view.rotation * Math.PI) / 180
   const cos = Math.cos(a)
   const sin = Math.sin(a)
+  const s = frameScale(view)
   const dx = point.x - view.x
   const dy = point.y - view.y
-  return { x: (cos * dx + sin * dy) * view.zoom, y: (-sin * dx + cos * dy) * view.zoom }
+  return { x: (cos * dx + sin * dy) * s, y: (-sin * dx + cos * dy) * s }
 }
 
 /** The value of an attribute as it shows: the position, rotation, and scale through the object's groups and, held on the screen, through the camera; a group's own box; anything else as is. */

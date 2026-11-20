@@ -37,9 +37,11 @@ node scripts/inspect.mjs eval "window.__quickAnimator.openProject('C:/path/to/ex
 ```
 
 Use forward slashes in paths passed through the shell. In development the page exposes
-`window.__quickAnimator` with `useStore`, `openProject`, `getEditor`, `getRenderer`, and `getViewport`,
-the Preview view, whose `toPane(x, y)` is where a place in the scene is on the pane: a project
-opens fitted by its camera, so a test does not take the view to be at the scene's middle.
+`window.__quickAnimator` with `useStore`, `openProject`, `getEditor`, `getRenderer`, `getViewport`,
+the Preview view, and `getCameraView`, the Camera view. Either view's `toPane(x, y, { z, turn: null })`
+is where a place in the scene at a depth is on the pane: a project opens fitted by its camera, so a
+test does not take the view to be at the scene's middle, and a thing at a depth shows where the
+view's lens puts it.
 A second instance started only for testing takes `--user-data-dir=C:/path/to/a/scratch/folder`
 after the port: it then keeps its own settings, so the project it opens is not the one the
 owner's instance opens next.

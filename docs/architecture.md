@@ -256,6 +256,33 @@ guides for one view's pixel size; the pane calls `layout` again with the Camera 
 draws that view, with the cameras' own frames left out, and once more for the view a press lands
 in, so the handles picked are the ones that view shows.
 
+The camera in depth (D433 to D435). `model/lens.ts` is the camera's arithmetic in plain numbers:
+a `View` is a place, a pan, a tilt and a roll, a focal length, a zoom, and whether it has
+perspective; from it come the camera's axes, the distance at which a thing shows at its own size,
+and its frame, the part of the plane facing it, where its line of sight meets depth 0, that its
+picture takes in. `viewOf` in `model/sample.ts` reads a `View` from a camera at a time; a camera
+with no `z` stands exactly where a 50 mm lens takes in the project's size. `preview/planes.ts`
+holds what the two views share. A `Plane` is a depth, and for the plane of a turned camera's
+picture a turn about the camera's place: everything flat is worked on in the `x, y` of the plane
+it lies in, so the gizmo, the points, the paths, and the solver are as they were for a flat scene.
+`SurfaceBase` gives a view its `toWorld`, `toPane`, and `zoom` on the plane in hand from two
+things the view knows, the line of sight through a place on its pane and where a place in the
+scene shows; `carry` is how far a thing goes with the pointer in the plane that faces the view,
+which is a move in depth in a turned view. `PictureCamera` sets a Three.js camera from a `View`,
+a lens, or the flat camera of before while the scene renderer says nothing drawn is off depth 0
+and the camera looks straight on, which keeps a scene with no depth to the pixel; the Camera view
+and an export both take their picture through it. `Viewport`, the Preview view, is a target, a
+side as a pan and a tilt, and a zoom, drawn through a flat camera while it looks along an axis and
+a lens otherwise; nothing it does is written. The scene renderer gives every item the plane it
+lies in, the scene's own at its depth or the picture's for what is held on the screen, lays out
+what is drawn for the thing in hand in one group on that thing's plane, orders the meshes by depth
+for the camera about to draw, things at one depth by the cast, and draws the cameras' bodies and
+the thin boxes of things on a layer only a turned Preview view shows. In the preview pane the
+plane in hand is the plane of what is selected, or the gesture's own, and both views are given it
+before any place on the pane is asked for; a camera's own moves, across, round, closer, and a
+turn, are drags like any other whose values come from a function of how far the pointer went, so
+a plain move, an animated one, and a recorded one are written by the one tail every drag has.
+
 Cuts (D365, D376 to D378) are text edits like any other, in `project/operations.ts`. `addCamera`
 writes a new camera and `cutToCamera` a new shot of one, both through `cutIn`: a camera declared
 last, with the life the preferences and the next cut leave it, the shot it covers to its end

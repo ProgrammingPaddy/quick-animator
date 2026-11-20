@@ -1,0 +1,44 @@
+{
+ "results": {
+  "WHEEL1": {
+   "out": {
+    "zoom": "0.165",
+    "view": [
+     200,
+     100,
+     0.165
+    ]
+   },
+   "floor": {
+    "zoom": "0.02",
+    "view": [
+     200,
+     100,
+     0.02
+    ]
+   },
+   "floorStays": true,
+   "inFromFloor": [
+    "0.0232",
+    "0.027",
+    "0.0314",
+    "0.0365",
+    "0.0424",
+    "0.0493"
+   ],
+   "everyTickChanges": true,
+   "smallTicks": {
+    "zoom": "0.549",
+    "view": [
+     200,
+     100,
+     0.549
+    ]
+   },
+   "ceiling": "64",
+   "ceilingStays": true,
+   "error": null
+  }
+ },
+ "volatile": {}
+}

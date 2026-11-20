@@ -1,0 +1,204 @@
+{
+ "results": {
+  "VIEW1": {
+   "front": {
+    "facing": [
+     0,
+     0
+    ],
+    "flat": true,
+    "straight": true
+   },
+   "altLeft": {
+    "facing": [
+     -30,
+     0
+    ],
+    "flat": false,
+    "straight": false
+   },
+   "altLeftUp": [
+    -30,
+    18
+   ],
+   "ctrlMiddleBack": {
+    "facing": [
+     0,
+     0
+    ],
+    "straight": true
+   },
+   "middleKeepsWhatIsPressed": 0,
+   "altRightCloser": 2.01,
+   "menuShutAfterIt": true,
+   "altRightBack": 1,
+   "compassX": {
+    "facing": [
+     90,
+     0
+    ],
+    "flat": true,
+    "straight": false
+   },
+   "compassXAgain": [
+    -90,
+    0
+   ],
+   "compassY": [
+    0,
+    -90
+   ],
+   "compassDrag": {
+    "facing": [
+     -23.9,
+     -90
+    ],
+    "flat": false
+   },
+   "compassZ": {
+    "facing": [
+     0,
+     0
+    ],
+    "straight": true
+   },
+   "nothingWritten": true,
+   "error": null
+  },
+  "CAMERA1": {
+   "wheel": "camera = Camera({ x: 0, y: 0, zoom: 1.35, })",
+   "wheelBack": "camera = Camera({ x: 0, y: 0, zoom: 1, })",
+   "altWheel": "camera = Camera({ x: 0, y: 0, zoom: 1, z: 1976, })",
+   "altWheelBack": "camera = Camera({ x: 0, y: 0, zoom: 1, z: 2667, })",
+   "across": {
+    "camera": "camera = Camera({ x: -305, y: -152, zoom: 1, z: 2667, })",
+    "stillUnder": [
+     0,
+     0
+    ]
+   },
+   "acrossBack": "camera = Camera({ x: 0, y: 0, zoom: 1, z: 2667, })",
+   "round": {
+    "camera": "camera = Camera({ x: -1333, y: 0, zoom: 1, z: 2310, rotationY: -30, })",
+    "middle": [
+     1,
+     0
+    ]
+   },
+   "roundUp": {
+    "camera": "camera = Camera({ x: -1288, y: -690, zoom: 1, z: 2231, rotationY: -30, rotationX: 15, })",
+    "middle": [
+     0,
+     0
+    ]
+   },
+   "roundBack": "camera = Camera({ x: 0, y: 0, zoom: 1, z: 2667, rotationY: 0, rotationX: 0, })",
+   "closer": "camera = Camera({ x: 0, y: 0, zoom: 1, z: 1324, rotationY: 0, rotationX: 0, })",
+   "closerBack": "camera = Camera({ x: 0, y: 0, zoom: 1, z: 2666, rotationY: 0, rotationX: 0, })",
+   "turn": "camera = Camera({ x: 0, y: 0, zoom: 1, z: 2666, rotationY: -23.9, rotationX: 0, })",
+   "faceX": "camera = Camera({ x: 0, y: 0, zoom: 1, z: 2666, rotationY: 90, rotationX: 0, })",
+   "faceXAgain": "camera = Camera({ x: 0, y: 0, zoom: 1, z: 2666, rotationY: -90, rotationX: 0, })",
+   "reset": "camera = Camera({ zoom: 1, })",
+   "error": null
+  },
+  "DEPTH1": {
+   "frontDrag": "mid = Rect({ x: 236, y: 118, width: 300, height: 200, fill: '#4f8cff', })",
+   "atDepthInTheCameraView": {
+    "ball": "ball = Circle({ x: 466, y: -80, z: 500, radius: 90, fill: '#f59e0b', })",
+    "offThePointer": 0
+   },
+   "altOnAHandle": {
+    "grew": true,
+    "proportions": 0.999,
+    "facing": [
+     0,
+     0
+    ]
+   },
+   "above": [
+    0,
+    -90
+   ],
+   "aboveDrag": {
+    "nearer": true,
+    "across": true,
+    "heightKept": true,
+    "selected": [
+     "mid"
+    ]
+   },
+   "body": {
+    "selected": [
+     "camera"
+    ],
+    "left": true,
+    "farther": true,
+    "heightKept": true
+   },
+   "error": null
+  },
+  "MIRROR1": {
+   "cameraToView": {
+    "camera": "camera = Camera({ x: -1124, y: -457, zoom: 1, z: 4196, rotationX: 6, rotationY: -15, })",
+    "atTheEye": 1,
+    "looksAsItDoes": true
+   },
+   "front": [
+    0,
+    0
+   ],
+   "viewFromCamera": {
+    "atTheCamera": 0,
+    "facing": [
+     -15,
+     6
+    ]
+   },
+   "reset": "camera = Camera({ zoom: 1, })",
+   "ahead": 1,
+   "animated": {
+    "camera": "camera = Camera({ zoom: 1, })",
+    "verb": "to",
+    "changes": [
+     "rotationX",
+     "rotationY",
+     "x",
+     "y",
+     "z"
+    ],
+    "to": [
+     -824,
+     2536,
+     -18
+    ],
+    "span": [
+     0,
+     1
+    ],
+    "back": 0
+   },
+   "error": null
+  },
+  "LENS1": {
+   "withDepth": {
+    "depthless": false,
+    "lens": true
+   },
+   "flat": {
+    "depthless": true,
+    "lens": false,
+    "stands": 2666.67
+   },
+   "nearerCoversFarther": "near",
+   "fromTheFrontToo": "near",
+   "bothWays": {
+    "focal": 31.18,
+    "warnings": [
+     "camera has both fov and focalLength, which are one lens: fov counts"
+    ]
+   },
+   "error": null
+  }
+ },
+ "volatile": {}
+}

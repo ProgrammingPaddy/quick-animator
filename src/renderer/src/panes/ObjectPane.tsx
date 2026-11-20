@@ -14,6 +14,7 @@ import { requestSavePreset } from '../project/userPresets'
 import { closeBackground, openBackground, setBackground } from '../project/controller'
 import { ColorPicker } from '../components/ColorPicker'
 import { isActionSelected, OBJECT_KINDS, useStore } from '../state/store'
+import { useAnimateKey } from '../state/animateKey'
 import { timecode } from '../state/time'
 
 /** The fold keys of the types that are not kinds of object (D342). */
@@ -43,6 +44,7 @@ const Idents = ({ words }: { words: string[] }) => (
  * and a right-click adds an object.
  */
 export function ObjectPane() {
+  const animateName = useAnimateKey()
   const project = useStore((s) => s.project)
   const model = useStore((s) => s.model)
   const fps = useStore((s) => s.settings.fps)
@@ -617,7 +619,7 @@ export function ObjectPane() {
             }}
           >
             {prospective && (
-              <li className="object prospective" title="Not made yet: a value, a key, or a Shift-drag makes it">
+              <li className="object prospective" title={`Not made yet: a value, a key, or a ${animateName}-drag makes it`}>
                 <div
                   className="object-row"
                   onContextMenu={(e) => {

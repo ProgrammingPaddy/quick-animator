@@ -281,11 +281,12 @@ function quadAt(p0: Point, p1: Point, p2: Point, t: number): Point {
   return { x: u * u * p0.x + 2 * u * t * p1.x + t * t * p2.x, y: u * u * p0.y + 2 * u * t * p1.y + t * t * p2.y }
 }
 
-/** How many pieces a curve is drawn in: by the length of its control polygon, so a long or tight curve gets more. */
+/** How many pieces a curve is drawn in: by the length of its control polygon, so a long or tight curve gets more. A curve asked for finer than its own size needs, to be shown large (D424), may have more of them. */
 function stepsFor(points: Point[], tolerance: number): number {
   let length = 0
   for (let i = 1; i < points.length; i++) length += Math.hypot(points[i]!.x - points[i - 1]!.x, points[i]!.y - points[i - 1]!.y)
-  return Math.max(4, Math.min(64, Math.ceil(Math.sqrt(length / Math.max(0.05, tolerance)) * 1.5)))
+  const fine = tolerance < 0.5
+  return Math.max(4, Math.min(fine ? 512 : 64, Math.ceil(Math.sqrt(length / Math.max(fine ? 0.004 : 0.05, tolerance)) * 1.5)))
 }
 
 /** The path drawn as polylines, one per subpath, each point tagged with where it came from (D238). */

@@ -14,6 +14,7 @@ import { identifierEdits, nameProblem, renameMembers, replaceIdentifiers } from 
 import { currentWritten, definingAction, shownValue, valueAt, withWritten, writesFrom, writtenValues } from '../model/sample'
 import { curveCode, perFrame, sharesAlong, sharesToward, thinned, type Take } from '../model/record'
 import { begun, cameraAt, camerasOf, containers, existsAt, journeyOf, NO_VIEW, ownBounds, unitTurns, viewOf, worldPose, writtenSpan, type View } from '../model/sample'
+import { NORMAL_LENS, standDistance } from '../model/lens'
 import type { Action, ActionInfo, BlockInfo, ClassAction, Mask, PropInfo, Range, SceneModel, SceneObject } from '../model/types'
 import { useStore, type ActionRef, type Clip, type ClipAction, type ClipObject, type MenuItem, type Pin, type RecordedClip, type SelectionState, type ObjectKind } from '../state/store'
 import { closeReview, findClip, noteClip, noteLives, noteMade, recorded } from './recording'
@@ -79,10 +80,15 @@ export function uniqueName(base: string, from = 1): string {
 /** What is a factor or a share of one, written to hundredths: a whole number would lose it (D391). */
 const FINE_ATTRS = new Set(['scale', 'opacity', 'zoom', 'fillOpacity', 'strokeOpacity', 'drawn', 'lineHeight'])
 
-/** How a written number is rounded: whole pixels, tenths of a degree, hundredths for factors and shares, a camera's zoom and a fill's own opacity among them. */
-function roundAttr(attr: string, value: number): number {
+/**
+ * How a written number is rounded: whole pixels, tenths of a degree, hundredths for factors and
+ * shares, a camera's zoom and a fill's own opacity among them. A camera's zoom below 1 keeps
+ * three figures: far out a hundredth is a third of the zoom, a step no wheel or corner makes.
+ */
+export function roundAttr(attr: string, value: number): number {
+  if (attr === 'zoom' && Math.abs(value) < 1) return Number(value.toPrecision(3))
   if (FINE_ATTRS.has(attr)) return Math.round(value * 100) / 100
-  if (attr === 'rotation' || attr === 'angle') return Math.round(value * 10) / 10
+  if (attr === 'rotation' || attr === 'rotationX' || attr === 'rotationY' || attr === 'angle' || attr === 'fov' || attr === 'focalLength') return Math.round(value * 10) / 10
   return Math.round(value)
 }
 
@@ -119,7 +125,7 @@ export function resizeAttrs(className: string): string[] {
 export function verbFor(attrs: string[]): Verb {
   const set = new Set(attrs)
   if (set.size > 0 && [...set].every((a) => a === 'x' || a === 'y' || a === 'z')) return 'move'
-  if (set.size === 1 && set.has('rotation')) return 'rotate'
+  if (set.size > 0 && [...set].every((a) => a === 'rotation' || a === 'rotationX' || a === 'rotationY')) return 'rotate'
   // A scaling is a resize by a factor (D211).
   if (set.size === 1 && set.has('scale')) return 'resize'
   if (set.size === 1 && set.has('opacity')) return 'fade'
@@ -164,10 +170,16 @@ export function addObject(className: ObjectKind, x: number, y: number, at = stat
   return name
 }
 
-/** A new camera's block (D250, D361): where it looks and how close, its roll when it has one, and when it begins and ends when that is not the whole scene. */
+/** A new camera's block (D250, D361, D433): where it is and how its lens is zoomed; where it looks, its depth, and its lens when they are not as a camera has them unless told; and when it begins and ends when that is not the whole scene. */
 function cameraBlock(name: string, view: View, at: number, until: number | null): string {
-  const attrs: Record<string, AttrValue> = { x: Math.round(view.x), y: Math.round(view.y), zoom: roundAttr('zoom', view.zoom) }
+  const attrs: Record<string, AttrValue> = { x: Math.round(view.x), y: Math.round(view.y) }
+  if (Math.abs(view.z - standDistance()) >= 0.5) attrs['z'] = Math.round(view.z)
+  if (Math.abs(view.rotationY) >= 0.05) attrs['rotationY'] = roundAttr('rotationY', view.rotationY)
+  if (Math.abs(view.rotationX) >= 0.05) attrs['rotationX'] = roundAttr('rotationX', view.rotationX)
   if (Math.abs(view.rotation) >= 0.05) attrs['rotation'] = roundAttr('rotation', view.rotation)
+  if (Math.abs(view.focal - NORMAL_LENS) >= 0.05) attrs['focalLength'] = roundAttr('focalLength', view.focal)
+  attrs['zoom'] = roundAttr('zoom', view.zoom)
+  if (view.orthographic) attrs['projection'] = 'orthographic'
   if (at > 0) attrs['at'] = roundSeconds(at)
   if (until !== null) attrs['until'] = roundSeconds(until)
   return blockText(`${name} = ${CAMERA}`, attrs)
@@ -195,6 +207,39 @@ export function cameraInHand(make = true): string | null {
   const name = freeName('camera')
   applyEdits([insertDeclaration(model.lastDeclEnd, cameraBlock(name, NO_VIEW, 0, null))], objectsSelected([name]))
   return name
+}
+
+/**
+ * Put a camera back where a camera is unless told (D436): at the scene's middle, at its standing
+ * distance, looking straight on, unrolled. Its lens and its zoom are left. What an animation holds
+ * at the playhead is written there, as any change is; what only the declaration says is taken out
+ * of it, so the camera is as one that was never moved and nothing is written that need not be.
+ * One undo step.
+ */
+export function resetCamera(name: string): void {
+  const before = state()
+  const camera = before.model?.objects.find((o) => o.name === name && o.className === CAMERA)
+  if (!before.model || !camera?.decl || camera.codeDriven) return
+  const view = viewOf(before.model, camera, before.time)
+  const home: Record<string, number> = { x: 0, y: 0, z: standDistance(), rotationX: 0, rotationY: 0, rotation: 0 }
+  const shown: Record<string, number> = { x: view.x, y: view.y, z: view.z, rotationX: view.rotationX, rotationY: view.rotationY, rotation: view.rotation }
+  const animated = Object.keys(home).filter((attr) => camera.actions.some((a) => !a.overridden && (attr in a.changes || (a.verb === 'path' && (attr === 'x' || attr === 'y')))))
+  const own = !gestureOpen()
+  if (own) beginGesture()
+  try {
+    const written = Object.fromEntries(animated.filter((attr) => Math.abs(home[attr]! - shown[attr]!) > 1e-6).map((attr) => [attr, home[attr]!]))
+    if (Object.keys(written).length > 0) setAttrsAtMany([{ name, attrs: written, together: Object.keys(written) }], before.time)
+    // One line at a time: each is found again in the code as it stands.
+    for (const attr of Object.keys(home)) {
+      if (animated.includes(attr)) continue
+      const { source, model } = state()
+      const decl = model?.objects.find((o) => o.name === name)?.decl
+      const edit = decl ? removeProp(source, decl, attr) : null
+      if (edit) applyEdits([edit])
+    }
+  } finally {
+    if (own) endGesture()
+  }
 }
 
 /** How a shot of a camera is named after it (D377): `wide_shot2` is another shot of `wide`. */
@@ -314,7 +359,7 @@ function cutIn(name: string, view: View, t: number): boolean {
 export function addCamera(at = state().time, place: Point = { x: 0, y: 0 }): string | null {
   if (!state().model) return null
   const name = freeName('camera')
-  return cutIn(name, { x: place.x, y: place.y, zoom: 1, rotation: 0 }, roundSeconds(Math.max(0, at))) ? name : null
+  return cutIn(name, { ...NO_VIEW, x: place.x, y: place.y, z: standDistance() }, roundSeconds(Math.max(0, at))) ? name : null
 }
 
 /**

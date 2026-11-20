@@ -109,10 +109,10 @@
   "WHEEL1": {
    "wheel": {
     "zoom": 3,
-    "stillUnder": true,
+    "cameraStays": true,
     "written": [
-     "x: 379,",
-     "y: 69,",
+     "x: 200,",
+     "y: 100,",
      "zoom: 3,",
      "rotation: 12,"
     ],

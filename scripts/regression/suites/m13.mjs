@@ -124,23 +124,20 @@ await tick(200);
 out.error = S().error;
 return out`,
 
-  // The camera by the wheel and the middle button, with Select in hand and something selected (D369): the wheel zooms the camera, the place under the pointer staying under it; a run of ticks is one undo step; Shift and the wheel leave the camera; the middle button drags it, the picture following the pointer; the selection stays through all of it. In a scene with no camera the wheel makes one, in the same undo step.
+  // The camera by the wheel and the middle button, with Select in hand and something selected (D369): the wheel zooms the camera's lens and leaves the camera where it is, wherever the pointer is (D426); a run of ticks is one undo step; Shift and the wheel leave the camera; the middle button drags it, the picture following the pointer; the selection stays through all of it. In a scene with no camera the wheel makes one, in the same undo step.
   WHEEL1: `${HELP}
 const out = {};
 await start(${JSON.stringify(PLAIN)}, 'both', 'select');
 S().select(['dot']); await tick(150);
 const c = cam();
 const before = smp.viewAt(S().model, 0);
-// 100 px right of the picture's middle and 40 below: the place of the scene there.
-const under = (v) => { const a = (v.rotation * Math.PI) / 180; const px = 100 / c.k / v.zoom; const py = -40 / c.k / v.zoom; return { x: v.x + Math.cos(a) * px - Math.sin(a) * py, y: v.y + Math.sin(a) * px + Math.cos(a) * py } };
-const was = under(before);
+// The pointer 100 px right of the picture's middle and 40 below: the camera stays where it is all the same.
 const source0 = S().source;
 await wheel(c.cx + 100, c.cy + 40, -Math.log(2) / 0.003);
 await wheel(c.cx + 100, c.cy + 40, -Math.log(2) / 0.003);
 await tick(700);
 const after = smp.viewAt(S().model, 0);
-const is = under(after);
-out.wheel = { zoom: r2(after.zoom), stillUnder: Math.hypot(is.x - was.x, is.y - was.y) < 2, written: lines('wide', ['x', 'y', 'zoom', 'rotation']), selection: S().selection, tool: S().tool };
+out.wheel = { zoom: r2(after.zoom), cameraStays: after.x === before.x && after.y === before.y, written: lines('wide', ['x', 'y', 'zoom', 'rotation']), selection: S().selection, tool: S().tool };
 await undo();
 out.oneUndoForTheRun = S().source === source0;
 await wheel(c.cx, c.cy, -300, { shiftKey: true });

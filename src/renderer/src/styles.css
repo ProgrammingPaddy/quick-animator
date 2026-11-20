@@ -3019,6 +3019,15 @@ button.chevron:hover {
   gap: 8px;
 }
 
+/* A name on the left and what it sets on the right: a second thing under one name stays on the right, under the first. */
+.prefs-grid > .dim {
+  grid-column: 1;
+}
+
+.prefs-grid > .row {
+  grid-column: 2;
+}
+
 .prefs-grid label.check {
   display: inline-flex;
   align-items: center;
@@ -4502,3 +4511,113 @@ button.chevron:hover {
   flex: none;
 }
 
+/* A view's corner (D428, D435, D436): its compass, the scene's axes as the view sees them, and under it what puts the view or the camera somewhere at once. */
+.view-corner {
+  position: absolute;
+  top: 46px;
+  right: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  z-index: 2;
+}
+
+.compass {
+  display: block;
+  width: 72px;
+  height: 72px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.compass:active {
+  cursor: grabbing;
+}
+
+.compass-disc {
+  fill: rgba(40, 40, 40, 0.35);
+  stroke: rgba(255, 255, 255, 0.06);
+}
+
+.compass:hover .compass-disc {
+  fill: rgba(52, 52, 52, 0.8);
+}
+
+.compass-line {
+  stroke-width: 2;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+.compass-line.x,
+.compass-end.negative.x circle {
+  stroke: #e5484d;
+}
+
+.compass-line.y,
+.compass-end.negative.y circle {
+  stroke: #46a758;
+}
+
+.compass-line.z,
+.compass-end.negative.z circle {
+  stroke: #3e8ed0;
+}
+
+.compass-end {
+  cursor: pointer;
+}
+
+.compass-end.positive.x circle {
+  fill: #e5484d;
+}
+
+.compass-end.positive.y circle {
+  fill: #46a758;
+}
+
+.compass-end.positive.z circle {
+  fill: #3e8ed0;
+}
+
+.compass-end.negative circle {
+  fill: rgba(24, 24, 24, 0.9);
+  stroke-width: 1.5;
+}
+
+.compass-end:hover circle {
+  filter: brightness(1.25);
+}
+
+.compass-end text {
+  font-size: 9px;
+  font-weight: 700;
+  fill: #101010;
+  pointer-events: none;
+}
+
+.view-corner-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.view-corner-buttons button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(32, 32, 32, 0.9);
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+.view-corner-buttons button:hover {
+  color: var(--fg);
+  background: rgba(52, 52, 52, 0.95);
+}

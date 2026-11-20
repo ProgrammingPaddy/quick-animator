@@ -17,28 +17,57 @@ import { newProject, pickProject } from '../project/controller'
 import { askSystemFonts } from '../project/fonts'
 import { convertTextToShape } from '../project/textToShape'
 import { cameraAt, camerasOf, journeyOf, NO_VIEW, parseColor, textPadding, textStyleAt, valueAt, viewOf, worldPose } from '../model/sample'
+import { aheadOf, anglesAlong, axesOf, frameDistance, frameOf as cameraFrame, fullDistance, looksStraight, roundPlace, standDistance } from '../model/lens'
 import { layoutOf, type TextStyle } from '../model/text'
 import { DEFAULT_EASE_FRACTION, easingFor, unease } from '../model/easing'
-import { addCamera, cameraInHand, cutHereItems, hideMenuItems, propertiesMenu, maskMenuItems, addMorph, addObject, addPath, beginFill, beginOutline, canEdit, paintFill, paintStroke, sketchLine, writeOnLine, setObjectProp, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, recordShown, flushRecordedSoon, recordOutline, recordWriteOn, carryPath, pathBeginsAtObject, setPathAngle, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, settleMorph, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphRunning, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
+import { addCamera, cameraInHand, resetCamera, roundAttr, cutHereItems, hideMenuItems, propertiesMenu, maskMenuItems, addMorph, addObject, addPath, beginFill, beginOutline, canEdit, paintFill, paintStroke, sketchLine, writeOnLine, setObjectProp, adjustDurations, appendPushedMove, addClassPath, appendShapePoints, beginShape, beginTimed, convertToShape, createGroup, deleteActions, deleteObjects, duplicateObjects, finishShape, insertPathAnchor, insertPathPoints, insertShapeAnchor, insertShapePoints, isShapeClosed, jumpToObject, lastActionIndex, overrideClassAction, pathAnchorCurved, pathAnchorKind, pathAnchorSmooth, recordShown, flushRecordedSoon, recordOutline, recordWriteOn, carryPath, pathBeginsAtObject, setPathAngle, pathEditable, pathEditableKind, pathOffset, pathSegmentKind, removePathPoints, removeShapePoints, requestRename, resizeAttrs, resizedValues, scaleShapeCurves, scaleShapePoints, setActionDestination, setActionTiming, setAttrsAtMany, setPathAnchorKind, setPathHandle, setPathPoints, setPathSegment, setPathShift, setShapeAnchorKind, setShapeClosed, setShapeHandle, setShapePoints, setShapeSegment, settleMorph, shapeAnchorCount, shapeAnchorCurved, shapeAnchorKind, shapeAnchorSmooth, shapeEditAnchors, shapeEditBase, shapeEditPieces, shapeEditable, shapeMorphRunning, shapeMorphSelected, shapeSegmentKind, smoothPath, smoothShape, smoothShapeRun, straightenPath, straightenShape, ungroup, type ShapeEditBase } from '../project/operations'
 import { addUserObject, requestSavePreset } from '../project/userPresets'
 import { noteGroup } from '../project/recording'
 import { makeMover, outlineOf, resetMover, walk, type Mover, type Polygon, type Pushing } from '../preview/collide'
-import { SceneRenderer, type ControlHandle, type Frame, type GuideLine, type Handle } from '../preview/SceneRenderer'
+import { planeOfFrame, SceneRenderer, type ControlHandle, type Frame, type GuideLine, type Handle } from '../preview/SceneRenderer'
+import { FLAT, lift, meet, samePlane, type Plane } from '../preview/planes'
+import { Compass, type CompassAxis, type CompassHandle } from '../components/Compass'
 import { CameraView } from '../preview/CameraView'
-import { Viewport, type Surface } from '../preview/Viewport'
+import { ROUND_RATE, Viewport, type Surface } from '../preview/Viewport'
 import { dropTargets } from '../state/dropTargets'
-import { matchHotkey } from '../state/hotkeys'
+import { animateHeld, animateKey, isAnimateKey, useAnimateKey } from '../state/animateKey'
+import { matchHotkey, sayKey } from '../state/hotkeys'
 import { OBJECT_KINDS, TRANSFORM_MODES, useStore, type ActionRef, type Pick, type TransformMode } from '../state/store'
 import { formatTime } from '../state/time'
 
 const MODE_LABEL: Record<TransformMode, string> = { all: 'Transform', move: 'Move', rotate: 'Rotate', resize: 'Resize' }
 const MODE_TIP: Record<TransformMode, string> = {
-  all: 'Move, resize, and rotate by the handles; Shift animates',
-  move: 'Drag to move; Shift animates',
-  rotate: 'Drag to turn; Shift animates',
-  resize: 'Drag corners or edges; Alt keeps proportions; Shift animates',
+  all: 'Move, resize, and rotate by the handles; [animate] animates',
+  move: 'Drag to move; [animate] animates',
+  rotate: 'Drag to turn; [animate] animates',
+  resize: 'Drag corners or edges; Alt keeps proportions; [animate] animates',
 }
-const BASE_ATTRS = ['x', 'y', 'rotation', 'scale', 'width', 'height', 'radius', 'fontSize', 'zoom']
+const BASE_ATTRS = ['x', 'y', 'z', 'rotation', 'rotationX', 'rotationY', 'scale', 'width', 'height', 'radius', 'fontSize', 'zoom']
+
+/** A move of a view or of a camera (D428): across and up; round what is at the middle; closer; and for a camera alone, a turn on the spot. */
+type CameraMove = 'across' | 'round' | 'closer' | 'turn'
+/** How far a drag on a compass turns, in degrees for a pane pixel: its near side stays under the pointer (D428). */
+const COMPASS_RATE = 180 / Math.PI / 24
+/** How much closer a drag of a pane pixel brings a camera, as a share: half as far for each 140 pixels (D428). */
+const CLOSER_RATE = 0.005
+/** The nearest a camera is brought to what it looks at, in the scene's pixels: never through it. */
+const NEAREST = 10
+
+/** The side a view looks from to look along an end of an axis, as a camera's pan and tilt (D428): the front for z, the right for x, above for y. */
+function facingOf(axis: CompassAxis): { yaw: number; pitch: number } {
+  if (axis.axis === 'x') return { yaw: 90 * axis.sign, pitch: 0 }
+  if (axis.axis === 'y') return { yaw: 0, pitch: -90 * axis.sign }
+  return { yaw: axis.sign > 0 ? 0 : 180, pitch: 0 }
+}
+
+/** An angle as near another as it can be told, whole turns apart, so a camera animated to it takes the short way; half a turn either way, the smaller of the two. */
+function nearAngle(angle: number, to: number): number {
+  const turns = (to - angle) / 360
+  const low = angle + 360 * Math.floor(turns)
+  const high = low + 360
+  const gap = Math.abs(to - low) - Math.abs(high - to)
+  return Math.abs(gap) < 1e-9 ? (Math.abs(low) <= Math.abs(high) ? low : high) : gap < 0 ? low : high
+}
 
 /** The index of the point within `radius` of a place, the nearest when several are, or null. */
 function nearestPoint(points: Point[], at: Point, radius: number): number | null {
@@ -262,8 +291,17 @@ interface Drag {
   metAt?: number
   /** While a recording runs: what a group in hand carries, of what is in view, whose lives go with its animation (D403). */
   carried?: string[]
-  /** How far the dragged thing goes in the scene for a drag of so many pixels, where that is not the Preview view's own scale: on the Camera view the picture follows the pointer, so the camera goes the other way (D361). */
-  delta?: (dx: number, dy: number) => Point
+  /** A move of the camera in its own view (D428): what the camera shows for a drag of so many pixels, in place of a move across the scene. On the Camera view the picture follows the pointer, so the camera goes the other way (D361). */
+  custom?: (dx: number, dy: number) => Record<string, number>
+  /** What decides together where such a move is written (D356): everything it changes. */
+  together?: string[]
+  /** A move that carries the thing in the plane that faces the view (D430): where the thing is as the drag begins, and whether the view looks straight into the scene, so nothing goes in depth. */
+  lifted?: { at: THREE.Vector3; depth: boolean }
+  /** Where the pointer is on the pane as the drag begins. */
+  paneX: number
+  paneY: number
+  /** What a press let go of where it began does. */
+  onClick?: () => void
 }
 
 /** What a box drawn on the pane holds, as the view it was drawn in has it (D89, D366). */
@@ -380,6 +418,7 @@ const PreviewTime = memo(function PreviewTime({ fps }: { fps: number }) {
 })
 
 export function PreviewPane() {
+  const animateName = useAnimateKey()
   const hostRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   /** The Preview view's part of the pane, and the Camera view's, with its canvas and the name it shows (D359). */
@@ -393,6 +432,15 @@ export function PreviewPane() {
   const cameraViewRef = useRef<{ view: CameraView; fit: () => void } | null>(null)
   /** The view the gesture in hand began in (D366): it keeps to it wherever the pointer goes. */
   const gestureSurfaceRef = useRef<Surface | null>(null)
+  /** The plane the gesture in hand works on (D434), where that is not the plane of what is selected: the plane of what it took up, or the scene's own for what it makes. */
+  const gesturePlaneRef = useRef<Plane | null>(null)
+  /** Gives both views the plane in hand as it is now, before a place on the pane is asked for. */
+  const freshPlaneRef = useRef<() => void>(() => undefined)
+  /** The compasses in the views' corners (D428, D435). */
+  const worldCompassRef = useRef<CompassHandle>(null)
+  const cameraCompassRef = useRef<CompassHandle>(null)
+  /** A drag with the right button has moved a view or a camera: the menu its release would open stays shut. */
+  const menuShutRef = useRef(false)
   /** Lays out what is drawn over the scene for one of the views, when it was last laid out for the other: before a press looks for a handle there. */
   const layoutRef = useRef<(which: 'world' | 'camera') => void>(() => undefined)
   const viewportRef = useRef<Viewport | null>(null)
@@ -413,7 +461,6 @@ export function PreviewPane() {
   /** The turn plain drags have given the box's axes since the selection was made; the box stays turned until it changes (D116). */
   const axesRef = useRef(0)
   const paintRef = useRef<() => void>(() => undefined)
-  const [altDown, setAltDown] = useState(false)
   const [dragging, setDragging] = useState<'aspect' | null>(null)
   /** The paths shown right now (D194, D209, D405): the Path tool's selected one, with its line and anchors and whether its points can be edited, and the others, lines only. */
   const pathRef = useRef<{ primary: { ref: ActionRef; frame: PathFrame; editable: boolean; kind: 'points' | 'curves' | null; handles: AnchorHandle[] } | null; others: { ref: ActionRef; frame: PathFrame }[] } | null>(null)
@@ -562,15 +609,31 @@ export function PreviewPane() {
       const cameras = new Set(s.model ? camerasOf(s.model).map((c) => c.name) : [])
       // The Camera tool has the handles of cameras alone (D373): with anything else selected it shows what is selected and moves none of it.
       const camerasInHand = inHand.length > 0 && inHand.every((n) => cameras.has(n))
+      const surface: Surface = which === 'camera' ? cameraView : viewport
       return {
         selection: which === 'camera' ? inHand.filter((n) => !cameras.has(n)) : inHand,
         mode: s.tool === 'camera' ? ('all' as const) : s.transformMode,
-        pixel: 1 / (which === 'camera' ? cameraView.zoom : viewport.zoom),
+        pixel: 1 / surface.zoom,
         axes: axesRef.current,
         anchored: s.anchored,
         handles: s.tool === 'select' || (s.tool === 'camera' && camerasInHand),
         cameras: which === 'world',
+        // What is in hand is laid out on its own plane (D434). In a view with perspective a pane pixel is more of the scene the farther a thing is, so each thing's lines are sized where it is; in a turned Preview view the cameras stand in the scene as bodies (D435).
+        plane: surface.plane,
+        scale: which === 'camera' || !viewport.flat ? (place: THREE.Vector3) => surface.scaleAt(place) : undefined,
+        bodies: which === 'world' && !viewport.straight,
       }
+    }
+    /** The plane in hand (D434): the gesture's own while one runs, else the plane of the first thing selected, as it is drawn. */
+    const planeInHand = (): Plane => {
+      if (gesturePlaneRef.current) return gesturePlaneRef.current
+      const first = useStore.getState().selection[0]
+      return first ? renderer.planeOf(first) : FLAT
+    }
+    freshPlaneRef.current = () => {
+      const plane = planeInHand()
+      viewport.plane = plane
+      cameraView.plane = plane
     }
     layoutRef.current = (which) => {
       if (laidOut === which) return
@@ -578,10 +641,15 @@ export function PreviewPane() {
       laidOut = which
     }
     // The masks' pictures are drawn through the view's camera before each drawing (D337).
-    viewport.beforeRender = (gl, camera) => renderer.renderMasks(gl, camera)
+    viewport.beforeRender = (gl, camera) => {
+      renderer.orderFor(camera)
+      renderer.renderMasks(gl, camera)
+    }
+    // How large a thing shows, in the pixels of the screen, in whichever view shows it larger: what the detail of a circle follows (D424).
+    renderer.viewDetail = (place) => Math.max(useStore.getState().previewView !== 'camera' ? viewport.scaleAt(place) : 0, cameraView.shown ? cameraView.scaleAt(place) : 0) * window.devicePixelRatio
     viewportRef.current = viewport
     rendererRef.current = renderer
-    if (import.meta.env.DEV) Object.assign((window as unknown as { __quickAnimator?: object }).__quickAnimator ?? {}, { getRenderer: () => renderer, getViewport: () => viewport })
+    if (import.meta.env.DEV) Object.assign((window as unknown as { __quickAnimator?: object }).__quickAnimator ?? {}, { getRenderer: () => renderer, getViewport: () => viewport, getCameraView: () => cameraView })
 
     const paint = () => {
       const s = useStore.getState()
@@ -597,6 +665,8 @@ export function PreviewPane() {
       const over = overlayFor('world')
       renderer.update(s.model, now, over.selection, over.mode, over.pixel, over.axes, gestureRef.current?.restore, over.anchored, over.handles)
       laidOut = 'world'
+      // The plane in hand, for both views (D434): what is selected lies in it as it is drawn now, and places on the pane are places on it.
+      freshPlaneRef.current()
       // Which paths show (D389, D405): with Show Paths, every path running at the moment drawn, of whatever is there then, the path of what is selected in the selection's own color; with the Path tool, also the path of what is selected, the one in force at that moment, and the selected path, which shows its shape and, with its points written out, a handle on each (D192, D194). No other tool shows a path of its own. One hidden for now stays hidden (D209).
       const found: { ref: ActionRef; frame: PathFrame; lead: boolean; held: boolean }[] = []
       if (s.model) {
@@ -648,7 +718,11 @@ export function PreviewPane() {
       // A path whose shape is code has no points to drag and is drawn dashed to say so (D226).
       renderer.setPath(primary ? primary.frame.curve : null, 1 / viewport.zoom, primary?.editable ? primary.frame.anchors : null, s.pathPoints, !!primary && !primary.editable, primary?.handles ?? [], pathRound)
       renderer.setOtherPaths(
-        others.map((o) => ({ points: o.frame.curve, dashed: !pathEditable(o.ref), held: o.held })),
+        others.map((o) => {
+          // Each line lies on the plane of the thing that goes along it (D434).
+          const plane = renderer.planeOf(o.ref.object)
+          return plane === FLAT ? { points: o.frame.curve, dashed: !pathEditable(o.ref), held: o.held } : { points: o.frame.curve, dashed: !pathEditable(o.ref), held: o.held, z: plane.z, turn: plane.turn }
+        }),
         1 / viewport.zoom,
       )
       // With Move path, the path in hand wears a box, with the handle that turns it (D394).
@@ -704,7 +778,7 @@ export function PreviewPane() {
           const a = (c.frame.rotation * Math.PI) / 180
           const lx = -c.frame.width / 2
           const ly = c.frame.height / 2
-          const at = viewport.toPane(c.frame.x + lx * Math.cos(a) - ly * Math.sin(a), c.frame.y + lx * Math.sin(a) + ly * Math.cos(a))
+          const at = viewport.toPane(c.frame.x + lx * Math.cos(a) - ly * Math.sin(a), c.frame.y + lx * Math.sin(a) + ly * Math.cos(a), planeOfFrame(c.frame))
           el.classList.add('shown')
           el.style.left = `${at.x}px`
           el.style.top = `${at.y}px`
@@ -712,9 +786,18 @@ export function PreviewPane() {
           el.classList.toggle('selected', s.selection.includes(c.name))
         }
       }
-      if (worldShown) viewport.render()
-      // What the camera sees (D360), with what is in hand laid out again in its own pixels (D366), and its name beside the view's.
-      cameraView.setView(taken)
+      if (worldShown) {
+        // Laid out again, now that where everything lies is known: on the plane in hand, each line as wide as its own depth makes a pixel (D434).
+        renderer.layout(overlayFor('world'), false)
+        viewport.render()
+      }
+      // Each compass shows the scene's axes as its view sees them (D428): the Preview view's, and the camera's with its roll.
+      const seen = viewport.axes()
+      worldCompassRef.current?.set(seen.right, seen.up, seen.forward)
+      const through = axesOf(taken)
+      cameraCompassRef.current?.set(through.right, through.up, through.forward)
+      // What the camera sees (D360), with what is in hand laid out again in its own pixels (D366), and its name beside the view's. A scene with nothing off depth 0 is taken flat, as it always was (D434).
+      cameraView.setView(taken, renderer.depthless)
       if (cameraView.shown) {
         renderer.layout(overlayFor('camera'))
         laidOut = 'camera'
@@ -737,7 +820,13 @@ export function PreviewPane() {
       const panel = cameraPanel.getBoundingClientRect()
       const inCamera = cameraView.shown && clientX >= panel.left && clientX <= panel.right && clientY >= panel.top && clientY <= panel.bottom
       const surface: Surface = inCamera ? cameraView : viewport
-      return { inside, world: surface.toWorld(paneX, paneY), hit: inside && (!inCamera || cameraView.holds(paneX, paneY)) ? renderer.pick(surface.camera, surface.toNdc(paneX, paneY)) : null, zoom: surface.zoom }
+      // What is dropped lands on the scene's own plane, whatever is in hand (D434).
+      const kept = surface.plane
+      surface.plane = FLAT
+      const world = surface.toWorld(paneX, paneY)
+      const zoom = surface.zoom
+      surface.plane = kept
+      return { inside, world, hit: inside && (!inCamera || cameraView.holds(paneX, paneY)) ? renderer.pick(surface.camera, surface.toNdc(paneX, paneY)) : null, zoom }
     }
     dropTargets.previewCenter = () => {
       // The middle of what is looked at: the picture's, when the Camera view is alone.
@@ -745,7 +834,7 @@ export function PreviewPane() {
       return { x: (v.left + v.right) / 2, y: (v.top + v.bottom) / 2 }
     }
     viewport.onChange = () => {
-      setZoom(viewport.zoom)
+      setZoom(viewport.scale)
       paint()
       bump()
     }
@@ -767,42 +856,63 @@ export function PreviewPane() {
     observer.observe(world)
     observer.observe(cameraPanel)
 
-    // The wheel over the Camera view (D361, D369): the camera zooms, whatever the tool, the place under the pointer staying under it. A run of ticks is one undo step. A scene with no camera gets one.
+    // The wheel over the Camera view (D361, D369): the camera zooms, whatever the tool. It is the lens that zooms and nothing else (D426): the camera stays where it is, so the picture grows from its middle, wherever the pointer is. A run of ticks is one undo step. A scene with no camera gets one.
     let wheelRun: ReturnType<typeof setTimeout> | null = null
-    const zoomCamera = (e: WheelEvent) => {
-      if (!canEdit() || dragRef.current) return
+    /** Through a run of ticks: the zoom the wheel has asked for, finer than what is written, so ticks too small to change the written zoom add up; and the zoom the view was left with, by which a change from elsewhere is told. */
+    let wheelZoom: { name: string; asked: number; left: number } | null = null
+    /** A tick of the wheel on the camera joins the run it is in, which is one undo step. */
+    const wheelTick = () => {
       if (wheelRun === null) beginGesture()
       else clearTimeout(wheelRun)
       wheelRun = setTimeout(() => {
         wheelRun = null
+        wheelZoom = null
         if (!dragRef.current) endGesture()
       }, 400)
+    }
+    /** Alt and the wheel over the Camera view (D428): the camera goes closer to what is at the middle of its picture, or farther, along its line of sight, a share of the way for each tick and never through it. Its lens is left alone, which is the wheel's own. */
+    const closerCamera = (e: WheelEvent) => {
+      if (!canEdit() || dragRef.current) return
+      wheelTick()
+      const name = cameraInHand()
+      const s = useStore.getState()
+      const camera = name ? s.model?.objects.find((o) => o.name === name) : undefined
+      if (!name || !s.model || !camera) return
+      const view = viewOf(s.model, camera, s.time)
+      const m = cameraView.middle()
+      const ray = cameraView.ray(m.x, m.y)
+      const under = renderer.pick(cameraView.camera, cameraView.toNdc(m.x, m.y))
+      const met = under ? meet(ray, renderer.planeOf(under)) : null
+      const at = under && met ? lift(met.x, met.y, renderer.planeOf(under)) : null
+      const ahead = Math.max(NEAREST, at ? aheadOf(view, at) : frameDistance(view))
+      const go = ahead - Math.max(NEAREST, ahead * Math.exp(e.deltaY * 0.0015))
+      const f = axesOf(view).forward
+      const attrs: Record<string, number> = looksStraight(view) ? { z: view.z + f.z * go } : { x: view.x + f.x * go, y: view.y + f.y * go, z: view.z + f.z * go }
+      setAttrsAtMany([{ name, attrs, together: Object.keys(attrs) }], s.time)
+    }
+    const zoomCamera = (e: WheelEvent) => {
+      if (!canEdit() || dragRef.current) return
+      wheelTick()
       const name = cameraInHand()
       const fresh = useStore.getState()
       const camera = name ? fresh.model?.objects.find((o) => o.name === name) : undefined
       if (!name || !fresh.model || !camera) return
       const view = viewOf(fresh.model, camera, fresh.time)
-      const zoom = Math.min(64, Math.max(0.02, view.zoom * Math.exp(-e.deltaY * 0.0015)))
-      // The pointer in the picture, from its middle, in the project's pixels, up being up.
-      const hostBounds = host.getBoundingClientRect()
-      const { x: px, y: py } = cameraView.toPicture(e.clientX - hostBounds.left, e.clientY - hostBounds.top)
-      const a = (view.rotation * Math.PI) / 180
-      const inScene = (z: number): Point => ({ x: (Math.cos(a) * px - Math.sin(a) * py) / z, y: (Math.sin(a) * px + Math.cos(a) * py) / z })
-      const was = inScene(view.zoom)
-      const is = inScene(zoom)
+      const going = wheelZoom && wheelZoom.name === name && Math.abs(wheelZoom.left - view.zoom) <= 1e-9 * view.zoom ? wheelZoom.asked : view.zoom
+      const asked = Math.min(64, Math.max(0.02, going * Math.exp(-e.deltaY * 0.0015)))
       const shown = useStore.getState()
       const own = shown.model?.objects.find((o) => o.name === name)
       if (!shown.model || !own) return
-      const x0 = shownValue(shown.model, own, 'x', shown.time)
-      const y0 = shownValue(shown.model, own, 'y', shown.time)
       const z0 = valueAt(shown.model, own, 'zoom', shown.time)
-      const attrs: Record<string, number> = { zoom: (typeof z0 === 'number' && z0 > 0 ? z0 : 1) * (zoom / view.zoom) }
-      const dx = was.x - is.x
-      const dy = was.y - is.y
-      // Only what changes is written: a zoom at the picture's middle moves nothing.
-      if (Math.abs(dx) >= 0.5) attrs['x'] = (typeof x0 === 'number' ? x0 : 0) + dx
-      if (Math.abs(dy) >= 0.5) attrs['y'] = (typeof y0 === 'number' ? y0 : 0) + dy
-      setAttrsAtMany([{ name, attrs, together: ['x', 'y', 'zoom'] }], shown.time)
+      const ownZoom = typeof z0 === 'number' && z0 > 0 ? z0 : 1
+      // The zoom as it will be written, and the view's zoom with it: a tick that does not change what is written changes nothing, and adds up with the next.
+      const written = roundAttr('zoom', ownZoom * (asked / view.zoom))
+      if (written === roundAttr('zoom', ownZoom)) {
+        wheelZoom = { name, asked, left: view.zoom }
+        return
+      }
+      wheelZoom = { name, asked, left: view.zoom * (written / ownZoom) }
+      setAttrsAtMany([{ name, attrs: { zoom: written } }], shown.time)
     }
 
     const onWheel = (e: WheelEvent) => {
@@ -811,12 +921,13 @@ export function PreviewPane() {
       const paneX = e.clientX - bounds.left
       const paneY = e.clientY - bounds.top
       const overCamera = e.target instanceof Node && cameraPanel.contains(e.target)
-      if (overCamera && !e.shiftKey) {
-        // The Camera view never zooms as a view: it shows what the camera sees, so the wheel there zooms the camera itself (D369).
-        if (!e.altKey) zoomCamera(e)
+      if (overCamera && !animateHeld(e)) {
+        // The Camera view never zooms as a view: it shows what the camera sees, so the wheel there zooms the camera itself (D369), and with Alt moves it closer (D428).
+        if (e.altKey) closerCamera(e)
+        else zoomCamera(e)
         return
       }
-      if (e.shiftKey) {
+      if (animateHeld(e)) {
         // Shift and the wheel lengthen or shorten the selected actions, wherever the pointer is
         // (D97, D111). During a Shift gesture the playhead keeps showing the end of what is being made (D103).
         const s = useStore.getState()
@@ -852,22 +963,18 @@ export function PreviewPane() {
     }
     host.addEventListener('wheel', onWheel, { passive: false })
 
-    // Releasing Shift ends the gesture: the playhead goes back to where it was. Alt held shows
-    // that a corner drag keeps the proportions (D113).
+    // Releasing Shift ends the gesture: the playhead goes back to where it was.
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'Alt') setAltDown(false)
-      if (e.key !== 'Shift' || !gestureRef.current || dragRef.current) return
+      if (!isAnimateKey(e) || !gestureRef.current || dragRef.current) return
       useStore.getState().setTime(restingTime(gestureRef.current))
       gestureRef.current = null
     }
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Alt') {
-        e.preventDefault()
-        setAltDown(true)
-      }
+      // Alt alone would open the window's menu: here it is held with the pointer, to keep proportions or to move a view (D113, D427).
+      if (e.key === 'Alt') e.preventDefault()
       // Shift held over the pane, with Starts at playhead: look ahead to the proposed animation's end
       // before anything is dragged, so what is dragged is what is written (D103).
-      if (e.key !== 'Shift' || e.repeat || gestureRef.current || dragRef.current) return
+      if (!isAnimateKey(e) || e.repeat || gestureRef.current || dragRef.current) return
       if (e.target instanceof Element && e.target.closest('input, textarea')) return
       const s = useStore.getState()
       // A recording has the playhead: Shift means nothing more while it runs (D397).
@@ -899,7 +1006,7 @@ export function PreviewPane() {
     }
     // Shift held with another key is that key's hotkey, not a gesture (D310): the look ahead ends first, as letting go of Shift ends it, so the hotkey acts where the playhead rests.
     const onOtherKey = (e: KeyboardEvent) => {
-      if (e.key === 'Shift' || e.key === 'Alt' || e.key === 'Control' || e.key === 'Meta' || !gestureRef.current || dragRef.current) return
+      if (isAnimateKey(e) || e.key === 'Shift' || e.key === 'Alt' || e.key === 'Control' || e.key === 'Meta' || !gestureRef.current || dragRef.current) return
       useStore.getState().setTime(restingTime(gestureRef.current))
       gestureRef.current = null
     }
@@ -907,11 +1014,9 @@ export function PreviewPane() {
     const onFocusIn = (e: FocusEvent) => {
       if (e.target instanceof Element && e.target.closest('.cm-editor, input, textarea')) hoverRef.current = false
     }
-    const onBlur = () => setAltDown(false)
     window.addEventListener('keyup', onKeyUp)
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keydown', onOtherKey, true)
-    window.addEventListener('blur', onBlur)
     document.addEventListener('focusin', onFocusIn)
 
     return () => {
@@ -919,7 +1024,6 @@ export function PreviewPane() {
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keydown', onOtherKey, true)
-      window.removeEventListener('blur', onBlur)
       document.removeEventListener('focusin', onFocusIn)
       unsubscribe()
       observer.disconnect()
@@ -982,12 +1086,16 @@ export function PreviewPane() {
     const part = (worldRef.current ?? host).getBoundingClientRect()
     if (!own.sized && part.width > 0 && part.height > 0) own.resize(part.width, part.height, window.devicePixelRatio)
     const viewport: Surface = on ?? surfaceAt(clientX, clientY) ?? own
+    // A gesture just over may have left its own plane in hand.
+    freshPlaneRef.current()
     const bounds = host.getBoundingClientRect()
     const paneX = clientX - bounds.left
     const paneY = clientY - bounds.top
     const cam = cameraViewRef.current?.view
     // Past the picture's edge the Camera view draws nothing, so nothing is picked there.
-    const hit = viewport === cam && !cam.holds(paneX, paneY) ? null : renderer.pick(viewport.camera, viewport.toNdc(paneX, paneY))
+    const drawn = viewport === cam && !cam.holds(paneX, paneY) ? null : renderer.pick(viewport.camera, viewport.toNdc(paneX, paneY))
+    // In a turned Preview view a flat thing seen on edge has no face to press: it is found by the line of its box (D435).
+    const hit = drawn ?? (viewport === own && !own.straight ? renderer.pickEdge(paneX, paneY, 5, (x, y, plane) => own.toPane(x, y, plane)) : null)
     return { viewport, renderer, bounds, paneX, paneY, world: viewport.toWorld(paneX, paneY), hit }
   }
 
@@ -1002,8 +1110,10 @@ export function PreviewPane() {
       el.removeEventListener('pointerup', onUp)
       el.removeEventListener('pointercancel', onUp)
       onEnd(ev)
-      // The gesture is over: the next one finds its own view.
+      // The gesture is over: the next one finds its own view, and its own plane, and the views have the plane of what is selected again.
       gestureSurfaceRef.current = null
+      gesturePlaneRef.current = null
+      freshPlaneRef.current()
     }
     el.addEventListener('pointermove', onMove)
     el.addEventListener('pointerup', onUp)
@@ -1053,7 +1163,7 @@ export function PreviewPane() {
    * own place, its first anchor. With `begun`, the press that made the path opened a gesture, and
    * it ends here: the path, its first points, and the line drawn are one undo step.
    */
-  const beginStroke = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, from: Point, clickAdds: boolean, begun = false) => {
+  const beginStroke = (host: HTMLDivElement, e: ReactPointerEvent<Element>, ref: ActionRef, from: Point, clickAdds: boolean, begun = false) => {
     const viewport = surfaceOf()
     if (!viewport) {
       if (begun) endGesture()
@@ -1099,7 +1209,7 @@ export function PreviewPane() {
    * instead, when there is one. A path that begins where its object is goes with its object
    * (D387), so the drag moves the object as the path begins, whatever the shape is written as.
    */
-  const beginPathMove = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, world: Point, insertAt: number | null) => {
+  const beginPathMove = (host: HTMLDivElement, e: ReactPointerEvent<Element>, ref: ActionRef, world: Point, insertAt: number | null) => {
     const viewport = surfaceOf()
     if (!viewport) return
     const bounds = host.getBoundingClientRect()
@@ -1138,7 +1248,7 @@ export function PreviewPane() {
    * the path begins at, and the path's `angle` takes the turn, by the angle step when snapping
    * is on, as one undo step.
    */
-  const beginPathTurn = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, frame: PathFrame, world: Point) => {
+  const beginPathTurn = (host: HTMLDivElement, e: ReactPointerEvent<Element>, ref: ActionRef, frame: PathFrame, world: Point) => {
     const viewport = surfaceOf()
     const pivot = frame.anchors[0] ?? frame.curve[0]
     const s = useStore.getState()
@@ -1172,7 +1282,7 @@ export function PreviewPane() {
    * Move a whole path whose shape is code, a function or a link, with the Path tool (D223): the
    * drag carries it by how far the pointer goes, written into its `offset`, as one undo step.
    */
-  const beginPathShift = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, world: Point) => {
+  const beginPathShift = (host: HTMLDivElement, e: ReactPointerEvent<Element>, ref: ActionRef, world: Point) => {
     const viewport = surfaceOf()
     if (!viewport) return
     const bounds = host.getBoundingClientRect()
@@ -1204,7 +1314,7 @@ export function PreviewPane() {
    * pointer rather than by how far it went: for an object pressed mid-path and shown at the
    * path's end, which then lands where the pointer is, as a move's end does (D102, D205).
    */
-  const beginPathEdit = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, world: Point, point: number | null, insert: LineInsert | null, toggle: boolean, follow = false) => {
+  const beginPathEdit = (host: HTMLDivElement, e: ReactPointerEvent<Element>, ref: ActionRef, world: Point, point: number | null, insert: LineInsert | null, toggle: boolean, follow = false) => {
     const viewport = surfaceOf()
     if (!viewport) return
     const bounds = host.getBoundingClientRect()
@@ -1261,7 +1371,7 @@ export function PreviewPane() {
    * on the first corner closes it. Enter closes, Escape leaves it a line.
    */
   /** A press on empty space (D89, D255): a drag draws a box in pane pixels and hands over what it holds, as the view it is drawn in has it, or null for a click. */
-  const beginMarquee = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, located: { paneX: number; paneY: number }, onEnd: (box: Boxed | null) => void) => {
+  const beginMarquee = (host: HTMLDivElement, e: ReactPointerEvent<Element>, located: { paneX: number; paneY: number }, onEnd: (box: Boxed | null) => void) => {
     const viewport = surfaceOf()
     if (!viewport) return
     const start = { x: located.paneX, y: located.paneY }
@@ -1283,23 +1393,17 @@ export function PreviewPane() {
         const renderer = rendererRef.current
         if (moved && rect && renderer) {
           const pane = { left: Math.min(rect.x0, rect.x1), right: Math.max(rect.x0, rect.x1), top: Math.min(rect.y0, rect.y1), bottom: Math.max(rect.y0, rect.y1) }
-          if (viewport === viewportRef.current) {
-            // The Preview view is never turned: the box is one in the scene, its top left corner and its bottom right.
-            const a = viewport.toWorld(pane.left, pane.top)
-            const b = viewport.toWorld(pane.right, pane.bottom)
-            const inScene = { left: a.x, right: b.x, top: a.y, bottom: b.y }
-            box = { has: (p) => p.x >= a.x && p.x <= b.x && p.y >= b.y && p.y <= a.y, objects: () => renderer.objectsIn(inScene), cameras: () => renderer.camerasIn(inScene) }
-          } else {
-            // The Camera view may be turned: what the box holds is told on the pane itself.
-            const onPane = (x: number, y: number) => viewport.toPane(x, y)
-            box = {
-              has: (p) => {
-                const q = onPane(p.x, p.y)
-                return q.x >= pane.left && q.x <= pane.right && q.y >= pane.top && q.y <= pane.bottom
-              },
-              objects: () => renderer.objectsOnPane(pane, onPane),
-              cameras: () => [],
-            }
+          // Either view may be turned (D366, D435): what the box holds is told on the pane itself, each thing by the plane it lies in, a point by the plane in hand.
+          const onPane = (x: number, y: number, plane?: Plane) => viewport.toPane(x, y, plane)
+          const inHand = viewport.plane
+          box = {
+            has: (p) => {
+              const q = onPane(p.x, p.y, inHand)
+              return q.x >= pane.left && q.x <= pane.right && q.y >= pane.top && q.y <= pane.bottom
+            },
+            objects: () => renderer.objectsOnPane(pane, onPane),
+            // The Camera view draws no camera, being one's own.
+            cameras: () => (viewport === viewportRef.current ? renderer.camerasOnPane(pane, onPane) : []),
           }
         }
         onEnd(box)
@@ -1309,12 +1413,20 @@ export function PreviewPane() {
   }
 
 
-  const beginShapeDraw = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, world: Point) => {
+  const beginShapeDraw = (host: HTMLDivElement, e: ReactPointerEvent<Element>, at: Point) => {
+    let world = at
     const viewport = surfaceOf()
     if (!viewport) return
     const s = useStore.getState()
     let name = shapeDraftRef.current
     if (name && !s.model?.objects.some((o) => o.name === name)) name = null
+    if (!name) {
+      // A new shape is drawn on the scene's own plane, whatever is in hand (D434).
+      const b = host.getBoundingClientRect()
+      gesturePlaneRef.current = FLAT
+      viewport.plane = FLAT
+      world = viewport.toWorld(e.clientX - b.left, e.clientY - b.top)
+    }
     if (name && s.model) {
       const obj = s.model.objects.find((o) => o.name === name)!
       const anchor = shapeOwnAnchors(s.model, obj, s.time)[0]
@@ -1381,7 +1493,7 @@ export function PreviewPane() {
    * one; or put a new point in at `insertAt`, where the pointer is, and drag it. With `toggle`,
    * a click picks the point or lets it go, and nothing moves.
    */
-  const beginShapePointEdit = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, name: string, world: Point, point: number | null, insert: LineInsert | null, toggle: boolean, morph = false) => {
+  const beginShapePointEdit = (host: HTMLDivElement, e: ReactPointerEvent<Element>, name: string, world: Point, point: number | null, insert: LineInsert | null, toggle: boolean, morph = false) => {
     const viewport = surfaceOf()
     if (!viewport) return
     const bounds = host.getBoundingClientRect()
@@ -1450,7 +1562,7 @@ export function PreviewPane() {
   }
 
   /** Drag a control of an anchor of a curves shape (D240): a smooth anchor's other control turns to stay in line, except while Alt is held, whenever in the drag that is, when this one moves alone; a corner's moves alone (D252). */
-  const beginShapeHandleDrag = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, name: string, pressed: AnchorHandle, at: Point) => {
+  const beginShapeHandleDrag = (host: HTMLDivElement, e: ReactPointerEvent<Element>, name: string, pressed: AnchorHandle, at: Point) => {
     const viewport = surfaceOf()
     if (!viewport) return
     const bounds = host.getBoundingClientRect()
@@ -1481,7 +1593,7 @@ export function PreviewPane() {
   }
 
   /** Drag a control of an anchor of a curves path (D246), with the same rules, Alt included. */
-  const beginPathHandleDrag = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, ref: ActionRef, handle: AnchorHandle, world: Point) => {
+  const beginPathHandleDrag = (host: HTMLDivElement, e: ReactPointerEvent<Element>, ref: ActionRef, handle: AnchorHandle, world: Point) => {
     const viewport = surfaceOf()
     if (!viewport) return
     const bounds = host.getBoundingClientRect()
@@ -1582,7 +1694,232 @@ export function PreviewPane() {
     return items
   }
 
-  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => press(e, null)
+  /** The camera a press in the Preview view is on (D361, D373, D435): in a turned view by its body, where it stands; else by its frame's line, on the frame's own plane; and with `inside`, the Camera tool's, by all of its frame. */
+  const cameraUnder = (located: { viewport: Surface; renderer: SceneRenderer; paneX: number; paneY: number }, inside: boolean, prefer: readonly string[]): string | null => {
+    const { viewport, renderer, paneX, paneY } = located
+    const ray = viewport.ray(paneX, paneY)
+    const onFrame = (frame: Frame) => {
+      const plane = planeOfFrame(frame)
+      const p = meet(ray, plane)
+      return p ? { x: p.x, y: p.y, pixel: 1 / viewport.zoomOn(p.x, p.y, plane) } : null
+    }
+    const body = viewport.straight ? null : renderer.pickCameraBody(paneX, paneY, (place) => viewport.project(place))
+    return body ?? renderer.pickCamera(onFrame, CAMERA_REACH_PX) ?? (inside ? renderer.pickCameraInside(onFrame, prefer) : null)
+  }
+
+  /** The place on the scene's own plane under a place on the pane, whatever plane is in hand: where what is made goes (D434). */
+  const onFlat = (surface: Surface, paneX: number, paneY: number): Point => {
+    const kept = surface.plane
+    surface.plane = FLAT
+    const p = surface.toWorld(paneX, paneY)
+    surface.plane = kept
+    return p
+  }
+
+  /** What a view looks at under a place on its pane (D428): the thing its line of sight meets there, on that thing's own plane; else where the line meets depth 0; null when it meets neither. */
+  const lookedAt = (surface: Surface, paneX: number, paneY: number): THREE.Vector3 | null => {
+    const renderer = rendererRef.current
+    if (!renderer) return null
+    const ray = surface.ray(paneX, paneY)
+    const name = renderer.pick(surface.camera, surface.toNdc(paneX, paneY))
+    const plane = name ? renderer.planeOf(name) : FLAT
+    const met = meet(ray, plane) ?? (name ? meet(ray, FLAT) : null)
+    return met ? lift(met.x, met.y, meet(ray, plane) ? plane : FLAT) : null
+  }
+
+  /** Whether a press is on a handle Alt has its say on (D113, D246), and so is not a move of the view: one of the selection's box, or a control of a curve's point. */
+  const onHandle = (located: { world: Point; viewport: Surface; renderer: SceneRenderer }, inCameraView: boolean): boolean => {
+    const s = useStore.getState()
+    const pixel = 1 / located.viewport.zoom
+    if ((s.tool === 'select' || s.tool === 'camera') && s.selection.length > 0) {
+      layoutRef.current(inCameraView ? 'camera' : 'world')
+      if (located.renderer.pickHandle(located.world)) return true
+    }
+    const shape = shapeRef.current
+    if (s.tool === 'shape' && shape?.editable && nearestPoint(shape.handles.map((h) => h.point), located.world, 8 * pixel) !== null) return true
+    const path = pathRef.current?.primary
+    return !!path && path.handles.length > 0 && nearestPoint(path.handles.map((h) => h.point), located.world, 8 * pixel) !== null
+  }
+
+  /**
+   * Move the Preview view (D428): go round what is at its middle, or zoom it, to the right or up
+   * for closer. Nothing is written: a view is not a camera. A drag with the right button keeps
+   * the menu shut.
+   */
+  const moveView = (host: HTMLDivElement, e: ReactPointerEvent<Element>, kind: 'round' | 'closer', rate = ROUND_RATE, onClick?: () => void) => {
+    const own = viewportRef.current
+    if (!own) return
+    e.preventDefault()
+    const m = own.middle()
+    if (kind === 'round') {
+      const at = lookedAt(own, m.x, m.y)
+      if (at) own.lookAt(at)
+    }
+    let last = { x: e.clientX, y: e.clientY }
+    let moved = false
+    capture(
+      host,
+      e.pointerId,
+      (ev) => {
+        if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 3) return
+        if (!moved) host.classList.add('panning')
+        moved = true
+        const dx = ev.clientX - last.x
+        const dy = ev.clientY - last.y
+        last = { x: ev.clientX, y: ev.clientY }
+        if (kind === 'round') own.roundBy(dx, dy, rate)
+        else own.zoomAt(Math.exp((dx - dy) * CLOSER_RATE), m.x, m.y)
+      },
+      () => {
+        host.classList.remove('panning')
+        if (moved && e.button === 2) menuShutRef.current = true
+        if (!moved) onClick?.()
+      },
+    )
+  }
+
+  /** A press on the Preview view's compass (D428, D435): a drag turns the view round what is at its middle, the compass's near side following the pointer; a press on an end of an axis looks along it, from the other side when it already does, with everything in view. */
+  const pressViewCompass = (e: ReactPointerEvent<Element>, axis: CompassAxis | null) => {
+    const host = hostRef.current
+    if (!host || e.button !== 0) return
+    moveView(host, e, 'round', COMPASS_RATE, () => {
+      const own = viewportRef.current
+      const renderer = rendererRef.current
+      if (!own || !renderer || !axis) return
+      const now = own.facing
+      let to = facingOf(axis)
+      if (Math.abs(to.pitch - now.pitch) < 0.5 && (Math.abs(to.pitch) > 89.5 || Math.abs(nearAngle(to.yaw, now.yaw) - now.yaw) < 0.5)) to = facingOf({ axis: axis.axis, sign: axis.sign > 0 ? -1 : 1 })
+      own.face(to.yaw, to.pitch)
+      const all = renderer.extent()
+      if (all.length > 0) own.showAll(all)
+      else own.fit()
+    })
+  }
+
+  /** Write what the camera that has the picture shows (D436): as it is at the playhead, or with the key that animates held, as an animation from the playhead, as any change made with it is (D103, D423). One undo step; a scene with no camera gets one in it. */
+  const writeCamera = (values: Record<string, number>, animate: boolean) => {
+    if (!canEdit() || Object.keys(values).length === 0) return
+    beginGesture()
+    try {
+      const name = cameraInHand()
+      const s = useStore.getState()
+      if (!name) return
+      if (animate && !s.recording) {
+        const gesture = gestureRef.current
+        const pinNow = gesture?.editing ? 'start' : s.pin
+        const end = beginTimed(name, Object.keys(values), pinNow, gesture?.from ?? s.time, gesture?.duration ?? 1)
+        const index = end === null ? null : lastActionIndex(name)
+        if (end !== null && index !== null) {
+          setActionDestination(name, index, values)
+          madeWithShift(end, pinNow)
+        }
+      } else setAttrsAtMany([{ name, attrs: values, together: Object.keys(values) }], s.time)
+    } finally {
+      endGesture()
+    }
+  }
+
+  /** What the camera that has the picture is taken through at the playhead; with none, as the picture is with no camera. */
+  const liveView = () => {
+    const s = useStore.getState()
+    const live = s.model ? cameraAt(s.model, s.time) : null
+    return live && s.model ? viewOf(s.model, live, s.time) : NO_VIEW
+  }
+
+  /** Of what a camera would be told, what is not so already. */
+  const differing = (values: Record<string, number>, now: Record<string, number>): Record<string, number> => Object.fromEntries(Object.entries(values).filter(([attr, value]) => Math.abs(value - (now[attr] ?? 0)) > 1e-6))
+
+  /** A press on an end of an axis of the Camera view's compass (D428): the camera faces along it from where it stands, the other way when it already does; its roll is its own. */
+  const faceCamera = (axis: CompassAxis, animate: boolean) => {
+    const view = liveView()
+    const along = (sign: number) => anglesAlong({ x: axis.axis === 'x' ? -sign : 0, y: axis.axis === 'y' ? -sign : 0, z: axis.axis === 'z' ? -sign : 0 })
+    let to = along(axis.sign)
+    if (Math.abs(to.rotationX - view.rotationX) < 0.5 && (Math.abs(to.rotationX) > 89.5 || Math.abs(nearAngle(to.rotationY, view.rotationY) - view.rotationY) < 0.5)) to = along(-axis.sign)
+    writeCamera(differing({ rotationX: to.rotationX, rotationY: nearAngle(to.rotationY, view.rotationY) }, { rotationX: view.rotationX, rotationY: view.rotationY }), animate)
+  }
+
+  /** The Preview view stands where the camera that has the picture stands, and looks the way it looks (D436). Nothing is written. */
+  const viewFromCamera = () => {
+    const view = liveView()
+    viewportRef.current?.standAt({ x: view.x, y: view.y, z: view.z }, view.rotationY, view.rotationX, frameDistance(view))
+  }
+
+  /** The camera that has the picture stands where the Preview view's eye is, and looks the way it looks (D436): written, and with the key that animates held, animated. Its roll and its lens are its own. */
+  const cameraFromView = (animate: boolean) => {
+    const own = viewportRef.current
+    if (!own) return
+    const view = liveView()
+    const eye = own.eye()
+    const { yaw, pitch } = own.facing
+    writeCamera(differing({ x: eye.x, y: eye.y, z: eye.z, rotationX: pitch, rotationY: nearAngle(yaw, view.rotationY) }, { x: view.x, y: view.y, z: view.z, rotationX: view.rotationX, rotationY: view.rotationY }), animate)
+  }
+
+  /** The camera that has the picture goes back to where a camera is unless told (D436): with the key that animates held, by an animation; else what it was told is taken away. */
+  const cameraHome = (animate: boolean) => {
+    if (!canEdit()) return
+    const name = cameraInHand(false)
+    if (!name) return
+    if (!animate) {
+      resetCamera(name)
+      return
+    }
+    const view = liveView()
+    writeCamera(differing({ x: 0, y: 0, z: standDistance(), rotationX: 0, rotationY: nearAngle(0, view.rotationY), rotation: nearAngle(0, view.rotation) }, { x: view.x, y: view.y, z: view.z, rotationX: view.rotationX, rotationY: view.rotationY, rotation: view.rotation }), true)
+  }
+
+  /** What a move of a camera changes (D428), so an animation of it is made to hold all of it: a camera that looks straight on goes across by x and y, and closer by z alone. */
+  const cameraKeys = (kind: CameraMove, straight: boolean): string[] => (kind === 'round' ? ['x', 'y', 'z', 'rotationX', 'rotationY'] : kind === 'turn' ? ['rotationX', 'rotationY'] : kind === 'closer' ? (straight ? ['z'] : ['x', 'y', 'z']) : straight ? ['x', 'y'] : ['x', 'y', 'z'])
+
+  /**
+   * A move of the camera that has the picture, made in its own view (D428): what the camera shows
+   * for a drag of so many pane pixels from where the drag began. Across, the thing pressed stays
+   * under the pointer, by its own depth, so the camera goes the other way (D361, D369). Round, it
+   * goes round what is at the middle of its picture, which stays there: a drag to the right turns
+   * it to its right, so the near side of what is seen follows the pointer. Closer, it goes along
+   * its line of sight, to the right or up for closer, half as far for each 140 pixels and never
+   * through what it nears. A turn is on the spot. The zoom is the lens's and no move's (D426).
+   */
+  const cameraMover = (kind: CameraMove, name: string, time: number, located: { paneX: number; paneY: number }): ((dx: number, dy: number) => Record<string, number>) | null => {
+    const s = useStore.getState()
+    const cam = cameraViewRef.current?.view
+    const obj = s.model?.objects.find((o) => o.name === name)
+    if (!s.model || !obj || !cam) return null
+    const view = viewOf(s.model, obj, time)
+    const { right, up, forward } = axesOf(view)
+    const straight = looksStraight(view)
+    if (kind === 'turn') return (dx, dy) => ({ rotationX: Math.max(-90, Math.min(90, view.rotationX - dy * COMPASS_RATE)), rotationY: view.rotationY - dx * COMPASS_RATE })
+    if (kind === 'across') {
+      const pressed = lookedAt(cam, located.paneX, located.paneY)
+      const ahead = Math.max(1e-3, pressed && aheadOf(view, pressed) > 1e-3 ? aheadOf(view, pressed) : frameDistance(view))
+      // How much of the scene a pane pixel is, as far ahead as what was pressed.
+      const per = (view.orthographic ? 1 / Math.max(1e-6, view.zoom) : ahead / fullDistance(view)) / (cam.scale || 1)
+      return (dx, dy) => {
+        const u = -dx * per
+        const v = dy * per
+        const out: Record<string, number> = { x: view.x + right.x * u + up.x * v, y: view.y + right.y * u + up.y * v }
+        if (!straight) out['z'] = view.z + right.z * u + up.z * v
+        return out
+      }
+    }
+    // What is at the middle of the picture: the thing the line of sight meets; else where it meets depth 0; else as far ahead as a 50 mm lens frames the project, which is where the frame is drawn.
+    const m = cam.middle()
+    const middle = lookedAt(cam, m.x, m.y)
+    const ahead = Math.max(NEAREST, middle && aheadOf(view, middle) > 1e-3 ? aheadOf(view, middle) : cameraFrame(view).distance)
+    const pivot = { x: view.x + forward.x * ahead, y: view.y + forward.y * ahead, z: view.z + forward.z * ahead }
+    if (kind === 'round')
+      return (dx, dy) => {
+        const rotationY = view.rotationY - dx * ROUND_RATE
+        const rotationX = Math.max(-90, Math.min(90, view.rotationX - dy * ROUND_RATE))
+        const at = roundPlace(pivot, ahead, rotationX, rotationY)
+        return { x: at.x, y: at.y, z: at.z, rotationX, rotationY }
+      }
+    return (dx, dy): Record<string, number> => {
+      const go = ahead - Math.max(NEAREST, ahead * Math.exp(-(dx - dy) * CLOSER_RATE))
+      return straight ? { z: view.z + forward.z * go } : { x: view.x + forward.x * go, y: view.y + forward.y * go, z: view.z + forward.z * go }
+    }
+  }
+
+  const onPointerDown = (e: ReactPointerEvent<Element>) => press(e, null)
 
   /**
    * A press on the pane: in the Preview view; in the Camera view, `on.view`, where everything is
@@ -1591,7 +1928,7 @@ export function PreviewPane() {
    * The middle button drags the Preview view, and in the Camera view the camera itself, the
    * picture following the pointer (D369).
    */
-  const press = (e: ReactPointerEvent<HTMLDivElement>, on: { view: 'camera' } | { camera: string } | null) => {
+  const press = (e: ReactPointerEvent<Element>, on: { view: 'camera'; move?: CameraMove; axis?: CompassAxis | null } | { camera: string } | null) => {
     const host = hostRef.current
     const own = viewportRef.current
     const cam = cameraViewRef.current?.view
@@ -1599,9 +1936,17 @@ export function PreviewPane() {
     const inCameraView = !!on && 'view' in on && !!cam
     const viewport: Surface = inCameraView && cam ? cam : own
     gestureSurfaceRef.current = viewport
-    const panCamera = inCameraView && e.button === 1
-
-    if (e.button === 1 && !panCamera) {
+    gesturePlaneRef.current = null
+    // What the buttons ask of a view or a camera (D427, D428): the middle button across, with Ctrl round; Alt and the right button closer. Alt and the left button go round too, looked at below, since a press on a handle with Alt is the handle's.
+    let move: CameraMove | null = on && 'view' in on && on.move ? on.move : e.button === 1 ? (e.ctrlKey || e.metaKey ? 'round' : 'across') : e.button === 2 && e.altKey ? 'closer' : null
+    // The right button alone is the menu's.
+    if (e.button !== 0 && !move) return
+    if (move && !inCameraView && e.button !== 0) {
+      // The Preview view's own moves change what is seen and write nothing.
+      if (move !== 'across') {
+        moveView(host, e, move === 'closer' ? 'closer' : 'round')
+        return
+      }
       e.preventDefault()
       host.classList.add('panning')
       let last = { x: e.clientX, y: e.clientY }
@@ -1616,22 +1961,33 @@ export function PreviewPane() {
       )
       return
     }
-    if (e.button !== 0 && !panCamera) return
-    if (panCamera) e.preventDefault()
 
     const located = locate(host, e.clientX, e.clientY, viewport)
     if (!located) return
     const { renderer } = located
     let store = useStore.getState()
-    // The middle button in the Camera view is the Camera tool for that drag.
+    // Alt and the left button go round (D427), but for what Alt already means under the pointer: a handle, which it keeps in proportion or moves alone (D113, D246), and with Paint a click, which takes a color (D294). Where Alt is the key that animates, a drag with it is an animation, as the one who chose it asked, and going round is the middle button's with Ctrl (D432).
+    if (e.button === 0 && e.altKey && !move && animateKey() !== 'Alt' && !(on && 'camera' in on) && store.tool !== 'paint' && !onHandle(located, inCameraView)) {
+      if (!inCameraView) {
+        moveView(host, e, 'round')
+        return
+      }
+      move = 'round'
+    }
+    // A move of the camera made in its own view (D369, D428): the picture is the camera's, and the move is written, whatever the tool.
+    const panCamera = inCameraView && move !== null
+    if (panCamera) e.preventDefault()
+    // Such a move is the Camera tool's for that drag.
     const toolNow = panCamera ? 'camera' : store.tool
 
     // The Object tool places one object per click and stays on (D163, D203).
     if (toolNow === 'object') {
       // A preset chosen in the bar is placed instead of a kind (D300).
       const preset = store.addPreset ? store.userPresets.find((u) => u.id === store.addPreset) : undefined
-      if (preset) addUserObject(preset, located.world.x, located.world.y)
-      else addObject(store.addKind, located.world.x, located.world.y)
+      // What is made goes on the scene's own plane, under the pointer (D434).
+      const at = onFlat(viewport, located.paneX, located.paneY)
+      if (preset) addUserObject(preset, at.x, at.y)
+      else addObject(store.addKind, at.x, at.y)
       return
     }
     // The Paint tool (D293, D294): a click fills what is under it with the color; Alt, or the dropper, takes the color under it instead.
@@ -1644,7 +2000,7 @@ export function PreviewPane() {
       const st = styleRef.current
       const outline = paintModeRef.current === 'stroke'
       const color = outline ? st.stroke : st.fill
-      if (e.shiftKey) {
+      if (animateHeld(e)) {
         // A color change made as any Shift-made animation is (D103, D127): from where the playhead was before Shift looked ahead, for the proposed length, pinned as the pin says, the next one following in Chain mode.
         const gesture = gestureRef.current
         const pinNow = gesture?.editing ? 'start' : store.pin
@@ -1659,7 +2015,12 @@ export function PreviewPane() {
     }
     // The Pencil (D297, D320): a line wherever it is drawn, over an object as over empty space; Shift writes it on as any Shift-made animation.
     if (toolNow === 'pencil') {
-      if (canEdit()) beginSketch(host, e, located.world, located.paneX, located.paneY)
+      if (canEdit()) {
+        // A line is drawn on the scene's own plane, whatever is in hand (D434).
+        gesturePlaneRef.current = FLAT
+        viewport.plane = FLAT
+        beginSketch(host, e, viewport.toWorld(located.paneX, located.paneY), located.paneX, located.paneY)
+      }
       return
     }
     // The Shape tool (D236): Create draws a shape point by point; Edit works on the selected shape's points, a press on a Shape picks it, and empty space lets the points go.
@@ -1667,9 +2028,9 @@ export function PreviewPane() {
       const shown = shapeRef.current
       const pixel = 1 / viewport.zoom
       const creating = store.shapeMode === 'create'
-      if (shown?.editable && (!e.shiftKey || !creating)) {
+      if (shown?.editable && (!animateHeld(e) || !creating)) {
         // A control of a picked anchor first, then a point, then, in Edit mode, the line (D240). In Create mode a press on the first corner of the shape being drawn closes it (D233); any other point drags, in either mode. Shift with a point in Edit mode writes a morph and drags its target (D257).
-        const control = e.shiftKey ? null : nearestPoint(shown.handles.map((h) => h.point), located.world, 8 * pixel)
+        const control = animateHeld(e) ? null : nearestPoint(shown.handles.map((h) => h.point), located.world, 8 * pixel)
         if (control !== null) {
           beginShapeHandleDrag(host, e, shown.name, shown.handles[control]!, located.world)
           return
@@ -1677,15 +2038,15 @@ export function PreviewPane() {
         const point = nearestPoint(shown.frame.anchors, located.world, 8 * pixel)
         const closing = creating && shapeDraftRef.current === shown.name && point === 0 && shown.frame.anchors.length >= 3
         if (point !== null && !closing) {
-          beginShapePointEdit(host, e, shown.name, located.world, point, null, e.ctrlKey || e.metaKey, e.shiftKey)
+          beginShapePointEdit(host, e, shown.name, located.world, point, null, e.ctrlKey || e.metaKey, animateHeld(e))
           return
         }
-        const insert = creating || e.shiftKey ? null : insertionAt(shown, located.world, 6 * pixel)
+        const insert = creating || animateHeld(e) ? null : insertionAt(shown, located.world, 6 * pixel)
         if (insert && !(e.ctrlKey || e.metaKey)) {
           beginShapePointEdit(host, e, shown.name, located.world, null, insert, false)
           return
         }
-        if (e.shiftKey) return
+        if (animateHeld(e)) return
       }
       if (creating) {
         beginShapeDraw(host, e, located.world)
@@ -1716,7 +2077,7 @@ export function PreviewPane() {
       })
       return
     }
-    // The Camera tool is Select for cameras alone (D373): a press picks the camera under it, and nothing else is picked or moved. In the Camera view the picture is the camera's own, so a press there is a press on the camera that has the picture. The middle button there drags that camera with any tool, and a scene with no camera gets one first, in the same undo step (D369).
+    // The Camera tool is Select for cameras alone (D373): a press picks the camera under it, and nothing else is picked or moved. In the Camera view the picture is the camera's own, so a press there is a press on the camera that has the picture. A move of the camera there, by the middle button or with Alt, moves that camera with any tool, and a scene with no camera gets one first, in the same undo step (D369, D428).
     const camerasOnly = toolNow === 'camera' && !panCamera
     /** The camera dragged as the picture, in its own view. */
     let pictured: string | null = null
@@ -1743,7 +2104,7 @@ export function PreviewPane() {
     if (!model) return
 
     // A new gesture without Shift ends any Shift gesture still waiting for its key release.
-    if (!e.shiftKey && gestureRef.current) {
+    if (!animateHeld(e) && gestureRef.current) {
       store.setTime(gestureRef.current.restore)
       gestureRef.current = null
     }
@@ -1756,7 +2117,7 @@ export function PreviewPane() {
     const pathTool = toolNow === 'path'
     const pixel = 1 / viewport.zoom
     // A control of a picked anchor of the selected curves path comes first (D246).
-    if (shown?.primary && shown.primary.handles.length > 0 && !e.shiftKey && !(pathTool && store.pathMode === 'move')) {
+    if (shown?.primary && shown.primary.handles.length > 0 && !animateHeld(e) && !(pathTool && store.pathMode === 'move')) {
       const control = nearestPoint(shown.primary.handles.map((h) => h.point), located.world, 8 * pixel)
       if (control !== null) {
         beginPathHandleDrag(host, e, shown.primary.ref, shown.primary.handles[control]!, located.world)
@@ -1764,7 +2125,7 @@ export function PreviewPane() {
       }
     }
     // With Move path, the handle above the path's box turns the path about the point it begins at (D394).
-    if (pathTool && store.pathMode === 'move' && shown?.primary && !e.shiftKey) {
+    if (pathTool && store.pathMode === 'move' && shown?.primary && !animateHeld(e)) {
       layoutRef.current(inCameraView ? 'camera' : 'world')
       if (renderer.onPathTurnHandle(located.world)) {
         beginPathTurn(host, e, shown.primary.ref, shown.primary.frame, located.world)
@@ -1781,7 +2142,7 @@ export function PreviewPane() {
         break
       }
     }
-    if (hitPath && !e.shiftKey) {
+    if (hitPath && !animateHeld(e)) {
       const ctrlHeld = e.ctrlKey || e.metaKey
       const isSelected = !!pathAction && pathAction.object === hitPath.ref.object && pathAction.index === hitPath.ref.index
       if (!isSelected) store.selectAction(hitPath.ref.object, hitPath.ref.index)
@@ -1919,7 +2280,7 @@ export function PreviewPane() {
     const selectedGroup = groupOf(model, selection)
     const members = selectedGroup ? groupMembers(model, selectedGroup.name) : []
     // A camera is picked by its frame's line or by its name, before anything drawn under it, and with Select never by what it frames (D361). The Camera tool picks it by all of its frame, and picks nothing else (D373).
-    const cameraHit = pictured ?? (on && 'camera' in on ? on.camera : inCameraView ? null : (renderer.pickCamera(located.world, CAMERA_REACH_PX * pixel) ?? (camerasOnly ? renderer.pickCameraInside(located.world, selection) : null)))
+    const cameraHit = pictured ?? (on && 'camera' in on ? on.camera : inCameraView ? null : cameraUnder(located, camerasOnly, selection))
     const under = cameraHit ?? (camerasOnly ? null : located.hit)
     // What the press picks (D247): the object, its outermost group, or every object of its class; a camera is itself.
     const picked = cameraHit ? [cameraHit] : under ? pickTargets(model, under, store.pick) : []
@@ -1949,6 +2310,15 @@ export function PreviewPane() {
       return
     }
 
+    // The gesture works on the plane of what it took up (D434): what is selected, for a handle of its box; else the thing pressed, which may lie at another depth.
+    if (!handle) {
+      const plane = renderer.planeOf(hit)
+      if (!samePlane(plane, viewport.plane)) {
+        gesturePlaneRef.current = plane
+        viewport.plane = plane
+        located.world = viewport.toWorld(located.paneX, located.paneY)
+      }
+    }
     // The gesture works on the selection when the hit thing is part of it, else on what the press picks.
     const classPick = store.pick === 'class' && picked.length > 1
     const inSelection = selection.includes(hit) || (!!selectedGroup && members.includes(hit)) || (classPick && picked.every((n) => selection.includes(n)))
@@ -1960,12 +2330,15 @@ export function PreviewPane() {
     const op: Drag['op'] = handle ? (handle.kind === 'rotate' ? 'rotate' : 'resize') : mode === 'rotate' ? 'rotate' : 'move'
     const isGroup = objects.length === 1 && subject.className === GROUP
     /** What the gesture is about: positions, the angle, or the size. A match here makes a selected action the target. */
-    const primaryAttrs = (obj: SceneObject): string[] => (op === 'move' ? ['x', 'y'] : op === 'rotate' ? ['rotation'] : resizeAttrs(obj.className))
+    /** A move of the camera made in its own view (D428), and what it changes. */
+    const pictureMove: CameraMove | null = pictured ? (move ?? 'across') : null
+    const moveKeys = pictureMove ? cameraKeys(pictureMove, looksStraight(viewOf(model, subject, store.time))) : null
+    const primaryAttrs = (obj: SceneObject): string[] => moveKeys ?? (op === 'move' ? ['x', 'y'] : op === 'rotate' ? ['rotation'] : resizeAttrs(obj.className))
 
     // An object that a path places is dragged as one that a move places (D388): the path is a move with a shape, so the rules below are all there are, and a press never takes the playhead anywhere.
     // While a recording runs, or waits for this, what is dragged is recorded (D397): Shift means nothing more then, and no animation in hand takes the drag. A Shape's resize, which rewrites its points, is recorded as a morph to the outline it leaves (D412).
     const recorded = store.recording
-    let kind: Drag['kind'] = recorded ? 'recorded' : e.shiftKey ? 'timed' : 'plain'
+    let kind: Drag['kind'] = recorded ? 'recorded' : animateHeld(e) ? 'timed' : 'plain'
     let actionIndex = -1
     let derived = false
     let showTime: number | null = null
@@ -1976,7 +2349,7 @@ export function PreviewPane() {
     // A path is about the place (D388): selected, a move of its object is about its end, as a move's is.
     const matches = !recorded && objects.length === 1 && !!selectedAction && (selectedAction.verb === 'path' ? op === 'move' : primaryAttrs(subject).some((a) => a in selectedAction.changes))
     const previewing = !recorded && gestureRef.current?.editing ? gestureRef.current : null
-    if (previewing && selectedAction && objects.length === 1 && e.shiftKey && (selectedAction.verb !== 'path' || op === 'move')) {
+    if (previewing && selectedAction && objects.length === 1 && animateHeld(e) && (selectedAction.verb !== 'path' || op === 'move')) {
       // Shift held on the selected animation previews one of its ends: any drag sets that end's state, whatever the animation changes so far (D157, D188).
       if (previewing.editEnd === 'start') editAt = selectedAction.start
       else {
@@ -1985,13 +2358,13 @@ export function PreviewPane() {
         derived = !!selectedAction.classAction
         editAt = selectedAction.end
       }
-    } else if (matches && e.shiftKey && !gestureRef.current && store.time <= selectedAction!.end + 0.5 / store.settings.fps) {
+    } else if (matches && animateHeld(e) && !gestureRef.current && store.time <= selectedAction!.end + 0.5 / store.settings.fps) {
       // Shift given to the pointer alone, with a matching animation selected and the playhead not past it: its end state (D329).
       kind = 'destination'
       actionIndex = selected!.index
       derived = !!selectedAction!.classAction
       editAt = selectedAction!.end
-    } else if (matches && !e.shiftKey && Math.abs(selectedAction!.end - store.time) < 0.5 / store.settings.fps) {
+    } else if (matches && !animateHeld(e) && Math.abs(selectedAction!.end - store.time) < 0.5 / store.settings.fps) {
       // The animation selected and the playhead at its end: a plain drag sets its end state. Anywhere else a plain drag edits what shows at the playhead, so the playhead never leaves the moment the pointer is in (D314, revising D157 and D187).
       kind = 'destination'
       actionIndex = selected!.index
@@ -2023,8 +2396,13 @@ export function PreviewPane() {
     }
     for (const o of targets) expand(o.name)
     // The picture dragged in the Camera view is framed by eye: nothing there to align the camera's frame to.
-    const box0Frame = op === 'move' && !pictured ? renderer.boxAround(targets.map((o) => o.name)) : null
     const isCamera = subject.className === CAMERA
+    // A move carries the thing in the plane that faces the view (D430) where that is not a move across its own plane: in a view that does not look straight into the scene, and so in depth too; and a camera, which is where it stands and not its frame, in any view. What is held on the screen stays on the picture.
+    const subjectPlane = renderer.planeOf(subject.name)
+    const lifted = op === 'move' && !pictured && (isCamera || (!viewport.straight && !subjectPlane.turn))
+    const inDepth = lifted && !viewport.straight
+    // Nothing is aligned to, or run into, by a move in depth.
+    const box0Frame = op === 'move' && !pictured && !inDepth ? renderer.boxAround(targets.map((o) => o.name)) : null
     const others: { name: string; box: Box }[] = []
     let movers: Drag['movers'] = null
     // An animation's push comes from its straight line (D206): the dragged outline sweeps from where the animation starts, which for an end being edited is not where the object shows now.
@@ -2059,6 +2437,8 @@ export function PreviewPane() {
         }
         // A mask is not drawn: nothing snaps to it or runs into it (D334).
         if (maskDrawnBy(model, o.name)) continue
+        // Nor is what lies in another plane aligned to or run into (D434).
+        if (!samePlane(planeOfFrame(f), subjectPlane)) continue
         others.push({ name: o.name, box: toBox(f) })
         // What a push moves is written through the solver from where it shows now; what cannot be written is as good as anchored.
         if (!base.has(o.name)) base.set(o.name, baseValues(model, o, sampleTime))
@@ -2074,7 +2454,7 @@ export function PreviewPane() {
       primary: primary.name,
       group: isGroup,
       // Several things animated as one are a group (D124): a Shift-drag makes it, and so does a recorded one.
-      grouping: objects.length > 1 && (e.shiftKey || recorded) ? names : null,
+      grouping: objects.length > 1 && (animateHeld(e) || recorded) ? names : null,
       handle,
       // A camera's frame keeps the picture's proportions (D361).
       keepAspect: e.altKey || isCamera,
@@ -2100,18 +2480,27 @@ export function PreviewPane() {
       moved: false,
       created: false,
       shown: false,
-      click: selected && !handle && !e.shiftKey ? 'object' : 'none',
+      click: selected && !handle && !animateHeld(e) ? 'object' : 'none',
       touched: new Set(),
       pushedActions: new Map(),
       pushedShifts: new Map(),
+      paneX: located.paneX,
+      paneY: located.paneY,
+    }
+    if (lifted) {
+      const b = base.get(subject.name)
+      drag.lifted = { at: new THREE.Vector3(b?.['x'] ?? 0, b?.['y'] ?? 0, isCamera ? (b?.['z'] ?? 0) : subjectPlane.z), depth: inDepth }
     }
     if (pictured) {
-      // The camera itself dragged in the Camera view: the picture follows the pointer, so the camera goes the other way, by the picture's scale, its zoom, and its roll as the drag began (D361).
-      const framed = renderer.frameOf(subject.name)
-      const k = cameraViewRef.current?.view.scale || 1
-      const zoom0 = (framed && framed.width > 0 ? store.settings.width / framed.width : 1) * k
-      const roll = ((framed?.rotation ?? 0) * Math.PI) / 180
-      drag.delta = (dx, dy) => ({ x: (-Math.cos(roll) * dx - Math.sin(roll) * dy) / zoom0, y: (-Math.sin(roll) * dx + Math.cos(roll) * dy) / zoom0 })
+      // The camera itself moved in the Camera view (D361, D428): across, round, closer, or turned, from where it is as the drag begins.
+      const mover = cameraMover(pictureMove ?? 'across', pictured, sampleTime, located)
+      if (mover) {
+        drag.custom = mover
+        drag.together = moveKeys ?? undefined
+      }
+      // A press on an end of an axis of its compass, let go of where it began, faces the camera along it.
+      const end = on && 'view' in on ? on.axis : null
+      if (end) drag.onClick = () => faceCamera(end, animateHeld(e))
     }
     dragRef.current = drag
     if (drag.op === 'resize' && drag.keepAspect) setDragging('aspect')
@@ -2267,8 +2656,15 @@ export function PreviewPane() {
               values.set(name, v)
             }
           }
+        } else if (drag.custom) {
+          // A move of the camera in its own view (D428): what it shows is worked out from where the drag began.
+          values.set(drag.primary, drag.custom(dx, dy))
         } else {
-          const went = drag.delta ? drag.delta(dx, dy) : viewport.delta(dx, dy)
+          // How far the pointer has gone: across the plane in hand, or, carried, in the plane that faces the view (D430); either way from where it began on the pane, by the view as it is now.
+          const paneX = ev.clientX - bounds.left
+          const paneY = ev.clientY - bounds.top
+          const from = viewport.toWorld(drag.paneX, drag.paneY)
+          const went = drag.lifted ? viewport.carry(drag.paneX, drag.paneY, paneX, paneY, drag.lifted.at) : { x: world.x - from.x, y: world.y - from.y, z: 0 }
           const tx = primaryBase['x']! + went.x
           const ty = primaryBase['y']! + went.y
           let ddx = tx - primaryBase['x']!
@@ -2307,7 +2703,7 @@ export function PreviewPane() {
                     continue
                   }
                   const f = renderer.frameOf(o.name)
-                  if (!f) continue
+                  if (!f || !samePlane(planeOfFrame(f), subjectPlane)) continue
                   drag.base.set(o.name, baseValues(live.model, o, live.time))
                   met.push(makeMover(o.name, [outlineOf(o, f, o.className === SHAPE ? shapeWorldCurve(live.model, o, live.time) : undefined)], live.anchored.includes(o.name) || !o.decl, live.soft.includes(o.name)))
                 }
@@ -2330,9 +2726,12 @@ export function PreviewPane() {
             ddy = snapTo(ty, snap.grid) - primaryBase['y']!
           }
           renderer.setGuides(guides, viewport.viewRect(), 1 / viewport.zoom)
+          // In depth too, where the view does not look straight into the scene (D430): to the grid, when snapping is on.
+          const deep = drag.lifted?.depth === true
+          const ddz = !deep ? 0 : snap.on ? snapTo(primaryBase['z']! + went.z, snap.grid) - primaryBase['z']! : went.z
           for (const name of drag.names) {
             const b = drag.base.get(name)!
-            values.set(name, { x: b['x']! + ddx, y: b['y']! + ddy })
+            values.set(name, deep ? { x: b['x']! + ddx, y: b['y']! + ddy, z: b['z']! + ddz } : { x: b['x']! + ddx, y: b['y']! + ddy })
           }
           for (const o of pushed) {
             const b = drag.base.get(o.name)
@@ -2438,7 +2837,7 @@ export function PreviewPane() {
             [...values].map(([name, attrs]) => {
               const c = changed(name, attrs)
               // A place is one thing (D356): where a move's change is written is decided for x and y together, whichever has moved. Decided one axis at a time, the first step of a drag after an animation on the other axis alone went to the declaration and the rest to the new animation (D328). Only what has changed is written.
-              const together = drag.op === 'move' && ('x' in c || 'y' in c) ? ['x', 'y'] : undefined
+              const together = drag.custom ? drag.together : drag.op === 'move' && ('x' in c || 'y' in c || 'z' in c) ? (drag.lifted?.depth ? ['x', 'y', 'z'] : ['x', 'y']) : undefined
               return { name, attrs: Object.keys(c).length > 0 ? { ...keepCenter, ...c } : c, together }
             }),
             useStore.getState().time,
@@ -2460,7 +2859,10 @@ export function PreviewPane() {
         if (idle.length > 0) deleteActions(idle.map(([object, index]) => ({ object, index })), true)
         // A gesture being recorded is written out as it ends (D412).
         endGesture()
-        if (gestureRef.current && !ev.shiftKey) {
+        // A drag with the right button has moved the camera: the menu its release would open stays shut. A press let go of where it began does what it was for.
+        if (drag.moved && e.button === 2) menuShutRef.current = true
+        if (!drag.moved) drag.onClick?.()
+        if (gestureRef.current && !animateHeld(ev)) {
           // Shift already released: the gesture is over, the playhead goes back, or rests at the end of the chain.
           s.setTime(restingTime(gestureRef.current))
           gestureRef.current = null
@@ -2487,7 +2889,7 @@ export function PreviewPane() {
     if (!renderer || !s.model || !obj?.decl || obj.className !== 'Text' || !canEdit()) return
     const f = renderer.frameOf(name)
     if (!f) return
-    const zoom = viewport.zoom
+    const plane = planeOfFrame(f)
     const style = textStyleAt(s.model, obj, s.time)
     // The editor's lines sit where the drawn ones are (D270): the block with its padding around the lines, each line
     // as tall as the layout's step, and the first baseline where the canvas puts it, which is the step's half-leading
@@ -2495,7 +2897,8 @@ export function PreviewPane() {
     const pose = worldPose(s.model, obj, s.time)
     const layout = layoutOf(style)
     const pad = textPadding(style)
-    const k = pose.scale * zoom
+    const k = pose.scale * viewport.zoomOn(pose.x, pose.y, plane)
+    const at = viewport.toPane(pose.x, pose.y, plane)
     const step = style.fontSize * style.lineHeight
     const lead = (step - layout.ascent - layout.descent) / 2
     const above = Math.max(0, lead - pad)
@@ -2505,7 +2908,7 @@ export function PreviewPane() {
     s.select([name])
     renderer.setEditing(name)
     paintRef.current()
-    setTextEdit({ name, original: style.text, value: style.text, left: viewport.toPane(pose.x, pose.y).x - width / 2, top: viewport.toPane(pose.x, pose.y).y - height / 2 - above * k, width: Math.max(40, width), height: Math.max(20, height + above * k), style, zoom: k, padding: pad * k, paddingTop: Math.max(0, pad - lead) * k, lineHeight: step * k, color: typeof fill === 'string' ? fill : '#ffffff' })
+    setTextEdit({ name, original: style.text, value: style.text, left: at.x - width / 2, top: at.y - height / 2 - above * k, width: Math.max(40, width), height: Math.max(20, height + above * k), style, zoom: k, padding: pad * k, paddingTop: Math.max(0, pad - lead) * k, lineHeight: step * k, color: typeof fill === 'string' ? fill : '#ffffff' })
   }
 
   const endTextEdit = (keep: boolean) => {
@@ -2536,12 +2939,12 @@ export function PreviewPane() {
    * tool's. While a recording runs the playhead runs under the stroke: the line begins where the
    * stroke began and is written on over the time it took, at the pace it was drawn (D412).
    */
-  const beginSketch = (host: HTMLDivElement, e: ReactPointerEvent<HTMLDivElement>, world0: Point, paneX: number, paneY: number) => {
+  const beginSketch = (host: HTMLDivElement, e: ReactPointerEvent<Element>, world0: Point, paneX: number, paneY: number) => {
     const viewport = surfaceOf()
     if (!viewport) return
     const trailWorld: Point[] = [world0]
     const trail: Point[] = [{ x: paneX, y: paneY }]
-    const withShift = e.shiftKey
+    const withShift = animateHeld(e)
     // A stroke drawn while a recording runs: the playhead's time at each place of it. A recording that waited for its first action runs from here.
     const recorded = useStore.getState().recording
     if (recorded) useStore.getState().runRecording()
@@ -2637,12 +3040,20 @@ export function PreviewPane() {
       e.preventDefault()
       return
     }
+    // A drag with the right button moved a view or a camera (D428): it opens no menu.
+    if (menuShutRef.current) {
+      menuShutRef.current = false
+      e.preventDefault()
+      return
+    }
     const located = locate(e.currentTarget, e.clientX, e.clientY)
     if (!located) {
       e.preventDefault()
       return
     }
     const { world, hit } = located
+    // What is added goes on the scene's own plane, under the pointer (D434).
+    const flat = onFlat(located.viewport, located.paneX, located.paneY)
     // The selected path's points and line (D194): delete the point under the pointer, or add one on the line there, or after the last one.
     const shown = pathRef.current
     const pathAction = useStore.getState().selectedActions.length === 1 ? useStore.getState().selectedActions[0]! : null
@@ -2686,7 +3097,7 @@ export function PreviewPane() {
         showMenu(e, [
           { label: 'Add point', run: () => insertPathPoints(pathAction, anchors.length, [world]) },
           ...pathSub,
-          { label: 'Add', children: [...OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, world.x, world.y) })), { label: 'Camera', run: () => void addCamera(undefined, world) }] },
+          { label: 'Add', children: [...OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, flat.x, flat.y) })), { label: 'Camera', run: () => void addCamera(undefined, flat) }] },
         ])
         return
       }
@@ -2719,8 +3130,7 @@ export function PreviewPane() {
       }
     }
     // A camera (D361, D373): with Select by its frame's line, with the Camera tool by all of its frame; what can be done to it from here.
-    const byLine = located.viewport === viewportRef.current && (st.tool === 'select' || st.tool === 'camera') ? located.renderer.pickCamera(world, CAMERA_REACH_PX * pixel) : null
-    const cameraHit = byLine ?? (located.viewport === viewportRef.current && st.tool === 'camera' ? located.renderer.pickCameraInside(world, st.selection) : null)
+    const cameraHit = located.viewport === viewportRef.current && (st.tool === 'select' || st.tool === 'camera') ? cameraUnder(located, st.tool === 'camera', st.selection) : null
     if (cameraHit) {
       if (!st.selection.includes(cameraHit)) st.select([cameraHit])
       showMenu(e, [
@@ -2787,7 +3197,7 @@ export function PreviewPane() {
         { label: many ? `Delete ${targets.length} objects` : 'Delete', run: () => deleteObjects(targets), danger: true },
       ])
     } else {
-      showMenu(e, [{ label: 'Add', children: [...OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, world.x, world.y) })), { label: 'Camera', run: () => void addCamera(undefined, world) }] }])
+      showMenu(e, [{ label: 'Add', children: [...OBJECT_KINDS.map((k) => ({ label: k, run: () => addObject(k, flat.x, flat.y) })), { label: 'Camera', run: () => void addCamera(undefined, flat) }] }])
     }
   }
 
@@ -2862,7 +3272,20 @@ export function PreviewPane() {
           ))}
         </div>
         <span className="view-tag">Preview</span>
-        {scroll && view && viewport && (
+        {/* The view's corner (D428, D435, D436): its compass, which shows the side it looks from, turns it, and looks along an axis; and under it, standing where the camera stands. */}
+        <div className="view-corner" onPointerDown={stop} onDoubleClick={(e) => e.stopPropagation()}>
+          <Compass ref={worldCompassRef} title="Turn the view" onPress={pressViewCompass} />
+          <div className="view-corner-buttons">
+            <button onClick={viewFromCamera} title="View from the camera" aria-label="View from the camera">
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                <rect x="2.5" y="7" width="13" height="10" rx="2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                <path d="M15.5 10.5l6-3v9l-6-3z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        {/* The bars are the view's from the front: turned, it has no left and top of the scene to scroll to. */}
+        {scroll && view && viewport && viewport.straight && (
           <>
             <ScrollBar axis="x" rangeStart={scroll.x[0]} rangeEnd={scroll.x[1]} windowStart={view.left} windowEnd={view.right} onScroll={(start) => viewport.scrollTo({ left: start })} />
             <ScrollBar axis="y" rangeStart={scroll.y[0]} rangeEnd={scroll.y[1]} windowStart={-view.top} windowEnd={-view.bottom} onScroll={(start) => viewport.scrollTo({ top: -start })} />
@@ -2883,6 +3306,29 @@ export function PreviewPane() {
         <span className="view-tag">
           Camera <b ref={cameraNameRef} />
         </span>
+        {/* The camera's corner (D428, D435, D436): its compass, which shows the way it looks, turns it on the spot, and faces it along an axis; and under it, back to where a camera is unless told, and to where the Preview view looks from. */}
+        <div className="view-corner" onPointerDown={stop} onDoubleClick={(e) => e.stopPropagation()}>
+          <Compass
+            ref={cameraCompassRef}
+            title="Turn the camera"
+            onPress={(e, axis) => {
+              if (e.button === 0) press(e, { view: 'camera', move: 'turn', axis })
+            }}
+          />
+          <div className="view-corner-buttons">
+            <button onClick={(e) => cameraHome(animateHeld(e))} title="Reset the camera" aria-label="Reset the camera">
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                <path d="M3 11.5l9-8 9 8M5.5 10v10h4.5v-6h4v6h4.5V10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
+              </svg>
+            </button>
+            <button onClick={(e) => cameraFromView(animateHeld(e))} title="Camera to the Preview's view" aria-label="Camera to the Preview's view">
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+                <circle cx="12" cy="12" r="3" fill="currentColor" />
+              </svg>
+            </button>
+          </div>
+        </div>
       </div>
       {textEdit && (
         <textarea
@@ -3064,7 +3510,7 @@ export function PreviewPane() {
           <>
             <div className="preview-modes" role="group" aria-label="Drag mode">
               {TRANSFORM_MODES.map((m) => (
-                <button key={m} className={transformMode === m ? 'active' : ''} onClick={() => setTransformMode(m)} title={MODE_TIP[m]} aria-pressed={transformMode === m}>
+                <button key={m} className={transformMode === m ? 'active' : ''} onClick={() => setTransformMode(m)} title={sayKey(MODE_TIP[m], animateName)} aria-pressed={transformMode === m}>
                   {MODE_LABEL[m]}
                 </button>
               ))}
@@ -3076,7 +3522,7 @@ export function PreviewPane() {
             >
               {anchor === 'edge' ? 'Edge' : 'Center'}
             </button>
-            {(altDown || dragging === 'aspect') && <span className="preview-chip">Keeping proportions</span>}
+            {dragging === 'aspect' && <span className="preview-chip">Keeping proportions</span>}
           </>
         )}
       </div>
@@ -3096,9 +3542,9 @@ export function PreviewPane() {
           {settings.width} x {settings.height}
         </span>
         {tool === 'object' && <span className="hint">Click to place</span>}
-        {tool === 'paint' && <span className="hint">{dropping ? 'Click an object to take its color' : 'Click to paint; Shift-click for a color change; Alt-click takes a color'}</span>}
-        {tool === 'pencil' && <span className="hint">Click for a dot, drag for a line; Shift animates</span>}
-        {tool === 'camera' && <span className="hint">Click a camera; Shift animates</span>}
+        {tool === 'paint' && <span className="hint">{dropping ? 'Click an object to take its color' : `Click to paint; ${animateName}-click for a color change; Alt-click takes a color`}</span>}
+        {tool === 'pencil' && <span className="hint">Click for a dot, drag for a line; {animateName} animates</span>}
+        {tool === 'camera' && <span className="hint">Click a camera; {animateName} animates</span>}
         {tool === 'shape' && shapeMode === 'create' && <span className="hint">{drafting ? 'Click for corners, drag to draw; the first point closes and fills, Escape leaves a line' : 'Click to start a shape'}</span>}
         {tool === 'shape' && shapeMode === 'edit' && <span className="hint">{shapeRef.current?.editable ? 'Drag a point, or a box around several; right-click a point or the line for curves and corners' : 'Click a shape, or drag a box around one'}</span>}
         {tool === 'path' && pathMode === 'move' && <span className="hint">Drag a path's line to move it, the handle over its box to turn it</span>}

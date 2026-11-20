@@ -1,4 +1,4 @@
-import { CLASS_NAMES, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ALIASES, VERB_ATTRS, VERB_NAMES, VERB_PARAMS, canonicalVerb, classes, type Verb } from './registry'
+import { CAMERA, CLASS_NAMES, GROUP, SHAPE, TIMING_KEY_NAMES, VERB_ALIASES, VERB_ATTRS, VERB_NAMES, VERB_PARAMS, canonicalVerb, classes, type Verb } from './registry'
 import { easeCurve, easeFrom, easePart, easeShare, namedEasings, ramps, easeAlong } from './easing'
 import { resolveMasks } from './masks'
 import { parseScene } from './parse'
@@ -820,6 +820,8 @@ export function evaluateScene(source: string, fps: number): EvaluateResult {
   // An action outside its object's lifetime does nothing visible: allowed, and said (D138).
   for (const obj of objects) {
     if (obj.until !== null) model.lastUntil = Math.max(model.lastUntil ?? 0, obj.until)
+    // A lens is written one way (D422): with both on one camera, fov is the one that counts.
+    if (obj.className === CAMERA && (obj.attrs['fov'] !== undefined || obj.actions.some((a) => 'fov' in a.changes)) && (obj.attrs['focalLength'] !== undefined || obj.actions.some((a) => 'focalLength' in a.changes))) warn(`${obj.name} has both fov and focalLength, which are one lens: fov counts`, obj)
     for (const action of obj.actions) {
       if (action.overridden) continue
       const label = `${action.name ? `${action.name} = ` : ''}${obj.name}.${action.verb}`

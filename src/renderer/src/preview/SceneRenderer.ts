@@ -1,9 +1,11 @@
 import * as THREE from 'three'
 import { groupMembers } from '../model/groups'
 import { CAMERA, GROUP } from '../model/registry'
+import { aheadOf, frameOf as cameraFrame, scaleAt, setPicture, type View } from '../model/lens'
+import { FLAT, lift, planeOfPicture, TURNED_LAYER, type Plane } from './planes'
 import { maskDrawnBy, maskFor, masksOn } from '../model/masks'
 import { hasPathData } from '../model/pathData'
-import { cameraAt, camerasOf, containers, existsAt, groupBox, inView, isAttached, opacityAt, parseColor, shapePieces, textPadding, textStyleAt, textUnitStates, valueAt, viewAt, viewOf, worldPose, type Pose, type ShapePiece } from '../model/sample'
+import { cameraAt, camerasOf, containers, existsAt, groupBox, inView, isAttached, opacityAt, parseColor, shapePiecesWithin, textPadding, textStyleAt, textUnitStates, valueAt, viewAt, viewOf, worldPose, type Pose, type ShapePiece } from '../model/sample'
 import { SHAPE } from '../model/registry'
 import { drawText, estimateMeasure, fontSpec, layoutOf, sameUnitStates, textMeasure, unitOverflow, type TextMeasure, type TextStyle, type UnitState } from '../model/text'
 import { fontsVersion } from '../project/fonts'
@@ -13,6 +15,15 @@ import type { TransformMode } from '../state/store'
 interface Item {
   mesh: THREE.Mesh
   className: string
+  /** Where it is drawn on the plane it lies in, its turn there in degrees, and that plane (D434): the scene's own at its depth, or the picture's for a thing held on the screen. */
+  at: { x: number; y: number; rotation: number }
+  plane: Plane
+  /** Held on the screen (D362): its place among the layers is its place in the cast, whatever its depth. */
+  attached: boolean
+  /** Its place in the cast. */
+  index: number
+  /** Its box as a thin line, drawn in a view that is turned, where a flat thing seen on edge would show nothing (D435). */
+  edge: THREE.LineLoop
   /** Unscaled size in world pixels, for the selection box. */
   width: number
   height: number
@@ -38,6 +49,39 @@ export interface Frame {
   rotation: number
   width: number
   height: number
+  /** The plane it lies in, when that is not the scene's own at depth 0 (D434): a depth, and for the plane of a turned camera's picture its turn. */
+  z?: number
+  turn?: THREE.Matrix4 | null
+}
+
+/** The plane a frame lies in. */
+export function planeOfFrame(frame: { z?: number; turn?: THREE.Matrix4 | null }): Plane {
+  return !frame.z && !frame.turn ? FLAT : { z: frame.z ?? 0, turn: frame.turn ?? null }
+}
+
+/** A frame with the plane it lies in said, when that is not the scene's own at depth 0. */
+function onPlane<T extends object>(frame: T, plane: Plane): T & { z?: number; turn?: THREE.Matrix4 | null } {
+  return plane.z === 0 && !plane.turn ? frame : { ...frame, z: plane.z, turn: plane.turn }
+}
+
+/** A frame as it is on its own plane, with no word of which plane that is. */
+function flatOf(frame: Frame): Frame {
+  return frame.z === undefined && frame.turn === undefined ? frame : { x: frame.x, y: frame.y, rotation: frame.rotation, width: frame.width, height: frame.height }
+}
+
+/**
+ * Put something drawn on a plane where the plane has it: its place and its turn on the plane, the
+ * plane's depth, and the plane's own turn in the scene when it has one. Its scale is set first.
+ */
+function place(object: THREE.Object3D, x: number, y: number, angle: number, plane: { z?: number; turn?: THREE.Matrix4 | null }, raise = 0): void {
+  object.position.set(x, y, (plane.z ?? 0) + raise)
+  object.rotation.set(0, 0, angle)
+  if (plane.turn) {
+    object.matrixAutoUpdate = false
+    object.updateMatrix()
+    object.matrix.premultiply(plane.turn)
+    object.matrixWorldNeedsUpdate = true
+  } else object.matrixAutoUpdate = true
 }
 
 export interface Box {
@@ -51,6 +95,22 @@ export interface Box {
 const unitPlane = new THREE.PlaneGeometry(1, 1)
 // Both unit shapes are one world pixel across, so an object's drawn size is its scale.
 const unitCircle = new THREE.CircleGeometry(0.5, 96)
+/** A circle of more sides, for one shown so large that 96 would show their corners (D424): each count made once. */
+const fineCircles = new Map<number, THREE.CircleGeometry>([[96, unitCircle]])
+/** The circle to draw one with, for the radius it shows at in pixels: its sides within a tenth of a pixel of the round. */
+function circleFor(radius: number): THREE.CircleGeometry {
+  let sides = 96
+  while (sides < 3072 && radius * (1 - Math.cos(Math.PI / sides)) > 0.1) sides *= 2
+  let geometry = fineCircles.get(sides)
+  if (!geometry) {
+    geometry = new THREE.CircleGeometry(0.5, sides)
+    fineCircles.set(sides, geometry)
+  }
+  return geometry
+}
+const unitSquare = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-0.5, -0.5, 0), new THREE.Vector3(0.5, -0.5, 0), new THREE.Vector3(0.5, 0.5, 0), new THREE.Vector3(-0.5, 0.5, 0)])
+/** The thin line of a thing's box in a view that is turned (D435). */
+const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x8a8f98, depthTest: false, transparent: true, opacity: 0.6 })
 /** Canvas pixels per world pixel for text, so it stays crisp when zoomed in. */
 const TEXT_SCALE = 2
 /** The most a Text is drawn closer for a camera that zooms in on it, and the longest side its canvas may have, in pixels (D357). */
@@ -203,8 +263,7 @@ class Outline {
 
   set(frame: Frame, pixel: number): void {
     this.group.visible = true
-    this.group.position.set(frame.x, frame.y, 0)
-    this.group.rotation.z = (frame.rotation * Math.PI) / 180
+    place(this.group, frame.x, frame.y, (frame.rotation * Math.PI) / 180, frame)
     const w = frame.width
     const h = frame.height
     const line = LINE_PX * pixel
@@ -245,10 +304,9 @@ class Marker {
     this.group.visible = false
   }
 
-  set(x: number, y: number, rotation: number, size: number, pixel: number): void {
+  set(x: number, y: number, rotation: number, size: number, pixel: number, plane: { z?: number; turn?: THREE.Matrix4 | null } = FLAT): void {
     this.group.visible = true
-    this.group.position.set(x, y, 0.7)
-    this.group.rotation.z = rotation
+    place(this.group, x, y, rotation, plane, 0.7)
     this.dark.scale.set(size + RIM_PX * 2 * pixel, size + RIM_PX * 2 * pixel, 1)
     this.light.scale.set(size, size, 1)
   }
@@ -738,6 +796,75 @@ const cameraLineMaterial = new THREE.MeshBasicMaterial({ color: 0x9a9a9a, depthT
 /** The color of the camera that has the picture, wherever it is marked (D358). */
 const cameraLiveMaterial = new THREE.MeshBasicMaterial({ color: 0xeab308, depthTest: false, transparent: true, opacity: 0.95 })
 
+const cameraEdgeMaterial = new THREE.LineBasicMaterial({ color: 0x9a9a9a, depthTest: false, transparent: true, opacity: 0.85 })
+const cameraLiveEdgeMaterial = new THREE.LineBasicMaterial({ color: 0xeab308, depthTest: false, transparent: true, opacity: 0.95 })
+/** How large a camera's body is drawn, in pane pixels, and how near it a press picks it. */
+const BODY_PX = 26
+export const BODY_REACH_PX = 16
+
+/** The lines of a camera's body, in its own space, a unit across: a box behind its place, and its lens as a short funnel the way it looks. */
+function bodyGeometry(): THREE.BufferGeometry {
+  const w = 0.5
+  const h = 0.36
+  const back = 0.9
+  const lens = 0.42
+  const corners = (z: number, k: number): THREE.Vector3[] => [new THREE.Vector3(-w * k, -h * k, z), new THREE.Vector3(w * k, -h * k, z), new THREE.Vector3(w * k, h * k, z), new THREE.Vector3(-w * k, h * k, z)]
+  const near = corners(0, 1)
+  const far = corners(back, 1)
+  const mouth = corners(-lens, 0.55)
+  const throat = corners(0, 0.22)
+  const points: THREE.Vector3[] = []
+  for (let i = 0; i < 4; i++) {
+    const j = (i + 1) % 4
+    points.push(near[i]!, near[j]!, far[i]!, far[j]!, near[i]!, far[i]!, mouth[i]!, mouth[j]!, throat[i]!, mouth[i]!)
+  }
+  return new THREE.BufferGeometry().setFromPoints(points)
+}
+const cameraBodyGeometry = bodyGeometry()
+
+/**
+ * A camera as a thing standing in the scene (D435), drawn in a view that is turned: a small body
+ * where it is, facing the way it looks, and the edges of its view out to the corners of its
+ * frame. The one that has the picture is lit, as its frame is.
+ */
+class CameraBody {
+  readonly group = new THREE.Group()
+  private readonly body = new THREE.LineSegments(cameraBodyGeometry, cameraEdgeMaterial)
+  private readonly edges = new THREE.LineSegments(new THREE.BufferGeometry(), cameraEdgeMaterial)
+
+  constructor() {
+    this.edges.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(24), 3))
+    for (const line of [this.body, this.edges]) {
+      line.layers.set(TURNED_LAYER)
+      line.renderOrder = ORDER - 2
+      line.frustumCulled = false
+    }
+    this.group.add(this.body, this.edges)
+    this.group.visible = false
+  }
+
+  set(view: View, pixel: number, live: boolean): void {
+    this.group.visible = true
+    const material = live ? cameraLiveEdgeMaterial : cameraEdgeMaterial
+    this.body.material = material
+    this.edges.material = material
+    this.body.position.set(view.x, view.y, view.z)
+    this.body.rotation.set((view.rotationX * Math.PI) / 180, (view.rotationY * Math.PI) / 180, (view.rotation * Math.PI) / 180, 'YXZ')
+    this.body.scale.setScalar(BODY_PX * pixel)
+    const f = cameraFrame(view)
+    const position = this.edges.geometry.getAttribute('position') as THREE.BufferAttribute
+    ;[[-1, 1], [1, 1], [1, -1], [-1, -1]].forEach(([a, b], i) => {
+      position.setXYZ(i * 2, view.x, view.y, view.z)
+      position.setXYZ(i * 2 + 1, f.center.x + (a! * f.right.x * f.width) / 2 + (b! * f.up.x * f.height) / 2, f.center.y + (a! * f.right.y * f.width) / 2 + (b! * f.up.y * f.height) / 2, f.center.z + (a! * f.right.z * f.width) / 2 + (b! * f.up.z * f.height) / 2)
+    })
+    position.needsUpdate = true
+  }
+
+  hide(): void {
+    this.group.visible = false
+  }
+}
+
 /** The frame of a camera that is alive, over the scene, so it shows whatever is drawn under it (D361): a solid lit line for the one that has the picture, a dashed one for the others. */
 class FrameLine {
   readonly group = new THREE.Group()
@@ -745,8 +872,7 @@ class FrameLine {
 
   set(frame: Frame, pixel: number, live: boolean): void {
     this.group.visible = true
-    this.group.position.set(frame.x, frame.y, 0)
-    this.group.rotation.z = (frame.rotation * Math.PI) / 180
+    place(this.group, frame.x, frame.y, (frame.rotation * Math.PI) / 180, frame)
     const w = frame.width / 2
     const h = frame.height / 2
     const corners = [
@@ -786,15 +912,24 @@ export class SceneRenderer {
   readonly group = new THREE.Group()
   /** Everything drawn over the scene for the one working on it, the selection, the handles, the guides, the paths, the edges of masks, the frames of cameras: kept apart, so the scene can be drawn without it (D360). */
   private readonly overlay = new THREE.Group()
-  /** The project's size, which a camera's frame is cut from (D357). */
-  private composition = { width: 1920, height: 1080 }
   /** The frames of the cameras alive right now, by name, and which of them has the picture (D358). */
   private readonly cameraFrames = new Map<string, Frame>()
+  /** What each of them takes its picture through (D433). */
+  private readonly cameraViews = new Map<string, View>()
   private liveCamera: string | null = null
   private readonly cameraLines: FrameLine[] = []
+  private readonly cameraBodies: CameraBody[] = []
+  /** What is drawn for the thing in hand, its box, its handles, its path, its points, the guides: all on the plane that thing lies in (D434). */
+  private readonly inHand = new THREE.Group()
+  /** The things drawn, in the order of the cast. */
+  private cast: Item[] = []
+  /** Whether nothing drawn is off depth 0 (D434): a scene with no depth, which draws in the order of the cast and through a flat picture, as it always did. */
+  depthless = true
+  /** How large a view shows a place of the scene, in its own pixels for a unit there, when a view says: what the detail of a circle follows (D424). Without it, the camera that has the picture. */
+  viewDetail: ((place: THREE.Vector3) => number) | null = null
   /** What was last asked to be drawn over the scene, kept so it can be laid out again in another view's pixels (D366): the selected path, the other paths, a Shape's handles, and the guides. */
   private pathSpec: { points: { x: number; y: number }[] | null; anchors: { x: number; y: number }[] | null; active: number[]; dashed: boolean; handles: ControlHandle[]; round: boolean[] } = { points: null, anchors: null, active: [], dashed: false, handles: [], round: [] }
-  private otherSpec: { points: { x: number; y: number }[]; dashed: boolean; held?: boolean }[] = []
+  private otherSpec: { points: { x: number; y: number }[]; dashed: boolean; held?: boolean; z?: number; turn?: THREE.Matrix4 | null }[] = []
   private shapeSpec: { points: { x: number; y: number }[] | null; active: number[]; handles: ControlHandle[]; round: boolean[] } = { points: null, active: [], handles: [], round: [] }
   private guideSpec: { lines: GuideLine[]; view: { left: number; right: number; top: number; bottom: number } } | null = null
   private readonly items = new Map<string, Item>()
@@ -823,6 +958,8 @@ export class SceneRenderer {
   readonly shapeHandles = new ShapeHandles()
   /** The handles shown right now, with their world positions, for picking. */
   private handles: { handle: Handle; x: number; y: number; radius: number }[] = []
+  /** The plane the thing in hand lies in, as last laid out: its handles, its path, and its points are places on it. */
+  private handPlane: Plane = FLAT
   private readonly raycaster = new THREE.Raycaster()
   /** What was last drawn, for the frames of groups. */
   private model: SceneModel | null = null
@@ -858,7 +995,7 @@ export class SceneRenderer {
     for (let i = 0; i < RESIZE_HANDLES.length; i++) {
       const marker = new Marker(unitPlane)
       this.resizeHandles.push(marker)
-      this.overlay.add(marker.group)
+      this.inHand.add(marker.group)
     }
     this.stem = new THREE.Mesh(unitPlane, lightMaterial)
     this.stem.renderOrder = ORDER + 1
@@ -866,13 +1003,14 @@ export class SceneRenderer {
     this.pathTurnStem = new THREE.Mesh(unitPlane, lightMaterial)
     this.pathTurnStem.renderOrder = ORDER + 1
     this.pathTurnStem.visible = false
-    this.overlay.add(this.gizmoOutline.group, this.rotateRing, this.rotateHandle.group, this.anchorCross.group, this.stem, this.guides.group, this.pathLine.group, this.shapeHandles.group, this.pathBox.group, this.pathTurnStem, this.pathTurnHandle.group, this.pathPivot.group)
+    this.inHand.add(this.gizmoOutline.group, this.rotateRing, this.rotateHandle.group, this.anchorCross.group, this.stem, this.guides.group, this.pathLine.group, this.shapeHandles.group, this.pathBox.group, this.pathTurnStem, this.pathTurnHandle.group, this.pathPivot.group)
+    this.overlay.add(this.inHand)
     this.group.add(this.overlay)
   }
 
   /** The project's size (D357): what a camera's frame is cut from. */
   setComposition(width: number, height: number): void {
-    this.composition = { width, height }
+    setPicture(width, height)
   }
 
   /** The cameras alive right now, with the frame each cuts from the scene, and whether it has the picture (D358, D361). */
@@ -885,6 +1023,11 @@ export class SceneRenderer {
     return this.showCameras || this.held.has(name)
   }
 
+  /** Whether a camera stands in a turned view as a body (D435): one whose frame is drawn, and the one that has the picture, always. */
+  private cameraStands(name: string): boolean {
+    return this.cameraShown(name) || name === this.liveCamera
+  }
+
   /** A place in the scene in a frame's own space, from its middle, with how far the frame reaches each way. */
   private within(f: Frame, world: { x: number; y: number }): { x: number; y: number; halfWidth: number; halfHeight: number } {
     const a = (-f.rotation * Math.PI) / 180
@@ -893,16 +1036,29 @@ export class SceneRenderer {
     return { x: dx * Math.cos(a) - dy * Math.sin(a), y: dx * Math.sin(a) + dy * Math.cos(a), halfWidth: f.width / 2, halfHeight: f.height / 2 }
   }
 
+  /** What a camera takes its picture through right now (D433), by its name; undefined for one that is not alive. */
+  cameraView(name: string): View | undefined {
+    return this.cameraViews.get(name)
+  }
+
+  /** The camera that has the picture right now. */
+  get live(): string | null {
+    return this.liveCamera
+  }
+
   /**
-   * The camera whose frame holds a place in the scene, for the Camera tool (D373), which picks a
-   * camera by all of its frame: one of `prefer`, what is selected, when it holds the place, so a
-   * camera in hand stays in hand; else the smallest frame, the one a larger frame would hide.
+   * The camera whose frame holds the pointer, for the Camera tool (D373), which picks a camera by
+   * all of its frame: one of `prefer`, what is selected, when it holds the pointer, so a camera
+   * in hand stays in hand; else the smallest frame, the one a larger frame would hide. `at` is
+   * the pointer's place on a frame's own plane, or null where its line of sight misses it (D434).
    */
-  pickCameraInside(world: { x: number; y: number }, prefer: readonly string[]): string | null {
+  pickCameraInside(at: (frame: Frame) => { x: number; y: number } | null, prefer: readonly string[]): string | null {
     let best: string | null = null
     let bestArea = Infinity
     for (const [name, f] of this.cameraFrames) {
       if (!this.cameraShown(name)) continue
+      const world = at(f)
+      if (!world) continue
       const p = this.within(f, world)
       if (Math.abs(p.x) > p.halfWidth || Math.abs(p.y) > p.halfHeight) continue
       if (prefer.includes(name)) return name
@@ -915,31 +1071,51 @@ export class SceneRenderer {
     return best
   }
 
-  /** The cameras whose frames a box of the scene touches, as a box drawn with the Camera tool takes them (D373). */
-  camerasIn(box: { left: number; right: number; top: number; bottom: number }): string[] {
+  /** The cameras whose frames, as a view shows them, touch a box on the pane, as a box drawn with the Camera tool takes them (D373): `toPane` is that view's own. */
+  camerasOnPane(box: { left: number; right: number; top: number; bottom: number }, toPane: (x: number, y: number, plane: Plane) => { x: number; y: number }): string[] {
     const names: string[] = []
     for (const [name, f] of this.cameraFrames) {
       if (!this.cameraShown(name)) continue
-      const a = (f.rotation * Math.PI) / 180
-      const halfWidth = (Math.abs(Math.cos(a)) * f.width + Math.abs(Math.sin(a)) * f.height) / 2
-      const halfHeight = (Math.abs(Math.sin(a)) * f.width + Math.abs(Math.cos(a)) * f.height) / 2
-      if (f.x + halfWidth >= box.left && f.x - halfWidth <= box.right && f.y + halfHeight >= box.bottom && f.y - halfHeight <= box.top) names.push(name)
+      if (touches(f, box, toPane)) names.push(name)
     }
     return names
   }
 
-  /** The camera whose frame's line runs within `reach` of a place in the scene, the nearest when several do, or null (D361): a camera is picked by its line, never by what it frames. */
-  pickCamera(world: { x: number; y: number }, reach: number): string | null {
+  /**
+   * The camera whose frame's line runs within `reach` pane pixels of the pointer, the nearest when
+   * several do, or null (D361): a camera is picked by its line, never by what it frames. `at` is
+   * the pointer's place on a frame's own plane, with how much of the scene a pane pixel is there.
+   */
+  pickCamera(at: (frame: Frame) => { x: number; y: number; pixel: number } | null, reach: number): string | null {
     let best: string | null = null
     let bestDistance = Infinity
     for (const [name, f] of this.cameraFrames) {
       // A frame that is not drawn is not picked (D374).
       if (!this.cameraShown(name)) continue
+      const world = at(f)
+      if (!world) continue
       const p = this.within(f, world)
       const ox = Math.abs(p.x) - p.halfWidth
       const oy = Math.abs(p.y) - p.halfHeight
-      const distance = ox <= 0 && oy <= 0 ? Math.min(-ox, -oy) : Math.hypot(Math.max(ox, 0), Math.max(oy, 0))
+      const distance = (ox <= 0 && oy <= 0 ? Math.min(-ox, -oy) : Math.hypot(Math.max(ox, 0), Math.max(oy, 0))) / world.pixel
       if (distance <= reach && distance < bestDistance) {
+        best = name
+        bestDistance = distance
+      }
+    }
+    return best
+  }
+
+  /** The camera whose body, as a turned view draws it (D435), is under a place on the pane: the nearest within reach. `project` is that view's own. */
+  pickCameraBody(paneX: number, paneY: number, project: (place: THREE.Vector3) => { x: number; y: number } | null): string | null {
+    let best: string | null = null
+    let bestDistance = BODY_REACH_PX
+    for (const [name, view] of this.cameraViews) {
+      if (!this.cameraStands(name)) continue
+      const p = project(new THREE.Vector3(view.x, view.y, view.z))
+      if (!p) continue
+      const distance = Math.hypot(p.x - paneX, p.y - paneY)
+      if (distance <= bestDistance) {
         best = name
         bestDistance = distance
       }
@@ -964,9 +1140,43 @@ export class SceneRenderer {
    */
   drawThrough(renderer: THREE.WebGLRenderer, camera: THREE.Camera, overlay = false): void {
     this.overlay.visible = overlay
+    this.orderFor(camera)
     this.renderMasks(renderer, camera)
     renderer.render(this.group, camera)
     this.overlay.visible = true
+  }
+
+  /**
+   * Which thing is drawn over which, for the camera about to draw (D434): nearer covers farther,
+   * and things at one depth draw in the order of the cast, as a flat scene always has. What is
+   * held on the screen keeps its place in the cast whatever the camera does, as a flat layer
+   * among layers in depth does: the things between two of them are sorted among themselves. A
+   * scene with no depth is left in the order of the cast.
+   */
+  orderFor(camera: THREE.Camera): void {
+    if (this.depthless) return
+    // Things lie in planes of one depth each: from in front of them the higher is nearer, from behind the lower.
+    const sign = camera.getWorldDirection(facing).z <= 0 ? 1 : -1
+    const run: Item[] = []
+    let next = 0
+    const give = (item: Item): void => {
+      item.mesh.renderOrder = next
+      if (item.stroke) item.stroke.renderOrder = next
+      next++
+    }
+    const flush = (): void => {
+      run.sort((a, b) => sign * (a.plane.z - b.plane.z) || a.index - b.index)
+      for (const item of run) give(item)
+      run.length = 0
+    }
+    for (const item of this.cast) {
+      if (!item.mesh.visible && !item.stroke?.visible) continue
+      if (item.attached) {
+        flush()
+        give(item)
+      } else run.push(item)
+    }
+    flush()
   }
 
   /** Where a mask's picture is kept: its objects' meshes, apart from the scene. */
@@ -1147,8 +1357,8 @@ export class SceneRenderer {
       edge.visible = !!box
       if (!box) return
       const margin = EDGE_MARGIN * pixel
-      edge.position.set((box.left + box.right) / 2, (box.top + box.bottom) / 2, 0.55)
       edge.scale.set(box.right - box.left + 2 * margin, box.top - box.bottom + 2 * margin, 1)
+      place(edge, (box.left + box.right) / 2, (box.top + box.bottom) / 2, 0, this.items.get(mask.shapes[0] ?? '')?.plane ?? FLAT, 0.55)
       const uniforms = (edge.material as THREE.ShaderMaterial).uniforms
       uniforms['map']!.value = targets.get(mask.name)!.texture
       uniforms['ratio']!.value = renderer.getPixelRatio()
@@ -1194,6 +1404,8 @@ export class SceneRenderer {
     this.time = time
     this.pixel = pixel
     const seen = new Set<string>()
+    this.cast = []
+    this.depthless = true
     if (model) {
       model.objects.forEach((obj, index) => {
         // A group and a camera draw nothing of their own (D124, D357).
@@ -1216,16 +1428,17 @@ export class SceneRenderer {
         // The Text being edited in the preview shows its words in the editor alone (D270).
         if (obj.name === this.editing) item.mesh.visible = false
         // Held by the pencil: drawn under the pointer, the model untouched until the sketch is written (D297).
-        if (this.follow && obj.name === this.follow.name) {
-          item.mesh.position.set(this.follow.point.x, this.follow.point.y, item.mesh.position.z)
-          if (item.stroke) item.stroke.position.set(this.follow.point.x, this.follow.point.y, item.stroke.position.z)
-        }
+        if (this.follow && obj.name === this.follow.name) item.at = { x: this.follow.point.x, y: this.follow.point.y, rotation: item.at.rotation }
+        this.cast.push(item)
+        this.settle(obj.name, item)
+        if (!item.attached && item.plane.z !== 0 && (item.mesh.visible || item.stroke?.visible)) this.depthless = false
       })
     }
     for (const [name, item] of this.items) {
       if (seen.has(name)) continue
       item.mesh.removeFromParent()
       item.stroke?.removeFromParent()
+      item.edge.removeFromParent()
       disposeItem(item)
       this.items.delete(name)
     }
@@ -1233,13 +1446,17 @@ export class SceneRenderer {
 
     // The cameras alive now, each with the frame it cuts from the scene (D357, D361): its line over the scene, solid and lit for the one that has the picture, which is the view's own frame, dashed for the others.
     this.cameraFrames.clear()
+    this.cameraViews.clear()
     this.liveCamera = null
     if (model) {
       this.liveCamera = cameraAt(model, time, keepAliveFrom)?.name ?? null
       for (const camera of camerasOf(model)) {
         if (!inView(model, camera, time) && !(keepAliveFrom !== undefined && existsAt(model, camera, keepAliveFrom))) continue
+        // The frame lies on the plane of the camera's picture, as far ahead as it looks at depth 0 (D433): for a camera that looks straight on from where it stands unless told, the frame it always had.
         const v = viewOf(model, camera, time)
-        this.cameraFrames.set(camera.name, { x: v.x, y: v.y, rotation: v.rotation, width: this.composition.width / v.zoom, height: this.composition.height / v.zoom })
+        const taken = cameraFrame(v)
+        this.cameraViews.set(camera.name, v)
+        this.cameraFrames.set(camera.name, onPlane({ x: v.x, y: v.y, rotation: v.rotation, width: taken.width, height: taken.height }, planeOfPicture(v)))
       }
     }
     this.layout({ selection, mode, pixel, axes, anchored, handles, cameras: true }, false)
@@ -1253,10 +1470,12 @@ export class SceneRenderer {
    * Shape's handles, and the guides with it. `cameras` says whether the cameras' frames show:
    * they do in the Preview view, and the Camera view is the camera's own.
    */
-  layout(o: { selection: string[]; mode: TransformMode; pixel: number; axes: number; anchored: string[]; handles: boolean; cameras: boolean }, again = true): void {
+  layout(o: { selection: string[]; mode: TransformMode; pixel: number; axes: number; anchored: string[]; handles: boolean; cameras: boolean; plane?: Plane; scale?: (place: THREE.Vector3) => number; bodies?: boolean }, again = true): void {
     const { selection, mode, pixel, axes, anchored, handles } = o
     const model = this.model
     this.pixel = pixel
+    /** How much of the scene a pane pixel is where a frame is: `pixel`, but in a view with perspective, where it goes by how far the frame is (D434). */
+    const pixelAt = (frame: Frame): number => (o.scale ? 1 / Math.max(1e-9, o.scale(lift(frame.x, frame.y, planeOfFrame(frame), scratch))) : pixel)
     if (again) {
       this.applyPath(pixel)
       this.applyOtherPaths(pixel)
@@ -1272,8 +1491,20 @@ export class SceneRenderer {
     }
     this.cameraLines.forEach((line, i) => {
       const entry = dashed[i]
-      if (entry) line.set(entry[1], pixel, entry[0] === this.liveCamera)
+      if (entry) line.set(entry[1], pixelAt(entry[1]), entry[0] === this.liveCamera)
       else line.hide()
+    })
+    // In a view that is turned each of them is also a thing standing in the scene (D435): its body, and the edges of its view. The one that has the picture always stands there, as its frame is always drawn.
+    const bodies = o.bodies ? [...this.cameraFrames].filter(([name]) => this.cameraStands(name)) : []
+    while (this.cameraBodies.length < bodies.length) {
+      const body = new CameraBody()
+      this.overlay.add(body.group)
+      this.cameraBodies.push(body)
+    }
+    this.cameraBodies.forEach((body, i) => {
+      const view = bodies[i] ? this.cameraViews.get(bodies[i]![0]) : undefined
+      if (view) body.set(view, o.scale ? 1 / Math.max(1e-9, o.scale(scratch.set(view.x, view.y, view.z))) : pixel, bodies[i]![0] === this.liveCamera)
+      else body.hide()
     })
 
     // An anchored object wears a small diamond at its center, so what a push cannot move is seen (D161).
@@ -1285,17 +1516,24 @@ export class SceneRenderer {
     }
     this.anchorMarks.forEach((mark, i) => {
       const f = i < pinned.length ? this.frameOf(pinned[i]!) : null
-      if (f) mark.set(f.x, f.y, Math.PI / 4, ANCHOR_PX * pixel, pixel)
+      if (f) mark.set(f.x, f.y, Math.PI / 4, ANCHOR_PX * pixelAt(f), pixelAt(f), f)
       else mark.hide()
     })
 
     const group = selection.length === 1 && model ? (model.objects.find((o) => o.name === selection[0] && o.className === GROUP) ?? null) : null
     const outlined = (group && model ? groupMembers(model, group.name) : selection).filter((n) => this.shown(n))
-    outlined.forEach((name, i) => this.outline(i).set(this.frameOf(name)!, pixel))
+    outlined.forEach((name, i) => {
+      const f = this.frameOf(name)!
+      this.outline(i).set(f, pixelAt(f))
+    })
     for (let i = outlined.length; i < this.outlines.length; i++) this.outlines[i]!.hide()
 
     // A group's box is in the code; a plain turn of an ad-hoc selection leaves its box on the turned axes until the selection changes (D116).
-    const frame = group ? this.frameOf(group.name) : outlined.length === 1 ? this.frameOf(outlined[0]!) : outlined.length > 1 ? this.boxAround(outlined, axes) : null
+    const framed = group ? this.frameOf(group.name) : outlined.length === 1 ? this.frameOf(outlined[0]!) : outlined.length > 1 ? this.boxAround(outlined, axes) : null
+    // What is drawn for the thing in hand lies on its plane, or on the one the view says is in hand (D434); the frame's own numbers are places on that plane.
+    this.handPlane = o.plane ?? (framed ? planeOfFrame(framed) : FLAT)
+    place(this.inHand, 0, 0, 0, this.handPlane)
+    const frame = framed ? flatOf(framed) : null
     // The selection shows in every tool; the handles that transform it belong to Select alone (D236, D247).
     const showRing = handles && !!frame && mode === 'rotate'
     const showResize = handles && !!frame && (mode === 'resize' || mode === 'all')
@@ -1429,7 +1667,7 @@ export class SceneRenderer {
   }
 
   /** The other paths shown, as lines without handles (D205), each dashed when its shape is code (D226), and in the selection's color when it is the path of what is selected (D405). */
-  setOtherPaths(curves: { points: { x: number; y: number }[]; dashed: boolean; held?: boolean }[], pixel: number): void {
+  setOtherPaths(curves: { points: { x: number; y: number }[]; dashed: boolean; held?: boolean; z?: number; turn?: THREE.Matrix4 | null }[], pixel: number): void {
     this.otherSpec = curves
     this.applyOtherPaths(pixel)
   }
@@ -1443,8 +1681,10 @@ export class SceneRenderer {
     }
     this.otherLines.forEach((line, i) => {
       const curve = curves[i]
-      if (curve) line.set(curve.points, pixel, null, [], curve.dashed, [], [], curve.held === true)
-      else line.hide()
+      if (curve) {
+        line.set(curve.points, pixel, null, [], curve.dashed, [], [], curve.held === true)
+        place(line.group, 0, 0, 0, curve)
+      } else line.hide()
     })
   }
 
@@ -1516,18 +1756,68 @@ export class SceneRenderer {
     if (item) {
       // A Shape with no fill is its stroke (D238).
       if (!item.mesh.visible && !item.stroke?.visible) return null
-      const { position, rotation, scale } = item.mesh
+      const { x, y, rotation } = item.at
+      const scale = item.mesh.scale
       if (item.bounds) {
         // A Shape's box sits where its line is, off its x and y, turned and scaled with it (D232).
-        const c = Math.cos(rotation.z)
-        const s = Math.sin(rotation.z)
+        const a = (rotation * Math.PI) / 180
+        const c = Math.cos(a)
+        const s = Math.sin(a)
         const k = scale.x
-        return { x: position.x + k * (c * item.bounds.x - s * item.bounds.y), y: position.y + k * (s * item.bounds.x + c * item.bounds.y), rotation: (rotation.z * 180) / Math.PI, width: Math.abs(item.bounds.width * k), height: Math.abs(item.bounds.height * k) }
+        return onPlane({ x: x + k * (c * item.bounds.x - s * item.bounds.y), y: y + k * (s * item.bounds.x + c * item.bounds.y), rotation, width: Math.abs(item.bounds.width * k), height: Math.abs(item.bounds.height * k) }, item.plane)
       }
-      return { x: position.x, y: position.y, rotation: (rotation.z * 180) / Math.PI, width: Math.abs(scale.x), height: Math.abs(scale.y) }
+      return onPlane({ x, y, rotation, width: Math.abs(scale.x), height: Math.abs(scale.y) }, item.plane)
     }
     const group = this.model?.objects.find((o) => o.name === name && o.className === GROUP)
-    return group && this.model ? groupBox(this.model, group, this.time) : null
+    if (!group || !this.model) return null
+    const box = groupBox(this.model, group, this.time)
+    if (!box) return null
+    // A group is its members (D417): its box lies on the plane of the first of them that is drawn.
+    for (const member of groupMembers(this.model, name)) {
+      const of = this.items.get(member)
+      if (of && (of.mesh.visible || of.stroke?.visible)) return onPlane(box, of.plane)
+    }
+    return box
+  }
+
+  /** The plane a thing lies in, as it is drawn (D434): the scene's own at depth 0 for one that is not there. */
+  planeOf(name: string): Plane {
+    const frame = this.frameOf(name)
+    return frame ? planeOfFrame(frame) : FLAT
+  }
+
+  /** Put an item's meshes where it lies: its place and its turn on its plane, and its box as a thin line for a view that is turned (D435). */
+  private settle(name: string, item: Item): void {
+    const angle = (item.at.rotation * Math.PI) / 180
+    place(item.mesh, item.at.x, item.at.y, angle, item.plane)
+    if (item.stroke) place(item.stroke, item.at.x, item.at.y, angle, item.plane)
+    const frame = this.frameOf(name)
+    item.edge.visible = !!frame
+    if (!frame) return
+    item.edge.scale.set(frame.width, frame.height, 1)
+    place(item.edge, frame.x, frame.y, angle, item.plane)
+  }
+
+  /** The places in the scene that hold everything a view could show (D435): the corners of every thing drawn, and of every camera's frame with where the camera stands. */
+  extent(): THREE.Vector3[] {
+    const places: THREE.Vector3[] = []
+    const corners = (f: Frame): void => {
+      const a = (f.rotation * Math.PI) / 180
+      const c = Math.cos(a)
+      const s = Math.sin(a)
+      const plane = planeOfFrame(f)
+      for (const [lx, ly] of [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]] as const) places.push(lift(f.x + lx * f.width * c - ly * f.height * s, f.y + lx * f.width * s + ly * f.height * c, plane))
+    }
+    for (const name of this.items.keys()) {
+      const f = this.frameOf(name)
+      if (f) corners(f)
+    }
+    for (const [name, f] of this.cameraFrames) {
+      corners(f)
+      const view = this.cameraViews.get(name)
+      if (view) places.push(new THREE.Vector3(view.x, view.y, view.z))
+    }
+    return places
   }
 
   /** The box around several visible things on axes turned by `axes`, upright by default, for an ad-hoc selection (D116). */
@@ -1564,7 +1854,9 @@ export class SceneRenderer {
     if (!Number.isFinite(minX)) return null
     const cu = (minX + maxX) / 2
     const cv = (minY + maxY) / 2
-    return { x: cu * axCos - cv * axSin, y: cu * axSin + cv * axCos, rotation: axes, width: maxX - minX, height: maxY - minY }
+    // The box lies on the plane of the first of them (D434): things at several depths have no one plane, and the first is the one in hand.
+    const first = names.map((name) => this.frameOf(name)).find((f) => !!f)
+    return onPlane({ x: cu * axCos - cv * axSin, y: cu * axSin + cv * axCos, rotation: axes, width: maxX - minX, height: maxY - minY }, first ? planeOfFrame(first) : FLAT)
   }
 
   /** The axis-aligned box around a visible object, rotation included, or null. */
@@ -1605,34 +1897,44 @@ export class SceneRenderer {
    * The visible objects whose frames, as a view shows them, touch a box on the pane, for a box
    * drawn in a view that may be turned, the Camera view's (D366): `toPane` is that view's own.
    */
-  objectsOnPane(box: { left: number; right: number; top: number; bottom: number }, toPane: (x: number, y: number) => { x: number; y: number }): string[] {
+  objectsOnPane(box: { left: number; right: number; top: number; bottom: number }, toPane: (x: number, y: number, plane: Plane) => { x: number; y: number }): string[] {
     const names: string[] = []
     for (const name of this.items.keys()) {
       if (this.model && maskDrawnBy(this.model, name)) continue
       const f = this.frameOf(name)
-      if (!f) continue
-      const a = (f.rotation * Math.PI) / 180
-      const c = Math.cos(a)
-      const s = Math.sin(a)
-      let left = Infinity
-      let right = -Infinity
-      let top = Infinity
-      let bottom = -Infinity
-      for (const [lx, ly] of [
-        [-f.width / 2, -f.height / 2],
-        [f.width / 2, -f.height / 2],
-        [-f.width / 2, f.height / 2],
-        [f.width / 2, f.height / 2],
-      ]) {
-        const p = toPane(f.x + lx! * c - ly! * s, f.y + lx! * s + ly! * c)
-        left = Math.min(left, p.x)
-        right = Math.max(right, p.x)
-        top = Math.min(top, p.y)
-        bottom = Math.max(bottom, p.y)
-      }
-      if (left <= box.right && right >= box.left && top <= box.bottom && bottom >= box.top) names.push(name)
+      if (f && touches(f, box, toPane)) names.push(name)
     }
     return names
+  }
+
+  /**
+   * The thing whose box, as a view shows it, has an edge within `reach` pane pixels of a place on
+   * the pane: the nearest. For a view that is turned (D435), where a flat thing seen on edge has
+   * no face to press and is found by the line it is drawn as.
+   */
+  pickEdge(paneX: number, paneY: number, reach: number, toPane: (x: number, y: number, plane: Plane) => { x: number; y: number }): string | null {
+    let best: string | null = null
+    let bestDistance = reach
+    for (const name of this.items.keys()) {
+      if (this.model && maskDrawnBy(this.model, name)) continue
+      const f = this.frameOf(name)
+      if (!f) continue
+      const c = cornersOnPane(f, toPane)
+      for (let i = 0; i < 4; i++) {
+        const a = c[i]!
+        const b = c[(i + 1) % 4]!
+        const dx = b.x - a.x
+        const dy = b.y - a.y
+        const length2 = dx * dx + dy * dy
+        const t = length2 > 0 ? Math.max(0, Math.min(1, ((paneX - a.x) * dx + (paneY - a.y) * dy) / length2)) : 0
+        const distance = Math.hypot(paneX - (a.x + dx * t), paneY - (a.y + dy * t))
+        if (distance <= bestDistance) {
+          best = name
+          bestDistance = distance
+        }
+      }
+    }
+    return best
   }
 
   /**
@@ -1642,6 +1944,8 @@ export class SceneRenderer {
    * selection, which can be dragged where it does not show (D334, D343).
    */
   pick(camera: THREE.Camera, ndc: THREE.Vector2): string | null {
+    // The topmost is by the order this camera draws in (D434).
+    this.orderFor(camera)
     this.raycaster.setFromCamera(ndc, camera)
     const model = this.model
     // A Shape's stroke counts as the Shape: an open line has nothing else to hit (D232).
@@ -1679,6 +1983,7 @@ export class SceneRenderer {
     if (item && item.className !== obj.className) {
       item.mesh.removeFromParent()
       item.stroke?.removeFromParent()
+      item.edge.removeFromParent()
       disposeItem(item)
       item = undefined
     }
@@ -1689,7 +1994,12 @@ export class SceneRenderer {
       // A Shape's fill is its own geometry, rebuilt when its line changes; the unit plane and circle are shared (D232).
       const mesh = new THREE.Mesh(isShape ? new THREE.BufferGeometry() : obj.className === 'Circle' ? unitCircle : unitPlane, material)
       mesh.userData['name'] = obj.name
-      item = { mesh, className: obj.className, width: 1, height: 1 }
+      const edge = new THREE.LineLoop(unitSquare, edgeMaterial)
+      edge.layers.set(TURNED_LAYER)
+      edge.renderOrder = ORDER - 3
+      edge.visible = false
+      this.overlay.add(edge)
+      item = { mesh, className: obj.className, width: 1, height: 1, at: { x: 0, y: 0, rotation: 0 }, plane: FLAT, attached: false, index: 0, edge }
       if (isShape) {
         const stroke = new THREE.Mesh(new THREE.BufferGeometry(), maskable(new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthTest: false, depthWrite: false, side: THREE.DoubleSide }), this.maskSize))
         stroke.userData['name'] = obj.name
@@ -1707,8 +2017,11 @@ export class SceneRenderer {
    * SVG fills them, with its stroke as a second mesh; the geometry is rebuilt only when the
    * line changes. `fill: 'none'` draws no fill. Its box is kept in its own space for the frame.
    */
-  private applyShape(item: Item, obj: SceneObject, model: SceneModel, time: number, pose: Pose, opacity: number, index: number, z: number): void {
-    const pieces = shapePieces(model, obj, time)
+  private applyShape(item: Item, obj: SceneObject, model: SceneModel, time: number, pose: Pose, opacity: number, index: number, view: View): void {
+    // Its curves are drawn in pieces half a unit from the curve at its own size, and as much finer as it shows larger, by doublings, so they are made again at a few sizes and not at every frame of a move (D424).
+    const shows = this.shownScale(item, view) * Math.abs(pose.scale)
+    const tolerance = shows <= 1.5 ? 0.5 : 0.5 / 2 ** Math.min(7, Math.ceil(Math.log2(shows) - 1e-9))
+    const pieces = shapePiecesWithin(model, obj, time, tolerance)
     const widthValue = valueAt(model, obj, 'strokeWidth', time)
     const strokeWidth = typeof widthValue === 'number' && Number.isFinite(widthValue) ? Math.max(0, widthValue) : 0
     // How much of the line is drawn so far (D298): the stroke stops there; the fill is whole.
@@ -1717,7 +2030,7 @@ export class SceneRenderer {
     const d = valueAt(model, obj, 'curves', time)
     // Path data is its own key; points, and a morphing shape, are keyed by the line they make, since a list may be a word and a morph changes the line over time (D257).
     const morphing = obj.actions.some((a) => a.verb === 'morph' && !a.overridden)
-    const key = `${strokeWidth}:${drawn < 1 ? drawn.toFixed(3) : ''}:${hasPathData(d) && !morphing ? `d${d}` : pieces.map((piece) => `${piece.closed ? 'c' : 'o'}${piece.curve.map((p) => `${Math.round(p.x * 10)},${Math.round(p.y * 10)}`).join(';')}`).join('|')}`
+    const key = `${strokeWidth}:${drawn < 1 ? drawn.toFixed(3) : ''}:${tolerance < 0.5 ? tolerance : ''}:${hasPathData(d) && !morphing ? `d${d}` : pieces.map((piece) => `${piece.closed ? 'c' : 'o'}${piece.curve.map((p) => `${Math.round(p.x * 10)},${Math.round(p.y * 10)}`).join(';')}`).join('|')}`
     if (item.shapeKey !== key) {
       item.shapeKey = key
       item.mesh.geometry.dispose()
@@ -1754,8 +2067,6 @@ export class SceneRenderer {
       const stroke = item.stroke
       stroke.visible = strokeWidth > 0 && pieces.some((piece) => piece.curve.length >= 2)
       stroke.renderOrder = index
-      stroke.position.set(pose.x, pose.y, z)
-      stroke.rotation.z = (pose.rotation * Math.PI) / 180
       stroke.scale.set(pose.scale, pose.scale, 1)
       const strokeMaterial = stroke.material as THREE.MeshBasicMaterial
       setColor(strokeMaterial, String(valueAt(model, obj, 'stroke', time)))
@@ -1770,6 +2081,7 @@ export class SceneRenderer {
     // while a recording runs, what is in hand stays drawn though its life has gone by (D403).
     const alive = inView(model, obj, time) || (keepAliveFrom !== undefined && existsAt(model, obj, keepAliveFrom))
     const opacity = alive ? opacityAt(model, obj, time) : 0
+    item.index = index
     if (opacity <= 0.0005) {
       mesh.visible = false
       if (item.stroke) item.stroke.visible = false
@@ -1786,8 +2098,13 @@ export class SceneRenderer {
     mesh.renderOrder = index
     // Drawn through the groups that carry it (D124).
     const pose = worldPose(model, obj, time)
-    mesh.position.set(pose.x, pose.y, num('z'))
-    mesh.rotation.z = (pose.rotation * Math.PI) / 180
+    item.at = { x: pose.x, y: pose.y, rotation: pose.rotation }
+    // Held on the screen it lies on the plane of the picture, wherever the camera that has it is and looks (D362); else on the scene's own plane at its depth (D434).
+    item.attached = isAttached(model, obj)
+    const view = viewAt(model, time)
+    const z = num('z')
+    if (item.attached) item.plane = planeOfPicture(view)
+    else if (item.plane.z !== z || item.plane.turn) item.plane = z === 0 ? FLAT : { z, turn: null }
     material.opacity = opacity
 
     if (obj.className === 'Rect') {
@@ -1799,12 +2116,15 @@ export class SceneRenderer {
       item.width = num('width')
       item.height = num('height')
       setColor(material, str('fill'))
+      // As many sides as the size it shows at asks for (D424): a circle close to a camera, or zoomed in on, stays round.
+      const round = circleFor((Math.max(item.width, item.height) / 2) * Math.abs(pose.scale) * this.shownScale(item, view))
+      if (mesh.geometry !== round) mesh.geometry = round
     } else if (obj.className === 'Text') {
-      this.applyText(item, obj, model, time, str('fill'))
+      this.applyText(item, obj, model, time, str('fill'), view)
       mesh.scale.set((item.drawn?.width ?? item.width) * pose.scale, (item.drawn?.height ?? item.height) * pose.scale, 1)
       return
     } else if (obj.className === SHAPE) {
-      this.applyShape(item, obj, model, time, pose, opacity, index, num('z'))
+      this.applyShape(item, obj, model, time, pose, opacity, index, view)
       return
     }
     mesh.scale.set(item.width * pose.scale, item.height * pose.scale, 1)
@@ -1816,15 +2136,28 @@ export class SceneRenderer {
    * canvas grown around the block so far as the characters reach, and kept, so a frame redraws
    * into it rather than making another. The box the handles frame stays the block's.
    */
-  private applyText(item: Item, obj: SceneObject, model: SceneModel, time: number, fill: string): void {
+  /** How large a thing shows, in pixels for a unit of the scene where it lies (D424): as the views say, or with none saying, through the camera that has the picture; 1 for a thing behind it. */
+  private shownScale(item: Item, view: View): number {
+    const at = lift(item.at.x, item.at.y, item.plane, scratch)
+    if (this.viewDetail) return this.viewDetail(at)
+    return item.attached ? 1 : this.throughCamera(view, at)
+  }
+
+  /** How many pixels of the picture a unit of the scene takes at a place, through a camera; 1 behind it. */
+  private throughCamera(view: View, at: THREE.Vector3): number {
+    const ahead = aheadOf(view, at)
+    return view.orthographic || ahead > 1e-6 ? scaleAt(view, ahead) : 1
+  }
+
+  private applyText(item: Item, obj: SceneObject, model: SceneModel, time: number, fill: string, view: View): void {
     const style = textStyleAt(model, obj, time)
     const layout = layoutOf(style)
     const states = textUnitStates(model, obj, time, layout)
     const color = parseColor(fill) ? fill : '#ffffff'
     // Redrawn when the look or the characters' states change, not for every frame of a unit animation that leaves them still.
     const still = item.drawnStates !== undefined && sameUnitStates(item.drawnStates, states)
-    // A camera closer than the scene's own size magnifies the picture of the text: it is drawn for the next doubling at or past that zoom, so it is redrawn at a few zooms and not at every frame of one (D357). Held on the screen, no camera magnifies it.
-    const zoom = isAttached(model, obj) ? 1 : viewAt(model, time).zoom
+    // A camera that shows the text larger than its own size, by its lens or by standing close, magnifies the picture of it: it is drawn for the next doubling at or past that, so it is redrawn at a few sizes and not at every frame of a move (D357, D424). Held on the screen, no camera magnifies it.
+    const zoom = item.attached ? 1 : this.throughCamera(view, lift(item.at.x, item.at.y, item.plane, scratch))
     const pad0 = textPadding(style)
     const longest = Math.max(layout.width, layout.height) + 2 * pad0
     const sharp = zoom <= 1 ? 1 : Math.max(1, Math.min(TEXT_SHARP_MAX, 2 ** Math.ceil(Math.log2(zoom) - 1e-9), Math.floor(TEXT_CANVAS_MAX / (longest * TEXT_SCALE))))
@@ -1864,6 +2197,26 @@ export class SceneRenderer {
     if (material.map) material.map.needsUpdate = true
     item.drawn = { width: width / scale, height: height / scale }
   }
+}
+
+const facing = new THREE.Vector3()
+const scratch = new THREE.Vector3()
+
+/** The corners of a frame as a view shows them, on the pane. */
+function cornersOnPane(f: Frame, toPane: (x: number, y: number, plane: Plane) => { x: number; y: number }): { x: number; y: number }[] {
+  const a = (f.rotation * Math.PI) / 180
+  const c = Math.cos(a)
+  const s = Math.sin(a)
+  const plane = planeOfFrame(f)
+  return ([[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]] as const).map(([lx, ly]) => toPane(f.x + lx * f.width * c - ly * f.height * s, f.y + lx * f.width * s + ly * f.height * c, plane))
+}
+
+/** Whether a frame, as a view shows it, touches a box on the pane: by the upright box around its corners there. */
+function touches(f: Frame, box: { left: number; right: number; top: number; bottom: number }, toPane: (x: number, y: number, plane: Plane) => { x: number; y: number }): boolean {
+  const corners = cornersOnPane(f, toPane)
+  const xs = corners.map((p) => p.x)
+  const ys = corners.map((p) => p.y)
+  return Math.min(...xs) <= box.right && Math.max(...xs) >= box.left && Math.min(...ys) <= box.bottom && Math.max(...ys) >= box.top
 }
 
 function union(a: Box | null, b: Box): Box {

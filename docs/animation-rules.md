@@ -48,8 +48,10 @@ slide = box.move({
 
 The origin is the middle of the scene, where the frame sits unless a camera looks elsewhere (see The camera). `x` grows to the right, `y` grows upward. Units are
 pixels at project resolution. `rotation` is in degrees, counterclockwise; a rotate to 720 turns
-twice, and a negative angle turns the other way. Time is in seconds. Objects draw in cast order:
-a later declaration draws on top of an earlier one.
+twice, and a negative angle turns the other way. Time is in seconds. `z` is depth, growing toward
+the viewer: a nearer thing covers a farther one, and a camera sees it larger. Things at one depth
+draw in cast order: a later declaration draws on top of an earlier one, so a scene that writes no
+`z` draws as it is written.
 
 ## Classes and attributes
 
@@ -57,7 +59,7 @@ Every object has these attributes, with these defaults:
 
 | Attribute | Default | Meaning |
 |-----------|---------|---------|
-| `x`, `y`, `z` | 0 | center position; for text, the center of the text's box |
+| `x`, `y`, `z` | 0 | center position; for text, the center of the text's box. `z` is depth, toward the viewer; see The camera |
 | `rotation` | 0 | degrees, counterclockwise |
 | `scale` | 1 | size multiplier |
 | `opacity` | 1 | 0 is invisible, 1 solid; see Lifetime and visibility |
@@ -74,7 +76,7 @@ Every object has these attributes, with these defaults:
 | `Text` | `text` `'Text'`, lines broken by `\n`; `fontSize` 48; `font` `'Segoe UI'`, an installed family or a file in `assets/fonts` by its name; `weight` 400; `italic` false; `align` `'center'`; `lineHeight` 1.2; `letterSpacing` 0. See Text |
 | `Shape` | `points` `[]`, the corners around `x, y`; `curves` `''`, SVG path data, drawn instead of the points when set; `closed` true; `smooth` false; `stroke` `'#ffffff'`, `strokeWidth` 0. See Shapes |
 | `Group` | only these: `members` `''`; `x`, `y` 0, how far the group has shifted its members; `rotation` 0 and `scale` 1, how far it has turned and scaled them; `pivotX`, `pivotY`, what its own rotation and scale pivot on, unset the center of the members' box at time zero. See Groups |
-| `Camera` | only these: `x`, `y` 0, the point of the scene at the middle of the picture; `zoom` 1; `rotation` 0, the roll; `class`, `at`, `until`. It is not drawn. See The camera |
+| `Camera` | only these: `x`, `y` 0 and `z`, where it stands; `rotationY`, `rotationX`, `rotation` 0, its pan, tilt, and roll; `focalLength` 50 or `fov`, its lens; `zoom` 1; `projection`; `class`, `at`, `until`. It is not drawn. See The camera |
 
 Every class but Camera also takes `masks` and `inverted`, which make an object a mask; see Masks.
 
@@ -866,17 +868,69 @@ camera.to({
 })
 ```
 
+A camera is a place, a direction, and a lens, as in any 3D program: the picture is what the lens
+takes in from where the camera stands. With nothing written but `x`, `y`, and `zoom` it looks
+straight into the scene, so a flat scene is framed as it always was.
+
 | Attribute | Default | Meaning |
 |-----------|---------|---------|
-| `x`, `y` | 0 | the point of the scene at the middle of the picture |
-| `zoom` | 1 | how close: 1 shows the project's size as it is, 2 twice as close, 0.5 twice as much |
+| `x`, `y` | 0 | where the camera is, across and up; looking straight on, the point of the scene at the middle of the picture |
+| `z` | 1.389 times the picture's longer side | where it is in depth, toward the viewer from depth 0. Unset, where a 50 mm lens takes in exactly the project's size at depth 0: 2666.67 for a picture 1920 wide |
+| `rotationY` | 0 | the pan, in degrees: turned on the spot about the upright axis, to its left for a positive angle |
+| `rotationX` | 0 | the tilt, in degrees: turned on the spot about its own level axis, up for a positive angle |
 | `rotation` | 0 | the roll, in degrees, counterclockwise; what is seen turns the other way |
+| `focalLength` | 50 | the lens, in millimetres on a sensor 36 mm across the picture's longer side: 24 is wide, 85 and more long |
+| `fov` | 39.6 | the same lens as the angle it takes in across the picture's longer side, in degrees. Write one of the two: with both, `fov` counts and a warning says so |
+| `zoom` | 1 | zooms the lens: 2 is twice the focal length, 0.5 half. The camera stays where it is |
+| `projection` | `'perspective'` | `'orthographic'` is a camera with no perspective: a thing is one size at any distance, and `zoom` is the scale |
 | `class`, `at`, `until` | | as on any object |
 
-A camera has no `scale`, `opacity`, or `fill`. `move`, `rotate`, and `path` act on it as on any
-object, and `to` changes its zoom, alone or with its place. Links work on it too: `x: () => ball.x`
-follows a ball. A scene with no camera shows the frame at the scene's middle, which is what a
-camera at 0, 0 with a zoom of 1 sees, so a scene needs a camera only when the picture moves.
+A camera has no `scale`, `opacity`, or `fill`. `move` changes its place, `z` included, `rotate`
+its pan, tilt, and roll, `path` takes it along a line, and `to` changes anything, its lens and
+zoom among it. Links work on it too: `x: () => ball.x` follows a ball. A scene with no camera shows
+the frame at the scene's middle, which is what a camera with nothing written sees, so a scene
+needs a camera only when the picture moves.
+
+The pan is taken first, then the tilt, then the roll, so a pan keeps the horizon level. A camera
+has no target: going round a thing is a move and a turn together, which the GUI writes as one
+animation.
+
+```js
+camera.to({
+  x: -1333,
+  z: 2309,
+  rotationY: -30,
+  at: 1,
+  duration: 2,
+})
+```
+
+Depth. `z` on a Rect, a Circle, a Text, or a Shape is how far it is toward the viewer from the
+plane everything is on unless told. Nearer covers farther, whatever the cast's order, and things
+at one depth draw in cast order. A thing straight ahead shows at its own size where the lens says,
+the picture's longer side times `focalLength` times `zoom` over 36 away, twice its size at half
+that, and half at double. In a scene with no depth, `zoom: 2` and a camera at half its distance
+are one picture; with depth they are two, since a zoom is a longer lens, which flattens, and
+closer is not. Nothing behind the camera is drawn.
+
+```js
+hills = Rect({
+  z: -1200,
+  width: 4000,
+  height: 900,
+})
+
+sign = Text({
+  z: 400,
+  text: 'Near',
+})
+
+camera.move({
+  z: 1800,
+  at: 0,
+  duration: 3,
+})
+```
 
 Several cameras: of the cameras alive at a moment, the one declared last has the picture, as a
 later object draws over an earlier one. A cut is a second camera with a life:
@@ -948,9 +1002,9 @@ before it is at that moment.
 
 Held on the screen: `attached: true` on any object, or on a group for everything it carries,
 places it by the picture instead of the scene. Its `x, y` are from the middle of the picture, in
-the project's pixels, and no camera's move, zoom, or roll changes where it shows. It keeps its
-place in the cast, so one declared early is a backdrop and one declared late an overlay, a title
-or a counter:
+the project's pixels, and no camera's move, turn, zoom, or lens changes where it shows. It keeps
+its place in the cast whatever the depths of the things around it, so one declared early is a
+backdrop and one declared late an overlay, a title or a counter:
 
 ```js
 caption = Text({
@@ -971,9 +1025,37 @@ In the GUI. The preview's header switches what the pane shows: Preview, the scen
 on, with the frame of the camera that has the picture drawn in it; Camera, what that camera sees;
 or the two side by side; C goes to the next. Every tool works in the Camera view as in the Preview
 view, through the camera: what is selected, dragged, resized, drawn, or typed there is written as
-it would be in the Preview view. Fit shows the frame of the camera that has the picture. With
-any tool, the wheel over the Camera view zooms the camera at the pointer and the middle button
-drags it.
+it would be in the Preview view, and a thing at any depth stays under the pointer. Fit shows the
+frame of the camera that has the picture. Shift, wherever these rules name it for making an
+animation, is the key held to animate: Preferences, Hotkeys can give that work to Ctrl or Alt.
+
+The two views are moved by the same gestures, and differ in what a move is. The Preview view is a
+view of the scene and no camera: nothing it does is written. The Camera view is the camera: every
+move there is written to the camera that has the picture, and with the key held to animate it is
+an animation from the playhead.
+
+| Gesture | Preview view | Camera view |
+|---------|--------------|-------------|
+| Wheel | zooms the view at the pointer | zooms the lens, `zoom`; the camera stays where it is |
+| Middle drag | slides the view | moves the camera across and up; what is pressed stays under the pointer |
+| Alt + left drag, Ctrl + middle drag | turns the view round what is at its middle | the camera goes round what is at the middle of its picture |
+| Alt + right drag | zooms the view | moves the camera closer or farther along its line of sight |
+| Alt + wheel | nothing | closer or farther |
+| The compass, dragged | turns the view | turns the camera on the spot |
+| The compass, an end of an axis clicked | looks along it, from the front, a side, or above, with everything in view | the camera faces along it from where it stands |
+
+A drag to the right turns to the right and a drag up turns up; a second click on an end of an
+axis looks from the other side. Alt on a corner or an edge of the selection's box still keeps the
+proportions, and with Paint, Alt and a click still take a color. From the front, a side, or above
+the Preview view is flat, a thing its own size at any depth; turned any other way it has
+perspective. In a turned Preview view a drag carries a thing in the plane that faces the view, so
+from above it moves across and in depth and `z` is written; the camera stands in the scene as a
+small body with the edges of its view, pressed to select it and dragged to carry it; and a flat
+thing seen on edge is a thin line, pressed by it. Under the Preview view's compass, View from the
+camera stands the view where the camera is, looking the way it looks. Under the Camera view's,
+Reset the camera puts it back where a camera is unless told, taking what was written of its place
+and direction out of its declaration, and Camera to the Preview's view stands it where the Preview
+view looks from.
 
 The Camera tool, the last in the palette, is Select for cameras alone. Every camera alive shows
 its frame in the Preview view, and a click inside one picks it, the smallest where frames
@@ -1164,4 +1246,4 @@ title.fade({
 ## Coming
 
 orbits (a turn around a point, as its own verb), objects attached to another's path, `link` actions, `Image`, `Video`, `Line`, `Polygon`,
-object states such as `startsMoving`, per-character text animation, soft edges on any object, one camera on at several times without a copy, depth for the camera, 3D.
+object states such as `startsMoving`, per-character text animation, soft edges on any object, one camera on at several times without a copy, things turned in depth, solids and lighting.

@@ -9,6 +9,7 @@ import { actionLinks, objectLinks } from '../model/links'
 import { hasPathData, parsePathData, pathAnchors } from '../model/pathData'
 import { maskNamed } from '../model/masks'
 import { CAMERA, EASE_NAMES, GROUP, MASK_ATTRS, PIVOT_PARAMS, schemaOf, type AttrSchema, type AttrType, type AttrValue } from '../model/registry'
+import { focalOf, fovOf } from '../model/lens'
 import { basePivot, cameraAt, definingAction, isVisibleAt, pathCurves, pathShape, shownValue, valueAt, withWritten, writesFrom } from '../model/sample'
 import { DEFAULT_STAGGER, UNIT_KINDS } from '../model/text'
 import type { Action, SceneModel, SceneObject } from '../model/types'
@@ -34,6 +35,21 @@ const RANGES: Record<string, { min: number; max: number; step: number }> = {
 const NAME_LISTS = new Set(['class', 'members', 'masks'])
 /** Read when the scene is, and so never a link: what makes a mask (D331), and what holds a thing on the screen (D362). */
 const NEVER_LINKS: ReadonlySet<string> = new Set([...MASK_ATTRS, 'attached'])
+
+/**
+ * A camera's lens is one thing written two ways (D422): a focal length, or the angle it takes
+ * in. The row of the way that is not written shows what the other comes to, and a value typed
+ * there is written the way the camera is: `fov` where that is written, which counts, else
+ * `focalLength` where that is. With neither written each row writes its own. Null for a row
+ * that writes itself.
+ */
+function lensRow(obj: SceneObject, attr: string): { writes: string; shown: (written: number) => number; written: (typed: number) => number } | null {
+  const has = (name: string): boolean => obj.attrs[name] !== undefined || obj.actions.some((a) => !a.overridden && name in a.changes)
+  const round = (v: number): number => Math.round(v * 10) / 10
+  if (attr === 'focalLength' && has('fov')) return { writes: 'fov', shown: (v) => round(focalOf(v)), written: (v) => round(fovOf(v)) }
+  if (attr === 'fov' && !has('fov') && has('focalLength')) return { writes: 'focalLength', shown: (v) => round(fovOf(v)), written: (v) => round(focalOf(v)) }
+  return null
+}
 
 function stepFor(attr: string): number {
   if (attr === 'scale' || attr === 'opacity' || attr === 'zoom') return 0.05
@@ -408,12 +424,17 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks, make }: { mo
             ...group.map((attr) => {
             const link = links.find((l) => l.key === attr.name)
             const isLife = attr.name === 'at' || attr.name === 'until'
+            // One of the two rows of a camera's lens may show, and write, the other (D422).
+            const lens = obj.className === CAMERA && !link && (attr.name === 'fov' || attr.name === 'focalLength') ? lensRow(obj, attr.name) : null
+            const lensValue = lens ? valueAt(model, obj, lens.writes, time) : 0
             // A group's unset pivot is the center of its members' box at time zero (D124); an object's lifetime shows as resolved (D138).
-            const value: AttrValue = obj.className === GROUP && (attr.name === 'pivotX' || attr.name === 'pivotY') && !(attr.name in obj.attrs) ? basePivot(model, obj)[attr.name === 'pivotX' ? 'x' : 'y'] : attr.name === 'at' ? obj.at : attr.name === 'until' ? (obj.until ?? 'end') : valueAt(model, obj, attr.name, time)
-            const defining = definingAction(obj, attr.name, time)
+            const value: AttrValue = obj.className === GROUP && (attr.name === 'pivotX' || attr.name === 'pivotY') && !(attr.name in obj.attrs) ? basePivot(model, obj)[attr.name === 'pivotX' ? 'x' : 'y'] : attr.name === 'at' ? obj.at : attr.name === 'until' ? (obj.until ?? 'end') : lens ? lens.shown(typeof lensValue === 'number' ? lensValue : 0) : valueAt(model, obj, attr.name, time)
+            const defining = definingAction(obj, lens ? lens.writes : attr.name, time)
             const status = link
               ? 'linked'
-              : attr.type === 'points'
+              : lens
+                ? `as ${lens.writes}`
+                : attr.type === 'points'
                 ? `${Array.isArray(value) ? value.length : 0} points`
                 : attr.type === 'pathdata'
                   ? hasPathData(value)
@@ -430,6 +451,8 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks, make }: { mo
               if (isLife) {
                 if (attr.name === 'at') setLifetime(name, { at: typeof next === 'number' ? next : null })
                 else setLifetime(name, { until: typeof next === 'number' ? next : null })
+              } else if (lens && typeof next === 'number') {
+                setAttrsAt(name, { [lens.writes]: lens.written(next) }, time)
               } else if (typeof next === 'number' && attr.animatable && attr.type === 'number') {
                 // The row shows the attribute's own value, where the solver works in what shows through the object's groups (D124): the typed value is passed as what it would show, so what is written is what was typed.
                 const fresh = useStore.getState().model
@@ -452,7 +475,7 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks, make }: { mo
             // The key controls (D323): on every value an animation can arrive at; a Shape's outline on the row that holds it, keyed as a morph.
             const outline = attr.type === 'points' ? !hasPathData(valueAt(model, obj, 'curves', time)) : attr.type === 'pathdata' ? hasPathData(value) : false
             let keys: KeyControls | undefined
-            if (!isLife && !link && !NAME_LISTS.has(attr.name) && !locked && (attr.animatable || outline)) {
+            if (!isLife && !link && !lens && !NAME_LISTS.has(attr.name) && !locked && (attr.animatable || outline)) {
               const slack = frameSeconds(fps) / 2
               const keyNow = keyState(obj, attr.name, time)
               const inert = Math.abs(time - obj.at) <= slack
@@ -524,7 +547,7 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks, make }: { mo
               control = <Field type={attr.type} name={attr.name} value={value} model={model} disabled={locked} doc={attr.doc} range={RANGES[attr.name]} step={stepFor(attr.name)} options={attr.options} families={isText && attr.name === 'font' ? families : undefined} multiline={isText && attr.name === 'text'} onValue={writeValue} onCode={writeCode} />
             }
             return (
-              <Row key={attr.name} name={attr.name} status={status} className={defining ? 'animated' : status === 'default' ? 'default' : ''} onLink={locked || make || NAME_LISTS.has(attr.name) || NEVER_LINKS.has(attr.name) ? undefined : () => openLinks(attr.name)} linkTitle={`Link ${attr.name} to something else`} keys={keys}>
+              <Row key={attr.name} name={attr.name} status={status} className={defining ? 'animated' : status === 'default' ? 'default' : ''} onLink={locked || make || lens || NAME_LISTS.has(attr.name) || NEVER_LINKS.has(attr.name) ? undefined : () => openLinks(attr.name)} linkTitle={`Link ${attr.name} to something else`} keys={keys}>
                 {control}
               </Row>
             )
@@ -539,7 +562,8 @@ function ObjectView({ model, obj, attrs, time, editable, openLinks, make }: { mo
 /** The pane's sections for an object's values (D330, D346): when it exists, where it is, how big, its colors, a mask's own, its lists, then what its class adds. */
 const SECTIONS: [string, string[]][] = [
   ['Lifetime', ['at', 'until']],
-  ['Position', ['x', 'y', 'z', 'zoom', 'rotation', 'pivotX', 'pivotY', 'attached']],
+  ['Position', ['x', 'y', 'z', 'rotationY', 'rotationX', 'rotation', 'pivotX', 'pivotY', 'attached']],
+  ['Lens', ['focalLength', 'fov', 'zoom', 'projection']],
   ['Size', ['width', 'height', 'radius', 'scale', 'fontSize']],
   ['Color', ['fill', 'stroke', 'strokeWidth', 'fillOpacity', 'strokeOpacity', 'opacity']],
   ['Mask', ['masks', 'inverted']],

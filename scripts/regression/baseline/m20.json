@@ -1,0 +1,144 @@
+{
+ "results": {
+  "KEY1": {
+   "shift": {
+    "ahead": 1,
+    "actions": 1,
+    "back": 0,
+    "last": {
+     "verb": "move",
+     "start": 0,
+     "end": 1
+    },
+    "x": "-200"
+   },
+   "alt": {
+    "shiftAhead": 0,
+    "shiftDrag": {
+     "actions": 0,
+     "x": "-100"
+    },
+    "ahead": 1,
+    "actions": 1,
+    "back": 0,
+    "last": {
+     "verb": "move",
+     "start": 0,
+     "end": 1
+    },
+    "x": "-100",
+    "viewTurned": false
+   },
+   "f": {
+    "ahead": 0,
+    "shiftAhead": 1,
+    "actions": 1,
+    "back": 0,
+    "tips": [
+     "Move, resize, and rotate by the handles; Shift animates",
+     "Drag to move; Shift animates"
+    ]
+   },
+   "ctrlTips": [
+    "Move, resize, and rotate by the handles; Ctrl animates"
+   ],
+   "tipsBack": [
+    "Move, resize, and rotate by the handles; Shift animates"
+   ],
+   "error": null
+  },
+  "KEY2": {
+   "made": 1,
+   "length0": 1,
+   "shiftWheel": {
+    "length": 1,
+    "viewZoomed": true
+   },
+   "heldWheel": {
+    "length": 1.017,
+    "time": 1.017
+   },
+   "heldWheelTimeline": {
+    "length": 1.033,
+    "found": true
+   },
+   "after": {
+    "length": 1.033,
+    "time": 0
+   },
+   "error": null
+  },
+  "KEY3": {
+   "found": true,
+   "fixedRowsGone": [],
+   "first": {
+    "keys": [
+     "Shift"
+    ],
+    "also": null,
+    "prefs": null
+   },
+   "tip": "Held over the preview, the playhead looks ahead and a drag, ",
+   "alt": {
+    "keys": [
+     "Alt"
+    ],
+    "also": "Also Keep proportions; Take a color; Move across; Go round; Move closer; Scroll rows; Change a number",
+    "prefs": [
+     "Alt"
+    ]
+   },
+   "ctrl": {
+    "keys": [
+     "Ctrl"
+    ],
+    "also": "Also Add to the selection; Go round; Zoom time",
+    "prefs": [
+     "Ctrl"
+    ]
+   },
+   "g": {
+    "keys": [
+     "Shift, Ctrl, or Alt"
+    ],
+    "also": "Also Add to the selection; Go round; Zoom time",
+    "prefs": [
+     "Ctrl"
+    ]
+   },
+   "afterEscape": {
+    "keys": [
+     "Ctrl"
+    ],
+    "also": "Also Add to the selection; Go round; Zoom time",
+    "prefs": [
+     "Ctrl"
+    ]
+   },
+   "selfNamed": [
+    "Delete"
+   ],
+   "pointerRows": [
+    "Add to the selection: Ctrl + click",
+    "Keep proportions: Alt + drag a handle",
+    "Take a color: Alt + click",
+    "Zoom: Wheel",
+    "Move across: Middle drag, Alt + middle drag",
+    "Go round: Alt + left drag, Ctrl + middle drag",
+    "Move closer: Alt + right drag, Alt + wheel",
+    "Scroll time: Wheel",
+    "Zoom time: Ctrl + wheel",
+    "Scroll rows: Alt + wheel",
+    "Change a number: Alt + drag"
+   ],
+   "reset": {
+    "keys": [
+     "Shift"
+    ],
+    "also": null,
+    "prefs": null
+   }
+  }
+ },
+ "volatile": {}
+}
